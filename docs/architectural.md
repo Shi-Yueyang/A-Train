@@ -19,7 +19,6 @@ The system shall:
 * Support digital ON/OFF I/O.
 * Provide a simple **web UI**, not high-end 3D graphics.
 * Run completely **headless** for automated testing.
-* Support deterministic scenarios.
 * Make it easy to add new train types.
 
 Non-goals for the initial version:
@@ -58,7 +57,7 @@ Non-goals for the initial version:
 │  │                     Simulation Core                        │  │
 │  │                                                            │  │
 │  │  State Machine + Fixed-Step Clock                           │  │
-│  │  Command Queue + Scenario Event Scheduler                   │  │
+│  │  Command Queue                                               │  │
 │  │  Train Models + Read-Only State Snapshots                   │  │
 │  └──────────────────────────┬─────────────────────────────────┘  │
 │                             │                                    │
@@ -100,7 +99,6 @@ There are three categories of processes.
 * digital I/O
 * signal model
 * simulation state machine and fixed-step clock
-* scenario loading and event scheduling
 * serialized command processing and state snapshots
 * ATP connections
 * Web API
@@ -133,11 +131,10 @@ Browser
 
 ## 2.1 Responsibilities
 
-The Simulation Core owns simulation time, scenario event scheduling, and the
-ordered update of the simulated world. It exposes commands to run, pause,
-reset, and select the time mode. It does not contain HTTP, WebSocket, or TCP
-connection handling; those adapters submit commands to the core and publish
-state produced by it.
+The Simulation Core owns simulation time and the ordered update of the
+simulated world. It exposes commands to run, pause, reset, and select the time
+mode. It does not contain HTTP, WebSocket, or TCP connection handling; those
+adapters submit commands to the core and publish state produced by it.
 
 The core is the sole writer of train state. Browser controls and ATP input are
 converted into commands. Control commands are applied immediately by the core
@@ -153,18 +150,17 @@ STOPPED --run--> RUNNING --pause--> PAUSED
 
 | State       | Meaning                                                  |
 | ----------- | -------------------------------------------------------- |
-| `STOPPED` | A scenario is loaded but no simulation time advances.    |
+| `STOPPED` | No simulation time advances.                             |
 | `RUNNING` | The core advances simulation time and updates the world. |
 | `PAUSED`  | World state and simulation time are frozen.              |
 
 `run` is idempotent while already running, and `pause` is idempotent while
-paused or stopped. `reset` restores the scenario's initial world state,
-sets simulation time to zero, clears events that were already triggered, and
-leaves the core stopped.
+paused or stopped. `reset` restores the simulator's initial world state, sets
+simulation time to zero, and leaves the core stopped.
 
 ## 2.3 Clock and Time Modes
 
-Simulation time is measured in seconds from the start of the loaded scenario:
+Simulation time is measured in seconds from reset:
 
 ```text
 simulation_time = 0.0 at reset
@@ -181,7 +177,7 @@ for simulation calculations.
 | `MANUAL`   | Simulation time advances only through an explicit`step(delta)` command. |
 
 `time_multiplier` is a positive finite number. `1.0` is real time, values
-greater than `1.0` accelerate the scenario, and values between `0` and `1.0`
+greater than `1.0` accelerate the simulation, and values between `0` and `1.0`
 slow it down. `MANUAL` mode makes automated tests independent of scheduling
 latency and machine speed.
 
@@ -191,45 +187,7 @@ steps. The initial implementation uses a configurable fixed step of `0.05 s`.
 Any remaining fractional duration is retained for the next update. The same
 fixed-step path is used for real-time, scaled, and manual advancement.
 
-## 2.4 Scenario Events
-
-A scenario contains an initial world state and an ordered list of predefined
-events. Each event has a unique identifier, a scheduled simulation time, and
-a payload describing an action handled by the simulator.
-
-```yaml
-events:
-  - id: signal-clear-001
-    at: 30.0
-    type: signal.set_aspect
-    payload:
-      signal_id: S12
-      aspect: clear
-  - id: balise-001
-    at: 120.0
-    type: btm.transmit
-    payload:
-      train_id: TRAIN001
-      data: ASOk/wCBcg==
-```
-
-Event times are non-negative seconds relative to scenario start. Event payloads
-are validated when the scenario is loaded, before it can enter `RUNNING`.
-Malformed, unknown, duplicate, or unhandleable events cause scenario loading
-to fail with a clear error; events are not silently skipped.
-
-When a nominal fixed step reaches an event's scheduled time, the core splits
-the step at that exact time: it updates physics up to the event time, triggers
-the event, then updates the remaining duration. Events therefore take effect
-at their declared simulation time, not at the next `0.05 s` boundary. Events
-with the same `at` value execute in their order in the scenario file. The core
-triggers each successful event exactly once and keeps a triggered-event record
-for UI state, logs, and tests.
-
-Scenarios are immutable while running. Loading or replacing a scenario is
-allowed only while stopped, and it performs a reset.
-
-## 2.5 Update Cycle
+## 2.4 Update Cycle
 
 All simulation mutations occur on one simulation execution context. Network
 readers and browser handlers may run concurrently, but enqueue commands rather
@@ -237,32 +195,29 @@ than changing world objects directly. This gives the core a deterministic order
 of operations and avoids locking inside train physics.
 
 The core processes control commands as soon as it receives them. These are
-`run`, `pause`, `reset`, `set_time_mode`, scenario loading, and manual step
-requests. A control command updates state and produces a snapshot immediately;
-it does not wait for a physics step.
+`run`, `pause`, `reset`, `set_time_mode`, and manual step requests. A control
+command updates state and produces a snapshot immediately; it does not wait
+for a physics step.
 
 For every nominal fixed simulation step, the core performs the following
-sequence. If an event occurs within the step, repeat steps 2 through 4 for the
-duration before and after that event.
+sequence.
 
 ```text
 1. Apply queued ATP and train-control commands in arrival order.
-2. Advance simulation time to the next due event or the nominal-step end.
-3. Update each train's equipment and physics for that duration in stable train-ID order.
-4. Trigger all events due at the current simulation time.
-5. Produce a state snapshot for the Web API and ATP Manager.
+2. Advance simulation time by the nominal fixed-step duration.
+3. Update each train's equipment and physics in stable train-ID order.
+4. Produce a state snapshot for the Web API and ATP Manager.
 ```
 
 The snapshot is read-only and includes the current simulation state, mode,
-time multiplier, simulation time, train state, and recently triggered events.
-The core also produces a snapshot after every control-state transition and
-terminal event-handler error. The Web API may publish snapshots at a lower
-display rate, but it must not alter their contents or advance the simulation.
+time multiplier, simulation time, and train state. The core also produces a
+snapshot after every control-state transition. The Web API may publish
+snapshots at a lower display rate, but it must not alter their contents or
+advance the simulation.
 
 The initial core API is:
 
 ```text
-load_scenario(scenario)
 run()
 pause()
 reset()
@@ -273,39 +228,25 @@ get_snapshot()
 ```
 
 `step(delta)` accepts a non-negative duration and returns only after all whole
-fixed steps and due events have been processed. This is the primary interface
-for deterministic headless tests.
+fixed steps have been processed. This is the primary interface for
+deterministic headless tests.
 
-## 2.6 Implementation Guide
+## 2.5 Implementation Guide
 
 Implement `SimulationCore` as the orchestration module for clock, commands,
-events, train models, and snapshots. Put physics in `train.py` and protocol
-parsing and transport in `atp.py`; neither module advances simulation time.
+train models, and snapshots. Put physics in `train.py` and protocol parsing
+and transport in `atp.py`; neither module advances simulation time.
 
 ### Data Types and Ownership
 
 Define `SimulationState` and `TimeMode` as `Enum` types. Define `Command` and
-`SimulationSnapshot` as frozen `dataclass` types. Define the immutable
-`Scenario` and `ScenarioEvent` types in `scenario/schema.py`. Keep mutable
-world state private to `SimulationCore`.
+`SimulationSnapshot` as frozen `dataclass` types. Keep mutable world state
+private to `SimulationCore`.
 
 `get_snapshot()` returns a newly constructed `SimulationSnapshot` containing
 only scalar values, immutable tuples, and frozen nested snapshot dataclasses.
 It never returns a train object, list, dictionary, or other mutable internal
 collection.
-
-Represent a scheduled event internally with its time and its source-file
-sequence number:
-
-```text
-(event.at, event.sequence, event)
-```
-
-Store these tuples in a `heapq`. The sequence number makes equal-time event
-order explicit and stable. `scenario/loader.py` validates event IDs, times,
-and YAML structure. `SimulationCore.load_scenario()` validates each event type
-and payload against the event-handler registry, then populates the heap during
-`reset()`.
 
 ### Core Loop
 
@@ -331,10 +272,10 @@ core pauses, stops, or changes time mode so paused time is never accumulated.
 In `MANUAL` mode, `step(delta)` enqueues a `StepCommand(delta)` and awaits its
 completion result. `run_loop()` handles that command immediately, adds `delta`
 to the same accumulator used by wall-clock modes, completes every resulting
-nominal fixed step and event split, then resolves the result. This keeps manual
-and wall-clock execution on exactly the same code path.
+nominal fixed step, then resolves the result. This keeps manual and wall-clock
+execution on exactly the same code path.
 
-### Commands, Events, and Snapshots
+### Commands and Snapshots
 
 Define the command types `RunCommand`, `PauseCommand`, `ResetCommand`,
 `SetTimeModeCommand`, `StepCommand`, `AtpStateCommand`, and
@@ -343,46 +284,195 @@ sequence and process commands in that sequence at the beginning of every fixed
 step. Return a structured command result for invalid input; do not let adapter
 exceptions enter `run_loop()`.
 
-Dispatch scenario events through one registry mapping every supported
-`event.type` to a handler. Each handler validates its payload before mutating
-the world. Record an event as triggered only after its handler succeeds. On
-failure, retain the event and its error in simulation status, transition to
-`PAUSED`, and publish an error snapshot. On the next `RunCommand`, retry that
-event before processing a later event or advancing physics.
-
-Build one snapshot at the end of each nominal fixed step, after every control
-state transition, and after every terminal event-handler error. Publish it to
-a bounded `asyncio.Queue[SimulationSnapshot]` owned by each subscriber task.
+Build one snapshot at the end of each nominal fixed step and after every
+control-state transition. Publish it to a bounded
+`asyncio.Queue[SimulationSnapshot]` owned by each subscriber task.
 When a subscriber queue is full, discard its oldest snapshot before adding the
 new one. WebSocket and ATP publisher tasks consume their own queues; they
 never perform network I/O in `run_loop()`, so a slow client cannot delay
-physics or event execution.
+physics.
 
 ### Test Strategy
 
 Use integration tests only. Each test starts the application through
-`bootstrap.py` with its real `SimulationCore`, scenario loader, FastAPI
-application, WebSocket publisher, and ATP adapter. Replace external ATP
-processes with a controllable test TCP server that speaks the production
-NDJSON protocol.
+`bootstrap.py` with its real `SimulationCore`, FastAPI application, WebSocket
+publisher, and ATP adapter. Replace external ATP processes with a controllable
+test TCP server that speaks the production NDJSON protocol.
 
-Each integration test loads a YAML scenario, selects `MANUAL` mode through the
-REST API, advances time through `POST /api/simulation/step`, and verifies
-observable behavior through REST responses, WebSocket snapshots, and the test
-ATP server's received and sent protocol messages. Tests must not access core
-or domain objects directly.
+Each integration test configures the required initial state, selects `MANUAL`
+mode through the REST API, advances time through `POST /api/simulation/step`,
+and verifies observable behavior through REST responses, WebSocket snapshots,
+and the test ATP server's received and sent protocol messages. Tests must not
+access core or domain objects directly.
 
 The integration suite must cover complete workflows for run/pause/reset,
-real-time multiplier configuration, exact-time event scheduling, train
-movement, BTM transmission, ATP brake commands, event-handler retry after a
-failure, and scenario assertion events. Each scenario supplies a fixed random
-seed so a failure can be reproduced exactly.
+real-time multiplier configuration, train movement, BTM transmission, and ATP
+brake commands. Each test uses a fixed random seed so a failure can be
+reproduced exactly.
 
 # 3. Train Model
 
-A train contains: train dynamics and door state management
+## 3.1 Responsibility and Boundary
 
-The train model is responsible for physical behavior. It should not know the internal implementation of ATP.
+The train model owns mutable train state and converts accepted control commands
+into physical motion. It does not know whether a command originated from the
+browser, an ATP process, or a test. Adapters identify the train and cab, then
+submit a transport-neutral command to the simulation core.
+
+The model must not expose mutable state to adapters. The core reads immutable
+snapshots for publication, and only the core invokes the train's per-step
+update method.
+
+ATP requests train actions; it never sets position, speed, or acceleration
+directly. The train model determines the physical result of traction and brake
+requests.
+
+## 3.2 Configuration and State
+
+Each train has immutable configuration and mutable runtime state.
+
+| Category       | Required values                                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Configuration  | Train ID, one or two cab IDs, initial active cab, initial position, maximum traction acceleration, maximum service-brake deceleration, and maximum emergency-brake deceleration. |
+| Physical state | Position in metres, speed in metres per second, and acceleration in metres per second squared.                                                                                   |
+| Control state  | Traction demand, service-brake demand, emergency-brake latch, and door state.                                                                                                    |
+
+The initial active cab and initial physical state are supplied by simulator
+configuration. `reset` restores those configured values and clears all control
+state, including the emergency-brake latch and door state.
+
+Acceleration limits are positive, finite, per-train configuration values.
+Emergency-brake deceleration must be at least the configured service-brake
+deceleration. This version models forward-only movement: position never
+decreases and speed never becomes negative.
+
+## 3.3 Controls and Cab Authority
+
+The train accepts these normalized commands from its active cab:
+
+| Command              | Range or value     | Effect                                                                    |
+| -------------------- | ------------------ | ------------------------------------------------------------------------- |
+| Traction demand      | `0.0` to `1.0` | Requests a proportion of maximum traction acceleration.                   |
+| Service-brake demand | `0.0` to `1.0` | Requests a proportion of maximum service-brake deceleration.              |
+| Emergency brake      | Applied or release | Applies latched maximum emergency-brake deceleration or requests release. |
+| Door command         | Open or close      | Changes the train door state.                                             |
+
+## 3.4 Per-Step Dynamics
+
+The simulation core updates every train once for each fixed simulation step in
+stable train-ID order. For a step duration `dt`, the train resolves one
+acceleration value using this priority:
+
+1. If the emergency-brake latch is applied, use negative maximum emergency-brake deceleration.
+2. Otherwise, if service-brake demand is greater than zero, use negative maximum service-brake deceleration scaled by the demand.
+3. Otherwise, if traction demand is greater than zero and all doors are closed, use maximum traction acceleration scaled by the demand.
+4. Otherwise, use zero acceleration.
+
+The model integrates the resolved acceleration over `dt`, clamps the resulting
+speed to zero or greater, and updates position using the average of the prior
+and resulting speed. If braking would bring the train to rest within a step,
+the model clamps speed to zero and uses only the distance travelled before
+stopping. It must not create reverse movement through numerical integration.
+
+Acceleration recorded in the public snapshot is the acceleration actually
+applied during that step. At standstill with no effective traction command, it
+is zero.
+
+## 3.5 Train-Facing Equipment Boundary
+
+Doors, cabs, BTM equipment, and digital I/O are train-local equipment. Their
+state may be included in a train snapshot, but their transport and protocol
+handling remain outside the train model.
+
+BTM payloads are opaque byte arrays. The train model can receive a BTM
+delivery request for a cab, but does not interpret its contents; the ATP
+adapter delivers the payload over the protocol. Digital I/O is represented as
+named on/off values and does not participate in the physical integration
+unless a future train rule explicitly defines an effect.
+
+## 3.6 Implementation Guide
+
+Implement the train model in `domain/train.py` as the aggregate that owns one
+train's mutable state. Keep calculations that do not require aggregate state
+in `domain/physics.py`, and keep cab, door, BTM, and I/O behavior in
+`domain/equipment.py` and `domain/io.py`. The simulation core calls only a
+small aggregate API:
+
+```text
+apply_control(command)
+step(dt)
+get_snapshot()
+reset()
+```
+
+`apply_control(command)` validates the command's train and cab identity,
+updates requested control state, and returns a structured result. It does not
+advance time or mutate position, speed, or acceleration. `step(dt)` resolves
+the effective acceleration, advances the physical state, and updates equipment
+for the same duration. `get_snapshot()` returns a newly constructed immutable
+train snapshot; it never exposes the aggregate or mutable equipment objects.
+
+Represent configuration with frozen dataclasses and runtime state with private
+mutable dataclasses. Validate all numeric configuration and control inputs at
+the boundary: values must be finite, acceleration limits must be positive, and
+normalized demands must be in the inclusive range `0.0` through `1.0`.
+
+### Physics Integration
+
+`physics.py` should provide pure functions for resolving acceleration and
+integrating forward-only motion. The aggregate supplies the prior physical
+state, effective control state, configured limits, and `dt`; the functions
+return the resulting physical state without side effects. Keep the stop-within-
+a-step calculation in this module so every train type applies the same
+zero-speed clamping rule.
+
+The first implementation should use constant acceleration over a fixed step.
+For a train with initial speed $v_0$, resolved acceleration $a$, and step
+duration $dt$, calculate the unconstrained speed as:
+
+$$
+v_1 = v_0 + a \cdot dt
+$$
+
+When $v_1 \geq 0$, advance position using:
+
+$$
+x_1 = x_0 + \frac{v_0 + v_1}{2} \cdot dt
+$$
+
+When braking would make $v_1 < 0$, calculate the stopping duration
+$t_{stop} = -v_0 / a$, advance only for $t_{stop}$, and return zero speed and
+zero acceleration. This makes manual and wall-clock modes share identical
+train movement behavior.
+
+### Extensible Equipment
+
+Model each train-facing equipment capability behind a narrow interface owned
+by the train aggregate. An equipment component may keep private mutable state,
+accept commands or deliveries, update during `step(dt)`, and create its own
+immutable snapshot. It must not import adapters, access the simulation clock,
+or modify train physical state directly.
+
+```text
+Equipment component
+  receive(command_or_delivery)
+  step(dt)
+  get_snapshot()
+  reset()
+```
+
+The aggregate coordinates components in a documented, stable order: apply
+accepted controls, update equipment, resolve train dynamics, then construct the
+snapshot. New equipment such as vigilance, pantograph control, passenger
+systems, or a train-type-specific I/O device can be added by implementing this
+interface and extending the aggregate's configuration and snapshot types. Do
+not add protocol-specific behavior to an equipment component; adapters
+translate protocol data into equipment commands and publish snapshot data.
+
+Keep snapshot extensions backward-compatible: add an optional frozen nested
+snapshot for new equipment rather than changing existing physical-state field
+meanings. This lets the WebSocket and ATP adapters evolve independently while
+the simulation core continues to treat each train as one aggregate.
 
 ---
 
@@ -688,7 +778,6 @@ POST   /api/simulation/start
 POST   /api/simulation/pause
 POST   /api/simulation/step
 POST   /api/simulation/reset
-POST   /api/simulation/scenario
 POST   /api/simulation/time-mode
 
 POST   /api/signals/{id}
@@ -734,7 +823,7 @@ Simulator ───────────────> Browser
 The UI can update train position, speed, signals, BTM, ATP state, digital I/O, and faults without polling continuously.
 
 The state message includes `simulation_state`, `simulation_time`, `time_mode`,
-`time_multiplier`, and recently triggered events in addition to world state.
+`time_multiplier`, and world state.
 
 ---
 
@@ -761,15 +850,11 @@ The preferred hierarchy is:
 A test should be able to do:
 
 ```text
-Load scenario
-      ↓
 Select MANUAL mode
       ↓
 Advance time with step(delta)
       ↓
 Submit signal or train command
-      ↓
-Advance to a scheduled event
       ↓
 Check ATP output
       ↓
@@ -778,59 +863,7 @@ PASS / FAIL
 
 without opening a browser.
 
-## 6.2 Scenario Format
-
-Scenarios are optional. The simulator can run in manual mode without a scenario.
-
-Use YAML for human-readable scenarios.
-
-Example:
-
-```yaml
-name: overspeed_test
-random_seed: 12345
-
-trains:
-  - id: TRAIN001
-    position: 1000
-    speed: 20
-
-events:
-  - id: signal-danger-001
-    at: 10.0
-    type: signal.set_aspect
-    payload:
-      signal_id: S001
-      aspect: RED
-
-  - id: btm-telegram-001
-    at: 20.0
-    type: btm.transmit
-    payload:
-      train_id: TRAIN001
-      cab_id: 1
-      data: "ASOk/wCBcg=="
-
-  - id: atp-output-assertion-001
-    at: 30.0
-    type: assert.atp_output
-    payload:
-      train_id: TRAIN001
-      cab_id: 1
-      atp_to_train: "100"
-```
-
-Scenario event types, including test assertions, are validated by registered
-event handlers at load time. The scenario runner uses `MANUAL` mode and
-`step(delta)` so its results do not depend on wall-clock timing.
-
-Scenarios should be executable from the command line:
-
-```bash
-simulator test scenarios/overspeed.yaml
-```
-
-## 6.3 Recording
+## 6.2 Recording
 
 Record important Train ↔ ATP traffic as NDJSON for debugging and audit.
 
@@ -854,7 +887,6 @@ Example:
 Python
 ├── FastAPI
 ├── asyncio
-├── PyYAML
 ├── SQLite
 └── pytest
 ```
@@ -881,12 +913,11 @@ train-simulator/
 │   ├── __main__.py                 # `python -m a_train` command-line entry point.
 │   ├── bootstrap.py                # Creates the core and adapters; owns process startup and shutdown.
 │   │
-│   ├── simulation/                 # Simulation-time orchestration; no HTTP, TCP, or YAML parsing.
+│   ├── simulation/                 # Simulation-time orchestration; no HTTP or TCP handling.
 │   │   ├── __init__.py             # Public simulation-core API.
 │   │   ├── clock.py                # Fixed-step accumulator and monotonic wall-clock conversion.
 │   │   ├── commands.py             # Frozen command types and command-result types.
 │   │   ├── core.py                 # Single `run_loop()` owner of mutable world state.
-│   │   ├── events.py               # Scheduled-event heap and event-handler registry.
 │   │   └── snapshots.py            # Frozen, transport-neutral simulation snapshot types.
 │   │
 │   ├── domain/                     # Train-world rules; independent of time loop and external transports.
@@ -896,11 +927,6 @@ train-simulator/
 │   │   ├── equipment.py            # Doors, cabs, BTM equipment, and train-local I/O behavior.
 │   │   ├── signals.py              # Linear-track signal state and signal-aspect rules.
 │   │   └── io.py                   # Named digital-signal definitions and bit-string conversion.
-│   │
-│   ├── scenario/                   # Scenario file model and validation; does not run simulation steps.
-│   │   ├── __init__.py             # Public scenario-loading API.
-│   │   ├── schema.py               # Frozen scenario and event data models.
-│   │   └── loader.py               # YAML parsing and load-time schema validation.
 │   │
 │   ├── adapters/                   # I/O boundaries that translate external data into core commands.
 │   │   ├── __init__.py             # Adapter package marker; no runtime behavior.
@@ -927,16 +953,10 @@ train-simulator/
 │   │   ├── app.py                  # Application lifecycle and REST/WebSocket test client helpers.
 │   │   └── atp_server.py           # Controllable production-protocol TCP server for test ATP peers.
 │   ├── test_simulation_control.py  # Run, pause, reset, manual stepping, and time-mode workflows.
-│   ├── test_scenario_events.py     # Scenario loading, scheduling, ordering, and failure workflows.
 │   ├── test_train_movement.py      # Train physics and signal behavior observed through the public API.
 │   ├── test_atp_integration.py     # Train-state publication and ATP-command application over TCP/NDJSON.
-│   ├── test_btm_integration.py     # End-to-end BTM event delivery to an ATP peer.
+│   ├── test_btm_integration.py     # End-to-end BTM delivery to an ATP peer.
 │   └── test_websocket_state.py     # Public state snapshots delivered through WebSocket.
-│
-├── scenarios/                      # Version-controlled runnable scenario fixtures.
-│   ├── basic.yaml                  # Minimal train movement scenario.
-│   ├── overspeed.yaml              # ATP braking-response scenario.
-│   └── btm.yaml                    # BTM transmission scenario.
 │
 ├── docs/
 │   ├── architectural.md            # System architecture and module contracts.
@@ -950,13 +970,11 @@ Dependency direction is strictly inward:
 
 ```text
 adapters -------------> simulation -> domain
-simulation -----------> scenario schemas
-bootstrap -----------> adapters, simulation, scenario
+bootstrap -----------> adapters, simulation
 web ------------------> REST and WebSocket adapters
 ```
 
-`domain` never imports `simulation`, `scenario`, `adapters`, or `web`.
-`scenario` never imports `simulation`, `domain`, `adapters`, or `web`.
+`domain` never imports `simulation`, `adapters`, or `web`.
 `simulation` never imports `adapters` or `web`. `bootstrap.py` is the only
 production module allowed to assemble these components and start background
 tasks.

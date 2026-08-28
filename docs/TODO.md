@@ -12,7 +12,7 @@ and development commands described in the repository structure.
 ### Foundation Work
 
 * Create the `src/a_train` package and the module boundaries in Section 7.2.
-* Configure Python, FastAPI, PyYAML, pytest, formatting, and test commands in
+* Configure Python, FastAPI, pytest, formatting, and test commands in
   `pyproject.toml`.
 * Add `python -m a_train` as the application entry point.
 * Add an application factory and lifecycle ownership in `bootstrap.py`.
@@ -20,9 +20,8 @@ and development commands described in the repository structure.
 
 ### Foundation Passing Criteria
 
-* `python -m a_train --help` exits successfully and documents the run and
-  scenario-test commands.
-* The application starts and stops cleanly without a loaded scenario.
+* `python -m a_train --help` exits successfully and documents the run command.
+* The application starts and stops cleanly.
 * `pytest` discovers and runs the integration suite.
 * The test fixture starts the real application and a controllable TCP test ATP
   server without using mocked production modules.
@@ -34,7 +33,7 @@ UI or a real ATP process.
 
 ### Core Work
 
-* Implement immutable commands, snapshots, scenario schemas, and world state.
+* Implement immutable commands, snapshots, and world state.
 * Implement the single `asyncio` `SimulationCore.run_loop()` task.
 * Implement `STOPPED`, `RUNNING`, and `PAUSED` transitions.
 * Implement `REALTIME`, `SCALED`, and `MANUAL` time modes.
@@ -53,57 +52,50 @@ UI or a real ATP process.
 * Reset restores the initial world state, simulation time `0.0`, and
   `STOPPED` state.
 
-## Phase 2: Scenario Loading and Exact-Time Events
+## Phase 2: Train World and Public State
 
-Implement YAML scenarios and their deterministic event execution model.
-
-### Scenario Work
-
-* Implement YAML parsing in `scenario/loader.py` and immutable types in
-  `scenario/schema.py`.
-* Implement load-time validation of scenario structure, event IDs, times, and
-  registered event payloads.
-* Implement the stable `(at, sequence, event)` event heap.
-* Split nominal fixed steps at event times.
-* Implement failure status and retry-on-run behavior for event handlers.
-
-### Scenario Passing Criteria
-
-* Loading a malformed scenario through the public API returns a validation
-  error and leaves the previously loaded scenario unchanged.
-* An event scheduled at `10.01 s` in a `0.05 s` step changes observable state
-  at `10.01 s`, not `10.05 s`.
-* Events at the same time execute in their source-file order.
-* Repeated manual stepping never triggers a successful event more than once.
-* A failed event pauses the simulation, exposes its ID and error in the public
-  simulation status, and is retried before physics advances after `run`.
-
-## Phase 3: Train World and Public State
-
-Implement the initial linear-track train behavior, signals, equipment, and
-transport-neutral snapshots.
+Implement the initial forward-only train model, its train-facing equipment,
+and transport-neutral snapshots.
 
 ### Train World Work
 
-* Implement train state, traction, braking, acceleration, speed, and position.
-* Implement cabs, door state, BTM equipment, digital I/O, and linear signals.
-* Implement stable train-ID update order.
-* Build immutable snapshots and bounded subscriber queues.
+* Implement the `Train` aggregate API: `apply_control`, `step`,
+  `get_snapshot`, and `reset`.
+* Define frozen per-train configuration and private mutable physical and
+  control state.
+* Validate train configuration, cab identity, and normalized traction and
+  service-brake demands at the aggregate boundary.
+* Implement pure fixed-step physics for traction, service braking, emergency
+  braking, zero-speed clamping, and forward-only position integration.
+* Implement cab and door state, BTM equipment, and digital I/O as train-facing
+  components with `receive`, `step`, `get_snapshot`, and `reset` lifecycles.
+* Define the stable aggregate update order: apply accepted controls, update
+  equipment, resolve dynamics, then construct a snapshot.
+* Implement stable train-ID update order and immutable train snapshots with
+  optional nested equipment snapshots.
+* Build bounded subscriber queues for simulation snapshots.
 
 ### Train World Passing Criteria
 
-* A scenario with multiple trains produces stable, repeatable public snapshots
-  using the same seed and command sequence.
-* A train-control request submitted through REST changes movement only after
-  the defined simulation boundary.
-* A signal scenario event changes the observable signal state at its scheduled
-  time.
+* Multiple trains produce stable, repeatable public snapshots using the same
+  initial state and command sequence.
+* A valid train-control request submitted through REST changes train control
+  state only at the defined simulation boundary; invalid train, cab, or demand
+  input returns a clear error and leaves state unchanged.
+* At each fixed step, emergency braking takes priority over service braking,
+  and service braking takes priority over traction.
+* Braking that would stop a train during a step leaves its speed and applied
+  acceleration at zero and never decreases its position.
+* A train reset restores its configured physical state and clears control and
+  equipment runtime state.
+* An equipment component can add an optional immutable nested snapshot without
+  changing existing physical snapshot fields or requiring adapter changes.
 * A slow WebSocket test client cannot prevent another client from receiving a
   later state snapshot or delay manual `step(delta)` completion.
 * Snapshot responses cannot be used by a client to mutate subsequent simulator
   state.
 
-## Phase 4: ATP TCP/NDJSON Integration
+## Phase 3: ATP TCP/NDJSON Integration
 
 Implement the external ATP boundary and connect it to the running simulation.
 
@@ -123,22 +115,20 @@ Implement the external ATP boundary and connect it to the running simulation.
   with the matching train and cab identifiers.
 * An `ATP_STATE` message from the test server affects train braking through the
   train model; it never directly sets speed or position.
-* A BTM scenario event sends its Base64 payload unchanged in a `BTM_RX`
-  message.
 * Disconnecting or sending malformed data from one ATP test server is reported
   without stopping the simulation or another cab's connection.
 * The recorded NDJSON contains simulation time, direction, message type, and
   train/cab identity for every recorded protocol message.
 
-## Phase 5: Web Control and Live State
+## Phase 4: Web Control and Live State
 
 Implement the browser-facing controls and state display as a thin client of
 the existing APIs.
 
 ### Web Integration Work
 
-* Implement REST routes and validation models for scenario loading, run,
-  pause, reset, time mode, step, signals, and train controls.
+* Implement REST routes and validation models for run, pause, reset, time
+  mode, step, signals, and train controls.
 * Implement WebSocket snapshot publishing.
 * Implement the static web client with simulation controls and live state.
 * Serve the static client from the FastAPI application.
@@ -149,36 +139,31 @@ the existing APIs.
   client error and leave simulation state unchanged.
 * A WebSocket client receives the initial snapshot followed by snapshots after
   a control-state transition and after a manual step.
-* The browser can load a scenario, choose `MANUAL` or `SCALED` mode, run,
-  pause, reset, and advance time without accessing simulator internals.
+* The browser can choose `MANUAL` or `SCALED` mode, run, pause, reset, and
+  advance time without accessing simulator internals.
 * Browser-displayed time, state, train position, and speed match the latest
   WebSocket snapshot.
-* The entire Phase 5 integration suite runs headlessly without opening a real
+* The entire Phase 4 integration suite runs headlessly without opening a real
   browser window.
 
-## Phase 6: End-to-End Scenarios and Release Readiness
+## Phase 5: Release Readiness
 
-Turn the system into a reproducible simulator that can run documented
-scenarios from the command line and in continuous integration.
+Turn the system into a reproducible simulator that runs reliably in continuous
+integration.
 
 ### Release Work
 
-* Add `basic.yaml`, `overspeed.yaml`, and `btm.yaml` scenarios.
-* Implement the command-line scenario runner in `MANUAL` mode.
 * Add configuration and operational documentation for ATP endpoints and logs.
 * Run the complete integration suite on Linux and Windows.
 
 ### Release Passing Criteria
 
-* `python -m a_train test scenarios/basic.yaml`, `overspeed.yaml`, and
-  `btm.yaml` each exit with code `0` when their assertions pass.
-* Intentionally failing a scenario assertion exits non-zero and reports the
-  scenario name, event ID, simulation time, and expected versus actual value.
-* Re-running each scenario with the same seed produces identical recorded
-  state and protocol traffic after excluding connection-establishment timing.
+* Re-running the same initial state and command sequence produces identical
+  recorded state and protocol traffic after excluding connection-establishment
+  timing.
 * The complete integration suite passes on Linux and Windows.
 * README instructions allow a new developer to install dependencies, start the
-  simulator, connect a test ATP process, and run all scenarios.
+  simulator, and connect a test ATP process.
 
 ## Deferred Until a New Phase
 
