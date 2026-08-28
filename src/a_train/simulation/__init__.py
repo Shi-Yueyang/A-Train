@@ -18,6 +18,10 @@ from .commands import (
 )
 from .core import SimulationCore
 from .snapshots import (
+    BtmSnapshot,
+    CabSnapshot,
+    DoorSnapshot,
+    IoSnapshot,
     SimulationSnapshot,
     SimulationState,
     TimeMode,
@@ -27,8 +31,12 @@ from .snapshots import (
 
 __all__ = [
     "AtpStateCommand",
+    "BtmSnapshot",
+    "CabSnapshot",
     "Command",
     "CommandResult",
+    "DoorSnapshot",
+    "IoSnapshot",
     "PauseCommand",
     "ResetCommand",
     "RunCommand",

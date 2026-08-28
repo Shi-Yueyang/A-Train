@@ -1,10 +1,107 @@
-/* A-Train browser client presentation styles. Implemented in Phase 5. */
+/* A-Train browser demo presentation styles. */
 
 :root {
   color-scheme: light dark;
+  --border: #444;
 }
 
 body {
   font-family: system-ui, sans-serif;
-  margin: 2rem;
+  margin: 1.5rem;
+  line-height: 1.4;
+}
+
+main#app {
+  max-width: 60rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+section {
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 0.75rem 1rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+}
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+}
+
+.row,
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.25rem 0;
+}
+
+.controls + .controls {
+  margin-top: 0.5rem;
+}
+
+label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+fieldset {
+  border: 1px dashed var(--border);
+  border-radius: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  margin: 0;
+}
+
+input[type="range"] {
+  width: 12rem;
+}
+
+pre#train-state-pre {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  white-space: pre;
+}
+
+.message {
+  min-height: 1.2rem;
+  font-weight: 600;
+}
+.message.error {
+  color: #e53935;
+}
+.message.ok {
+  color: #43a047;
+}
+
+.ws-status {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.3rem;
+  border: 1px solid var(--border);
+}
+.ws-status.live {
+  color: #43a047;
+  border-color: #43a047;
+}
+.ws-status.connecting {
+  color: #fb8c00;
+}
+.ws-status.disconnected {
+  color: #e53935;
+}
+
+button {
+  cursor: pointer;
 }

@@ -7,13 +7,83 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <!-- Static browser client placeholder. Implemented in Phase 5.
-         The UI is a thin client of the REST API and WebSocket and contains
-         no simulation rules. -->
     <main id="app">
       <h1>A-Train Simulator</h1>
-      <p>Web client is not implemented until Phase 5.</p>
+
+      <section id="status">
+        <h2>Simulation</h2>
+        <div class="row">
+          <span>State: <b id="sim-state">—</b></span>
+          <span>Time: <b id="sim-time">0.000</b> s</span>
+          <span>Mode: <b id="sim-mode">—</b></span>
+          <span>Multiplier: <b id="sim-mult">—</b></span>
+        </div>
+      </section>
+
+      <section id="sim-controls">
+        <div class="controls">
+          <button id="btn-run">Run</button>
+          <button id="btn-pause">Pause</button>
+          <button id="btn-reset">Reset</button>
+        </div>
+        <div class="controls">
+          <label>Mode
+            <select id="mode">
+              <option value="MANUAL">MANUAL</option>
+              <option value="SCALED">SCALED</option>
+              <option value="REALTIME">REALTIME</option>
+            </select>
+          </label>
+          <label>Multiplier <input id="multiplier" type="number" step="0.1" min="0.1" value="1.0" /></label>
+          <button id="btn-set-mode">Set Mode</button>
+          <label>Step (s) <input id="step-delta" type="number" step="0.05" min="0" value="0.05" /></label>
+          <button id="btn-step">Step</button>
+          <span id="ws-status" class="ws-status connecting">connecting…</span>
+        </div>
+      </section>
+
+      <section id="train-controls">
+        <h2>Train Control</h2>
+        <div class="controls">
+          <label>Train <select id="train-select"></select></label>
+          <label>Cab <select id="cab-select"></select></label>
+        </div>
+        <div class="controls">
+          <fieldset>
+            <legend>Traction demand</legend>
+            <input id="traction" type="range" min="0" max="1" step="0.01" value="0" />
+            <output id="traction-val">0.00</output>
+          </fieldset>
+          <fieldset>
+            <legend>Service brake demand</legend>
+            <input id="service" type="range" min="0" max="1" step="0.01" value="0" />
+            <output id="service-val">0.00</output>
+          </fieldset>
+          <button id="btn-apply-demands">Apply Demands</button>
+        </div>
+        <div class="controls">
+          <fieldset>
+            <legend>Emergency brake</legend>
+            <button id="btn-eb-apply">Apply</button>
+            <button id="btn-eb-release">Release</button>
+            <output id="eb-state">released</output>
+          </fieldset>
+          <fieldset>
+            <legend>Doors</legend>
+            <button id="btn-door-open">Open</button>
+            <button id="btn-door-close">Close</button>
+            <output id="door-state">closed</output>
+          </fieldset>
+        </div>
+      </section>
+
+      <section id="train-state">
+        <h2>Train State</h2>
+        <pre id="train-state-pre">—</pre>
+      </section>
+
+      <p id="message" class="message"></p>
     </main>
-    <script type="module" src="app.ts"></script>
+    <script defer src="app.js"></script>
   </body>
 </html>

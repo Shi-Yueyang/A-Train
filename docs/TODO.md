@@ -95,6 +95,47 @@ and transport-neutral snapshots.
 * Snapshot responses cannot be used by a client to mutate subsequent simulator
   state.
 
+## Phase 2.5: Manual Web Demo
+
+Provide a small browser-based demo for a human to verify the completed Phase 1
+and Phase 2 behavior against the public API. The page subscribes to the live
+`/ws` snapshot stream so state updates continuously without polling, and
+submits commands through the REST API. This is a manual verification tool, not
+the complete browser client planned for Phase 4.
+
+### Demo Work
+
+* Serve a static browser page from the FastAPI application.
+* Display the current simulation state, time mode, time multiplier, simulation
+  time, and each train's position, speed, acceleration, and control state.
+* Provide controls to run, pause, reset, select `MANUAL` or `SCALED` mode, set
+  a time multiplier, and advance a configurable manual step.
+* Provide controls for traction demand, service-brake demand, emergency-brake
+  application and release, and door state for a selected train and cab.
+* Subscribe to the `/ws` snapshot stream on page load and render every received
+  snapshot. Commands are submitted through the REST API; the resulting snapshot
+  is delivered back over the WebSocket, so the page never polls.
+* Reconnect to `/ws` automatically if the socket drops, and indicate the
+  connection status in the page.
+* Surface rejected commands and validation failures in the page without
+  changing the displayed simulator state.
+
+### Demo Acceptance Check
+
+* A human can start the simulator, open the served page, and observe the
+  initial `STOPPED` state and simulation time `0.0`.
+* In `MANUAL` mode, a human can apply traction, advance time, and observe
+  increasing position and speed; applying service or emergency braking then
+  visibly reduces speed without allowing reverse motion.
+* Run, pause, reset, time-mode changes, door commands, and invalid control
+  inputs produce the same observable state or error result as their REST API
+  responses.
+* In `REALTIME` or `SCALED` mode, a human can start the simulation and watch
+  simulation time and train state advance continuously without any manual
+  refresh.
+* Reset visibly restores the configured initial state and clears control and
+  equipment runtime state.
+
 ## Phase 3: ATP TCP/NDJSON Integration
 
 Implement the external ATP boundary and connect it to the running simulation.

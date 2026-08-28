@@ -10,9 +10,19 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ...domain.train import TrainControl
+from ...simulation.commands import TrainControlCommand
 from ...simulation.core import SimulationCore
 from ...simulation.snapshots import SimulationSnapshot
-from .schemas import StatusResponse, StepRequest, TimeModeRequest
+from .schemas import (
+    StatusResponse,
+    StepRequest,
+    TimeModeRequest,
+    TrainControlRequest,
+    TrainResponse,
+    TrainsResponse,
+    train_snapshot_to_response,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -33,6 +43,13 @@ def _to_status(snap: SimulationSnapshot) -> StatusResponse:
 def _raise_on_error(result) -> None:
     if not result.ok:
         raise HTTPException(status_code=400, detail=result.error)
+
+
+def _find_train(snap: SimulationSnapshot, train_id: str):
+    for train in snap.trains:
+        if train.train_id == train_id:
+            return train
+    return None
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -74,3 +91,41 @@ async def step_simulation(
 ) -> StatusResponse:
     _raise_on_error(await core.step(body.delta))
     return _to_status(core.get_snapshot())
+
+
+@router.get("/trains", response_model=TrainsResponse)
+async def list_trains(core: SimulationCore = Depends(get_core)) -> TrainsResponse:
+    snap = core.get_snapshot()
+    return TrainsResponse(trains=[train_snapshot_to_response(t) for t in snap.trains])
+
+
+@router.get("/trains/{train_id}", response_model=TrainResponse)
+async def get_train(
+    train_id: str,
+    core: SimulationCore = Depends(get_core),
+) -> TrainResponse:
+    train = _find_train(core.get_snapshot(), train_id)
+    if train is None:
+        raise HTTPException(status_code=404, detail=f"unknown train: {train_id}")
+    return train_snapshot_to_response(train)
+
+
+@router.post("/trains/{train_id}/commands", response_model=TrainResponse)
+async def control_train(
+    train_id: str,
+    body: TrainControlRequest,
+    core: SimulationCore = Depends(get_core),
+) -> TrainResponse:
+    payload = TrainControl(
+        cab_id=body.cab_id,
+        traction_demand=body.traction_demand,
+        service_brake_demand=body.service_brake_demand,
+        emergency_brake=body.emergency_brake,
+        door=body.door,
+    )
+    result = await core.submit_command(TrainControlCommand(train_id=train_id, payload=payload))
+    _raise_on_error(result)
+    train = _find_train(core.get_snapshot(), train_id)
+    if train is None:
+        raise HTTPException(status_code=404, detail=f"unknown train: {train_id}")
+    return train_snapshot_to_response(train)

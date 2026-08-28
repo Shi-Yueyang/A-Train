@@ -20,3 +20,70 @@ pytest
 ruff check .
 ruff format .
 ```
+
+## Testing the manual web demo (Phase 2.5)
+
+The browser demo is a manual verification tool for the Phase 1–2 behavior. It
+talks only to the REST API and refreshes after each accepted command; WebSocket
+delivery comes in Phase 4.
+
+**Start it:**
+
+```bash
+python -m a_train run --host 127.0.0.1 --port 8000
+```
+
+Open <http://127.0.0.1:8000/> in a browser. The page shows the initial
+`STOPPED` state, simulation time `0.000`, and the configured train (`TRAIN001`,
+cabs 1 and 2, active cab 1).
+
+**Verify movement in `MANUAL` mode:**
+
+1. Leave the mode on `MANUAL` and click **Run**.
+2. Drag the **Traction demand** slider up (e.g. `1.00`) and click
+   **Apply Demands**.
+3. Set **Step (s)** to `0.50` and click **Step** a few times. Position and
+   speed should increase each step; acceleration shows the applied traction.
+4. Click **Apply Emergency Brake** (or raise **Service brake demand** and
+   **Apply Demands**), then **Step**. Speed must drop; it never goes negative
+   and position never decreases. Click **Release** to clear the emergency
+   latch.
+5. Click **Open** on the doors, then **Apply Demands** with traction up.
+   The train must not move while a door is open; click **Close** to restore
+   traction.
+
+**Watch live state without refreshing:** the page keeps a WebSocket to `/ws`
+(status badge near the controls: `live` / `connecting…` / `disconnected`; it
+reconnects automatically). Select `REALTIME` (or `SCALED` with a multiplier),
+click **Set Mode** then **Run**, and watch simulation time and train state
+advance on their own — no manual refresh needed. **Pause** freezes the display.
+
+**Verify errors don't change state:**
+
+- Select cab **2** (not the active cab) in the **Cab** dropdown and click
+  **Apply Demands**. The message line shows `Rejected: cab 2 is not the active
+  cab …` and the displayed state is unchanged.
+- You can confirm the same result from the API:
+
+  ```bash
+  curl -X POST http://127.0.0.1:8000/api/trains/TRAIN001/commands \
+    -H 'Content-Type: application/json' \
+    -d '{"cab_id": 2, "traction_demand": 1.0}'
+  # 400 {"detail":"cab 2 is not the active cab of TRAIN001 (active: 1)"}
+  ```
+
+**Verify reset:**
+
+- Move the train, open the doors, apply the emergency brake, then click
+  **Reset**. The page returns to `STOPPED`, time `0.000`, position `0.000`,
+  traction/service `0.00`, doors `closed`, emergency `released` — the configured
+  initial state with control and equipment runtime state cleared.
+
+**Optional — watch scaled time:** select `SCALED`, set a multiplier (e.g.
+`2.0`), click **Set Mode** then **Run**. The WebSocket stream updates the page
+while the simulation runs in real time (see "Watch live state" above).
+
+**Automated checks:** the demo's static serving and API reachability are
+covered by `pytest tests/test_web_demo.py`; the `/ws` snapshot stream is
+covered by `pytest tests/test_websocket_state.py`. Run the whole suite with
+`pytest`.

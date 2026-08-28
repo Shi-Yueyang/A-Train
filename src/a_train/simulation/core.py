@@ -6,10 +6,10 @@ the core's own public API submit frozen ``Command`` objects to an
 ``asyncio.Queue``; only ``run_loop()`` consumes that queue or mutates world
 state.
 
-Control commands (``run``/``pause``/``reset``/``set_time_mode``/``step``) are
-applied immediately and produce a snapshot at once. World commands
-(``AtpState``/``TrainControl``) are buffered and applied in enqueue sequence at
-the next nominal fixed-step boundary (Phase 3/4 fill in their application).
+Control commands (``run``/``pause``/``reset``/``set_time_mode``/``step`` and
+the train-control command) are applied immediately and produce a snapshot at
+once. ``AtpStateCommand`` is buffered and applied in enqueue sequence at the
+next nominal fixed-step boundary (Phase 3 fills in its application).
 """
 
 from __future__ import annotations
@@ -18,7 +18,9 @@ import asyncio
 import dataclasses
 import math
 import time
+from collections.abc import Sequence
 
+from ..domain.train import Train, TrainConfig
 from .commands import (
     AtpStateCommand,
     Command,
@@ -37,8 +39,10 @@ _DEFAULT_FIXED_STEP = 0.05
 # Smallest wall-clock wait in a wall-clock tick; prevents a tight spin when the
 # next fixed step is only a float-epsilon away.
 _MIN_TICK_WAIT = 0.001
+_DEFAULT_SUBSCRIBER_MAXSIZE = 64
 
-_WORLD_COMMAND_TYPES = (AtpStateCommand, TrainControlCommand)
+# Commands applied at the next fixed-step boundary rather than immediately.
+_WORLD_COMMAND_TYPES: tuple[type[Command], ...] = (AtpStateCommand,)
 
 
 class SimulationCore:
@@ -49,6 +53,7 @@ class SimulationCore:
         command_queue: asyncio.Queue[Command],
         snapshot_subscribers: list[asyncio.Queue[SimulationSnapshot]],
         *,
+        train_configs: Sequence[TrainConfig] = (),
         fixed_step: float = _DEFAULT_FIXED_STEP,
     ) -> None:
         self._command_queue = command_queue
@@ -65,6 +70,9 @@ class SimulationCore:
         self._sequence = 0
         self._results: dict[int, asyncio.Future[CommandResult]] = {}
         self._world_buffer: list[Command] = []
+
+        self._trains: dict[str, Train] = {cfg.train_id: Train(cfg) for cfg in train_configs}
+        self._train_ids_sorted: tuple[str, ...] = tuple(sorted(self._trains))
 
         self._latest_snapshot = self._build_snapshot()
 
@@ -93,6 +101,25 @@ class SimulationCore:
 
     def load_scenario(self, scenario: object) -> None:
         raise NotImplementedError
+
+    def subscribe(
+        self, maxsize: int = _DEFAULT_SUBSCRIBER_MAXSIZE
+    ) -> asyncio.Queue[SimulationSnapshot]:
+        """Register a bounded snapshot queue and seed it with the current state.
+
+        Subscribers run their own publisher task that drains the queue; when the
+        queue is full, the core discards the oldest snapshot before adding the
+        new one, so a slow client can never delay physics (§2.6).
+        """
+
+        queue: asyncio.Queue[SimulationSnapshot] = asyncio.Queue(maxsize=maxsize)
+        queue.put_nowait(self._latest_snapshot)
+        self._snapshot_subscribers.append(queue)
+        return queue
+
+    def unsubscribe(self, queue: asyncio.Queue[SimulationSnapshot]) -> None:
+        if queue in self._snapshot_subscribers:
+            self._snapshot_subscribers.remove(queue)
 
     # -- Main loop -------------------------------------------------------
 
@@ -158,6 +185,8 @@ class SimulationCore:
                 return self._apply_set_time_mode(command)
             if isinstance(command, StepCommand):
                 return self._apply_step(command)
+            if isinstance(command, TrainControlCommand):
+                return self._apply_train_control(command)
             if isinstance(command, _WORLD_COMMAND_TYPES):
                 self._world_buffer.append(command)
                 return CommandResult()
@@ -187,6 +216,8 @@ class SimulationCore:
         self._accumulator = 0.0
         self._monotonic_ref = None
         self._world_buffer.clear()
+        for train in self._trains.values():
+            train.reset()
         return CommandResult()
 
     def _apply_set_time_mode(self, command: SetTimeModeCommand) -> CommandResult:
@@ -218,6 +249,13 @@ class SimulationCore:
         self._drain_fixed_steps()
         return CommandResult()
 
+    def _apply_train_control(self, command: TrainControlCommand) -> CommandResult:
+        train = self._trains.get(command.train_id)
+        if train is None:
+            return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
+        result = train.apply_control(command.payload)
+        return CommandResult(ok=result.ok, error=result.error)
+
     # -- Fixed-step update cycle (§2.5) ----------------------------------
 
     def _drain_fixed_steps(self) -> None:
@@ -228,21 +266,31 @@ class SimulationCore:
     def _run_fixed_step(self, duration: float) -> None:
         # 1. Apply queued ATP/train-control commands in arrival order.
         for command in list(self._world_buffer):
-            self._apply_world_command(command)
-            self._resolve(command.sequence, CommandResult())
+            result = self._apply_world_command(command)
+            self._resolve(command.sequence, result)
         self._world_buffer.clear()
-        # 2. Advance simulation time to the nominal-step end (events: Phase 2).
+        # 2. Advance simulation time to the nominal-step end.
         self._simulation_time += duration
-        # 3. Update each train's equipment and physics in stable order (Phase 3).
-        # 4. Trigger events due at the current simulation time (Phase 2).
+        # 3. Update each train's equipment and physics in stable train-ID order.
+        for train_id in self._train_ids_sorted:
+            self._trains[train_id].step(duration)
+        # 4. Trigger events due at the current simulation time (later phase).
         # 5. Produce a read-only state snapshot.
         self._latest_snapshot = self._build_snapshot()
         self._publish_snapshot()
 
-    def _apply_world_command(self, command: Command) -> None:
-        # Phase 3/4: route AtpStateCommand / TrainControlCommand into the
-        # train model. No trains exist yet, so application is a no-op.
-        return
+    def _apply_world_command(self, command: Command) -> CommandResult:
+        if isinstance(command, AtpStateCommand):
+            return self._apply_atp_state(command)
+        return CommandResult(ok=False, error=f"unknown world command: {type(command).__name__}")
+
+    def _apply_atp_state(self, command: AtpStateCommand) -> CommandResult:
+        # Phase 3: convert the atp_to_train bit string into train control through
+        # the train model. No trains accept ATP state yet.
+        train = self._trains.get(command.train_id)
+        if train is None:
+            return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
+        return CommandResult()
 
     # -- Helpers ---------------------------------------------------------
 
@@ -265,12 +313,13 @@ class SimulationCore:
             future.set_result(result)
 
     def _build_snapshot(self) -> SimulationSnapshot:
+        trains = tuple(self._trains[tid].get_snapshot() for tid in self._train_ids_sorted)
         return SimulationSnapshot(
             simulation_state=self._state,
             simulation_time=self._simulation_time,
             time_mode=self._time_mode,
             time_multiplier=self._time_multiplier,
-            trains=(),
+            trains=trains,
             recent_events=(),
         )
 

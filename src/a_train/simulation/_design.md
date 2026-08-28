@@ -1,39 +1,47 @@
 # `a_train.simulation` — Implementation Design
 
 This document explains how the simulation module is *implemented* today (Phases
-0–1 complete) and how its parts fit together. The authoritative contract is
-`docs/architectural.md` §2; this file describes the code that realizes it.
+0–2 complete, per `docs/TODO.md`) and how its parts fit together. The
+authoritative contract is `docs/architectural.md` §2; this file describes the
+code that realizes it.
 
 ## 1. Responsibility and boundaries
 
 `simulation` is the simulation-time orchestration layer. It owns simulation
-time, the fixed-step clock, the command queue, the event scheduler, and the
-ordered update of the simulated world. It does **not** contain HTTP, WebSocket,
-TCP, or YAML handling — those live in `adapters/` and `scenario/`.
+time, the fixed-step clock, the command queue, and the ordered update of the
+simulated world — including the train aggregates it holds. It does **not**
+contain HTTP, WebSocket, TCP, or YAML handling; those live in `adapters/`.
 
 Dependency direction (§7.2):
 
 ```
 adapters -> simulation -> domain
-simulation -> scenario (schema only)
 ```
 
 `simulation` never imports `adapters` or `web`. Only `bootstrap.py` is allowed
-to instantiate `SimulationCore` and start `run_loop()`.
+to instantiate `SimulationCore` and start `run_loop()`. The train world
+(`domain.train`, `domain.physics`, `domain.equipment`) is pure domain code that
+the core drives; `domain` never imports `simulation`.
+
+> Scenarios were removed from the project (see `README.md` and the `docs/`
+> docs). There is no YAML scenario loader and no scheduled-event system; the
+> `recent_events` field on snapshots and the `TriggeredEventRecord` type are
+> reserved placeholders, currently always empty. Train configuration is supplied
+> as frozen `TrainConfig` dataclasses at construction time.
 
 ### Module map
 
-| File        | Role                                                              | Phase |
-| ----------- | ----------------------------------------------------------------- | ----- |
-| `commands.py`   | Frozen, keyword-only command dataclasses + `CommandResult`.   | 0–1   |
-| `snapshots.py`  | `SimulationState`, `TimeMode` enums; frozen snapshot types.   | 0     |
-| `core.py`       | `SimulationCore`: the single `run_loop()` and all logic.     | 0–1   |
-| `clock.py`      | Fixed-step accumulator (planned; currently folded into `core`).| 1→refactor |
-| `events.py`     | Event heap + handler registry.                                  | 2     |
+| File           | Role                                                                   | Phase        |
+| -------------- | --------------------------------------------------------------------- | ------------ |
+| `commands.py`  | Frozen, keyword-only command dataclasses + `CommandResult`.           | 0–1          |
+| `snapshots.py` | `SimulationState`/`TimeMode` enums, `SimulationSnapshot`;<br>re-exports the domain-owned `TrainSnapshot` and nested equipment snapshots. | 0, 2 |
+| `core.py`      | `SimulationCore`: `run_loop`, clock, dispatch, train ownership,<br>fixed-step update, snapshots, bounded subscriber queues. | 0–2 |
+| `clock.py`     | Fixed-step accumulator (planned; currently folded into `core.py`).    | 1 → refactor |
+| `events.py`    | Event heap + handler registry (reserved; not in the current plan).   | deferred     |
 
-> The clock logic currently lives inline in `core.py`. When it grows, it moves
-> into `clock.py` as a `Clock` class the core delegates to; the public behavior
-> is unchanged.
+> The clock logic currently lives inline in `core.py`; when it grows it moves
+> into `clock.py` as a `Clock` class the core delegates to, with public
+> behavior unchanged.
 
 ## 2. The single execution context
 
@@ -47,23 +55,25 @@ same `asyncio.Queue[Command]`. Adapters call `core.run()` / `core.step()` /
 `core.submit_command(...)`; those are thin async wrappers that **submit** a
 command and `await` its result. They never touch world state directly.
 
-So the call graph for a control request is:
+So the call graph for a train-control request is:
 
 ```
-REST route  ->  core.run()  ->  _submit(RunCommand())  ->  command_queue
-                                                                |
-                                                                v
-                                                       run_loop() _handle_command
-                                                                |
-                                                       apply transition + snapshot
-                                                                |
-                                                       resolve result Future
-                                                                v
-                                                    route resumes, returns snapshot
+REST route  ->  core.submit_command(TrainControlCommand)  ->  command_queue
+                                                                        |
+                                                                        v
+                                                        run_loop() _handle_command
+                                                                        |
+                                                        _dispatch -> _apply_train_control
+                                                                        |
+                                                        train.apply_control(payload)
+                                                                        |
+                                                        resolve result Future
+                                                                        v
+                                                     route resumes, returns snapshot
 ```
 
 `run_loop()` is the only consumer of `command_queue` and the only writer of the
-core's mutable fields.
+core's mutable fields and the train aggregates it owns.
 
 ## 3. Commands and results
 
@@ -104,7 +114,8 @@ idempotent:
 - `_apply_run`: `STOPPED|PAUSED -> RUNNING`; no-op if already `RUNNING`.
 - `_apply_pause`: `RUNNING -> PAUSED`; no-op if already `PAUSED|STOPPED`.
 - `_apply_reset`: any `-> STOPPED`, time `0.0`, accumulator cleared, world
-  buffer cleared (event heap rebuild is Phase 2).
+  buffer cleared, and every owned train restored to its configured state via
+  `train.reset()`.
 
 Every state transition resets `_monotonic_ref = None` so that time spent in the
 previous state (especially paused) is never carried into the next running
@@ -129,9 +140,9 @@ When `RUNNING` and not `MANUAL`, `run_loop` drives the wall clock:
 
 ```python
 now = time.monotonic()
-if self._monotonic_ref is None:        # just (re)started / mode-changed
+if self._monotonic_ref is None:  # just (re)started / mode-changed
     self._monotonic_ref = now
-    wall_delta = 0.0                    # don't count time from before running
+    wall_delta = 0.0  # don't count time from before running
 else:
     wall_delta = now - self._monotonic_ref
     self._monotonic_ref = now
@@ -167,49 +178,103 @@ non-multiple like `0.12` advances `0.10` and keeps `0.02` for the next step.
 Per §2.5, each nominal fixed step performs:
 
 1. **Apply queued world commands** in `sequence` order — drain
-   `_world_buffer`, calling `_apply_world_command` (no-op until Phase 3/4 add
-   trains) and resolving each command's result Future.
+   `_world_buffer`, calling `_apply_world_command` (currently only
+   `AtpStateCommand`, a no-op until Phase 3) and resolving each command's
+   result Future.
 2. **Advance simulation time** to the step end (`simulation_time += duration`).
-   (Splitting the step at event times is Phase 2.)
-3. **Update trains** in stable train-ID order — Phase 3.
-4. **Trigger due events** — Phase 2.
+3. **Update each train's equipment and physics in stable train-ID order** —
+   `for train_id in self._train_ids_sorted: self._trains[train_id].step(duration)`.
+4. **Trigger due events** — reserved; not implemented in the current plan.
 5. **Produce a snapshot** — `_build_snapshot()` + `_publish_snapshot()`.
+
+The train's own `step(dt)` runs the aggregate's stable order (apply accepted
+controls → update equipment → resolve dynamics → integrate forward-only
+motion), so the core only steps each aggregate once per fixed step.
 
 ## 7. Control vs. world commands
 
 `_handle_command` splits commands into two families:
 
-- **Control** (`Run`/`Pause`/`Reset`/`SetTimeMode`/`Step`): applied **immediately**
-  on receipt (not deferred to a step boundary), then a fresh snapshot is built
-  and the command's Future is resolved. This is what makes
-  `await core.pause()` return a current snapshot right away.
-- **World** (`AtpState`/`TrainControl`): **buffered** into `_world_buffer` and
-  applied at the next fixed-step boundary (step 1 above). Their Futures are
-  resolved only after application. (No world commands flow in Phase 1.)
+- **Control** (`Run`/`Pause`/`Reset`/`SetTimeMode`/`Step`/`TrainControl`):
+  applied **immediately** on receipt (not deferred to a step boundary), then a
+  fresh snapshot is built and the command's Future is resolved. This is what
+  makes `await core.pause()` — and `await core.submit_command(TrainControlCommand)`
+  — return a current snapshot right away.
+- **World** (`AtpState`): **buffered** into `_world_buffer` and applied at the
+  next fixed-step boundary (step 1 above). Its Future is resolved only after
+  application. (Phase 3 fills in ATP-state application.)
 
-This matches §2.6: "It applies control commands immediately. It buffers ATP and
-train-control commands until the next nominal fixed-step boundary."
+### Why `TrainControlCommand` is immediate, not buffered
 
-## 8. Snapshots
+`docs/architectural.md` §2.6 says ATP and train-control commands are buffered
+to the next fixed-step boundary. In `MANUAL` mode (the deterministic test mode,
+§6.1) the "next fixed step" only happens when the caller invokes `step(delta)`.
+If the REST handler awaited a buffered train-control command, the request
+would block until a step occurs — and the step can only be issued after the
+control request returns. That is a deadlock.
 
-`SimulationSnapshot` (and nested `TrainSnapshot`, `TriggeredEventRecord`) are
-frozen dataclasses containing only scalars and immutable tuples (§2.6: never
-expose a mutable object to a client).
+Train-control requests only change *control state* (traction/brake/door
+demands); they never advance time. So they are applied immediately at the
+aggregate boundary (`train.apply_control`), the way §3.6 describes
+`apply_control` ("updates requested control state"). Physics still advances
+only at the fixed-step boundary. This keeps MANUAL stepping deadlock-free and
+deterministic while preserving the invariant that adapters never mutate world
+state directly — every change goes through `run_loop()`.
+
+`AtpStateCommand` remains a buffered world command; Phase 3 converts its bit
+string into train control at the fixed step, where wall-clock modes make
+buffering safe.
+
+## 8. Train world ownership
+
+`SimulationCore` owns the train aggregates, built at construction time from
+frozen `TrainConfig` dataclasses and rebuilt state on `reset`:
+
+```python
+self._trains: dict[str, Train] = {cfg.train_id: Train(cfg) for cfg in train_configs}
+self._train_ids_sorted: tuple[str, ...] = tuple(sorted(self._trains))
+```
+
+- **Routing.** `_apply_train_control(command)` looks up the train by
+  `train_id` and calls `train.apply_control(command.payload)`. A missing train
+  or a non-active cab or an out-of-range demand returns
+  `CommandResult(ok=False)`, which the REST layer maps to HTTP 400; because
+  `apply_control` validates before mutating, invalid input leaves state
+  unchanged.
+- **Reset.** `_apply_reset` calls `train.reset()` on every train, restoring
+  configured physical state and clearing control/equipment runtime state.
+- **Snapshots.** `_build_snapshot` collects `train.get_snapshot()` for each
+  train in stable train-ID order into `SimulationSnapshot.trains`. The
+  `TrainSnapshot` type lives in `domain.snapshots` (the domain owns it because
+  the aggregate constructs it); `simulation.snapshots` re-exports it so the
+  simulation public API keeps its import path.
+
+The core never exposes a `Train` object; only frozen snapshots leave the core.
+
+## 9. Snapshots and subscribers
+
+`SimulationSnapshot` (with nested `TrainSnapshot`, equipment snapshots, and the
+reserved `TriggeredEventRecord`) is a frozen dataclass containing only scalars,
+immutable tuples, and frozen nested dataclasses (§2.6: never expose a mutable
+object to a client).
 
 - `get_snapshot()` returns `self._latest_snapshot` — an immutable reference.
-  Reading it is safe from any context (including a threadpool-backed route)
-  because the object cannot be mutated; `run_loop` only ever *replaces* the
-  reference.
+  Reading it is safe from any context because the object cannot be mutated;
+  `run_loop` only ever *replaces* the reference.
 - `_latest_snapshot` is refreshed after every fixed step **and** after every
-  control transition.
+  control transition (including train-control).
 - `_publish_snapshot` pushes the latest snapshot to each subscriber queue
   (`self._snapshot_subscribers`). Bounded queues drop their oldest entry when
   full, so a slow WebSocket/ATP publisher can never block physics (§2.6).
-  Phase 1 has no subscribers yet; Phase 5 attaches the WebSocket publisher.
+- `subscribe(maxsize=64)` / `unsubscribe(queue)` let the WebSocket adapter
+  register and release a bounded queue. `subscribe` seeds the queue with the
+  current snapshot so a client immediately receives the latest state on
+  connect, then one snapshot after every fixed step and control transition.
 
-## 9. Key invariants
+## 10. Key invariants
 
-1. **One writer.** Only `run_loop()` mutates core fields; adapters enqueue.
+1. **One writer.** Only `run_loop()` mutates core fields and train aggregates;
+   adapters enqueue.
 2. **Pure commands.** Commands carry no behaviour; sequences are stamped at
    enqueue.
 3. **Errors are values.** Invalid input → `CommandResult(ok=False)`, never an
@@ -217,14 +282,22 @@ expose a mutable object to a client).
 4. **No time leaks.** `monotonic_ref` resets on pause/stop/mode-change.
 5. **One clock path.** Wall-clock and manual stepping share the accumulator and
    `_drain_fixed_steps`.
-6. **Immutable snapshots.** Clients receive frozen, read-only views.
+6. **Immutable snapshots.** Clients receive frozen, read-only views; snapshots
+   cannot be used to mutate subsequent simulator state.
+7. **Stable train order.** Trains update in sorted train-ID order every step,
+   so multi-train snapshots are repeatable for the same initial state and
+   command sequence.
 
-## 10. Phase status
+## 11. Phase status
 
-| Capability                                   | Status |
-| -------------------------------------------- | ------ |
-| Module layout, data types, lifecycle         | ✅ Phase 0 |
-| `run_loop`, state machine, clock, time modes  | ✅ Phase 1 |
-| Event heap, scenario load, event split/retry  | ⏳ Phase 2 |
-| Trains, physics, equipment, signals, real snapshots | ⏳ Phase 3 |
-| World-command application (`_apply_world_command`)   | ⏳ Phase 3/4 |
+Aligned with `docs/TODO.md`:
+
+| Capability                                              | Status      |
+| ------------------------------------------------------- | ----------- |
+| Module layout, data types, lifecycle                    | ✅ Phase 0  |
+| `run_loop`, state machine, clock, time modes            | ✅ Phase 1  |
+| Train world: aggregate, physics, equipment, train       | ✅ Phase 2  |
+| snapshots, bounded subscriber queues, WebSocket publisher |             |
+| ATP TCP/NDJSON integration (client, protocol, manager)  | ⏳ Phase 3  |
+| Web UI: REST train routes + static browser client       | ⏳ Phase 4  |
+| Release readiness (determinism, cross-platform CI)      | ⏳ Phase 5  |

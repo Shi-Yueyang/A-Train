@@ -2,13 +2,25 @@
 
 Snapshots are read-only views of the world produced by the core. They contain
 only scalar values, immutable tuples, and frozen nested dataclasses; they never
-expose a train object, list, or mutable internal collection (see §2.6).
+expose a train object, list, or mutable internal collection (§2.6).
+
+The train-world snapshot types live in ``domain.snapshots`` (the domain owns
+them because the train aggregate constructs them). This module re-exports
+``TrainSnapshot`` so the simulation public API keeps its existing import path.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+
+from ..domain.snapshots import (
+    BtmSnapshot,
+    CabSnapshot,
+    DoorSnapshot,
+    IoSnapshot,
+    TrainSnapshot,
+)
 
 
 class SimulationState(Enum):
@@ -25,17 +37,6 @@ class TimeMode(Enum):
     REALTIME = "REALTIME"
     SCALED = "SCALED"
     MANUAL = "MANUAL"
-
-
-@dataclass(frozen=True)
-class TrainSnapshot:
-    """Read-only view of a single train at a point in simulation time."""
-
-    train_id: str
-    speed: float = 0.0
-    acceleration: float = 0.0
-    position: float = 0.0
-    direction: str = "forward"
 
 
 @dataclass(frozen=True)
@@ -57,3 +58,16 @@ class SimulationSnapshot:
     time_multiplier: float = 1.0
     trains: tuple[TrainSnapshot, ...] = ()
     recent_events: tuple[TriggeredEventRecord, ...] = ()
+
+
+__all__ = [
+    "BtmSnapshot",
+    "CabSnapshot",
+    "DoorSnapshot",
+    "IoSnapshot",
+    "SimulationSnapshot",
+    "SimulationState",
+    "TimeMode",
+    "TrainSnapshot",
+    "TriggeredEventRecord",
+]
