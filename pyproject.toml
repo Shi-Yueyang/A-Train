@@ -32,7 +32,7 @@ a-train = "a_train.__main__:main"
 packages = ["src/a_train"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/a_train", "web", "scenarios", "README.md", "docs"]
+include = ["src/a_train", "web", "README.md", "docs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

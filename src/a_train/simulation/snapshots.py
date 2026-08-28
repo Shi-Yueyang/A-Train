@@ -40,15 +40,6 @@ class TimeMode(Enum):
 
 
 @dataclass(frozen=True)
-class TriggeredEventRecord:
-    """A scenario event that has been triggered exactly once."""
-
-    event_id: str
-    at: float
-    type: str
-
-
-@dataclass(frozen=True)
 class SimulationSnapshot:
     """The complete read-only state produced by the core (§2.5)."""
 
@@ -57,7 +48,6 @@ class SimulationSnapshot:
     time_mode: TimeMode = TimeMode.MANUAL
     time_multiplier: float = 1.0
     trains: tuple[TrainSnapshot, ...] = ()
-    recent_events: tuple[TriggeredEventRecord, ...] = ()
 
 
 __all__ = [
@@ -69,5 +59,4 @@ __all__ = [
     "SimulationState",
     "TimeMode",
     "TrainSnapshot",
-    "TriggeredEventRecord",
 ]

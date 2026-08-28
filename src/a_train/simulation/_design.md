@@ -21,13 +21,8 @@ adapters -> simulation -> domain
 `simulation` never imports `adapters` or `web`. Only `bootstrap.py` is allowed
 to instantiate `SimulationCore` and start `run_loop()`. The train world
 (`domain.train`, `domain.physics`, `domain.equipment`) is pure domain code that
-the core drives; `domain` never imports `simulation`.
-
-> Scenarios were removed from the project (see `README.md` and the `docs/`
-> docs). There is no YAML scenario loader and no scheduled-event system; the
-> `recent_events` field on snapshots and the `TriggeredEventRecord` type are
-> reserved placeholders, currently always empty. Train configuration is supplied
-> as frozen `TrainConfig` dataclasses at construction time.
+the core drives; `domain` never imports `simulation`. Train configuration is
+supplied as frozen `TrainConfig` dataclasses at construction time.
 
 ### Module map
 
@@ -37,7 +32,6 @@ the core drives; `domain` never imports `simulation`.
 | `snapshots.py` | `SimulationState`/`TimeMode` enums, `SimulationSnapshot`;<br>re-exports the domain-owned `TrainSnapshot` and nested equipment snapshots. | 0, 2 |
 | `core.py`      | `SimulationCore`: `run_loop`, clock, dispatch, train ownership,<br>fixed-step update, snapshots, bounded subscriber queues. | 0–2 |
 | `clock.py`     | Fixed-step accumulator (planned; currently folded into `core.py`).    | 1 → refactor |
-| `events.py`    | Event heap + handler registry (reserved; not in the current plan).   | deferred     |
 
 > The clock logic currently lives inline in `core.py`; when it grows it moves
 > into `clock.py` as a `Clock` class the core delegates to, with public
@@ -184,8 +178,7 @@ Per §2.5, each nominal fixed step performs:
 2. **Advance simulation time** to the step end (`simulation_time += duration`).
 3. **Update each train's equipment and physics in stable train-ID order** —
    `for train_id in self._train_ids_sorted: self._trains[train_id].step(duration)`.
-4. **Trigger due events** — reserved; not implemented in the current plan.
-5. **Produce a snapshot** — `_build_snapshot()` + `_publish_snapshot()`.
+4. **Produce a snapshot** — `_build_snapshot()` + `_publish_snapshot()`.
 
 The train's own `step(dt)` runs the aggregate's stable order (apply accepted
 controls → update equipment → resolve dynamics → integrate forward-only
@@ -253,10 +246,9 @@ The core never exposes a `Train` object; only frozen snapshots leave the core.
 
 ## 9. Snapshots and subscribers
 
-`SimulationSnapshot` (with nested `TrainSnapshot`, equipment snapshots, and the
-reserved `TriggeredEventRecord`) is a frozen dataclass containing only scalars,
-immutable tuples, and frozen nested dataclasses (§2.6: never expose a mutable
-object to a client).
+`SimulationSnapshot` (with nested `TrainSnapshot` and equipment snapshots) is a
+frozen dataclass containing only scalars, immutable tuples, and frozen nested
+dataclasses (§2.6: never expose a mutable object to a client).
 
 - `get_snapshot()` returns `self._latest_snapshot` — an immutable reference.
   Reading it is safe from any context because the object cannot be mutated;

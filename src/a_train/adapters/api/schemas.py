@@ -13,7 +13,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from ...domain.snapshots import TrainSnapshot
-from ...simulation.snapshots import SimulationSnapshot, TriggeredEventRecord
+from ...simulation.snapshots import SimulationSnapshot
 
 
 class StatusResponse(BaseModel):
@@ -168,10 +168,6 @@ def _train_to_dict(snap: TrainSnapshot) -> dict:
     }
 
 
-def _event_to_dict(event: TriggeredEventRecord) -> dict:
-    return {"event_id": event.event_id, "at": event.at, "type": event.type}
-
-
 def snapshot_to_dict(snap: SimulationSnapshot) -> dict:
     """Render a simulation snapshot as a JSON-serialisable dict (WebSocket)."""
 
@@ -181,5 +177,4 @@ def snapshot_to_dict(snap: SimulationSnapshot) -> dict:
         "time_mode": snap.time_mode.value,
         "time_multiplier": snap.time_multiplier,
         "trains": [_train_to_dict(t) for t in snap.trains],
-        "recent_events": [_event_to_dict(e) for e in snap.recent_events],
     }

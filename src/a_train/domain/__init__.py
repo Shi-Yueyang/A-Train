@@ -1,9 +1,8 @@
 """Train-world rules, independent of the time loop and external transports.
 
-The ``domain`` package never imports ``simulation``, ``scenario``, ``adapters``,
-or ``web`` (§7.2). It owns the train aggregate, physics, equipment, linear
-signals, named digital I/O, and the immutable snapshot types the aggregate
-publishes.
+The ``domain`` package never imports ``simulation``, ``adapters``, or ``web``
+(§7.2). It owns the train aggregate, physics, equipment, linear signals, named
+digital I/O, and the immutable snapshot types the aggregate publishes.
 """
 
 from __future__ import annotations

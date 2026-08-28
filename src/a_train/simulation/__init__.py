@@ -26,7 +26,6 @@ from .snapshots import (
     SimulationState,
     TimeMode,
     TrainSnapshot,
-    TriggeredEventRecord,
 )
 
 __all__ = [
@@ -48,5 +47,4 @@ __all__ = [
     "TimeMode",
     "TrainControlCommand",
     "TrainSnapshot",
-    "TriggeredEventRecord",
 ]

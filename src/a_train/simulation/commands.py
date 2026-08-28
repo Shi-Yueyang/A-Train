@@ -35,7 +35,7 @@ class PauseCommand(Command):
 
 @dataclass(frozen=True, kw_only=True)
 class ResetCommand(Command):
-    """Restore the scenario's initial world state and simulation time zero."""
+    """Restore the initial world state and set simulation time to zero."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -64,7 +64,7 @@ class AtpStateCommand(Command):
 
 @dataclass(frozen=True, kw_only=True)
 class TrainControlCommand(Command):
-    """A train-control request submitted through the REST API or a scenario."""
+    """A train-control request submitted through the REST API."""
 
     train_id: str
     payload: Any

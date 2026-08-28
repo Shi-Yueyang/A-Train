@@ -99,9 +99,6 @@ class SimulationCore:
     def get_snapshot(self) -> SimulationSnapshot:
         return self._latest_snapshot
 
-    def load_scenario(self, scenario: object) -> None:
-        raise NotImplementedError
-
     def subscribe(
         self, maxsize: int = _DEFAULT_SUBSCRIBER_MAXSIZE
     ) -> asyncio.Queue[SimulationSnapshot]:
@@ -274,8 +271,7 @@ class SimulationCore:
         # 3. Update each train's equipment and physics in stable train-ID order.
         for train_id in self._train_ids_sorted:
             self._trains[train_id].step(duration)
-        # 4. Trigger events due at the current simulation time (later phase).
-        # 5. Produce a read-only state snapshot.
+        # 4. Produce a read-only state snapshot.
         self._latest_snapshot = self._build_snapshot()
         self._publish_snapshot()
 
@@ -320,7 +316,6 @@ class SimulationCore:
             time_mode=self._time_mode,
             time_multiplier=self._time_multiplier,
             trains=trains,
-            recent_events=(),
         )
 
     def _publish_snapshot(self) -> None:

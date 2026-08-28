@@ -1,7 +1,7 @@
 """Phase 0 acceptance tests (TODO.md §Phase 0 passing criteria).
 
-* ``python -m a_train --help`` documents the ``run`` and ``test`` commands.
-* The application starts and stops cleanly without a loaded scenario.
+* ``python -m a_train --help`` documents the ``run`` command.
+* The application starts and stops cleanly.
 * ``pytest`` discovers and runs the integration suite.
 * The fixture starts the real application and a controllable TCP test ATP
   server without mocking production modules.
@@ -15,7 +15,7 @@ import subprocess
 import sys
 
 
-def test_cli_help_documents_run_and_test_commands() -> None:
+def test_cli_help_documents_run_command() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "a_train", "--help"],
         capture_output=True,
@@ -23,7 +23,6 @@ def test_cli_help_documents_run_and_test_commands() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "run" in result.stdout
-    assert "test" in result.stdout
 
 
 async def test_application_starts_and_stops_cleanly(app_client) -> None:
