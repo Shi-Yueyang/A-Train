@@ -1,0 +1,62 @@
+"""Phase 0 acceptance tests (TODO.md §Phase 0 passing criteria).
+
+* ``python -m a_train --help`` documents the ``run`` and ``test`` commands.
+* The application starts and stops cleanly without a loaded scenario.
+* ``pytest`` discovers and runs the integration suite.
+* The fixture starts the real application and a controllable TCP test ATP
+  server without mocking production modules.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import subprocess
+import sys
+
+
+def test_cli_help_documents_run_and_test_commands() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "a_train", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "run" in result.stdout
+    assert "test" in result.stdout
+
+
+async def test_application_starts_and_stops_cleanly(app_client) -> None:
+    # The fixture's lifespan has already started the real core and ATP manager.
+    # A successful request proves the app responds; clean fixture teardown
+    # proves graceful shutdown.
+    response = await app_client.get("/api/status")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["simulation_state"] == "STOPPED"
+    assert body["simulation_time"] == 0.0
+
+
+async def test_atp_server_speaks_ndjson(atp_server) -> None:
+    port = atp_server.port
+    assert port > 0
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write((json.dumps({"type": "hello", "train_id": "T1"}) + "\n").encode("utf-8"))
+        await writer.drain()
+
+        received = await atp_server.wait_for_message()
+        assert received["type"] == "hello"
+
+        await atp_server.send({"type": "hello_ack", "accepted": True})
+        line = await reader.readline()
+        assert json.loads(line.decode("utf-8"))["accepted"] is True
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
+async def test_fixture_starts_real_app_and_atp_server(app_client, atp_server) -> None:
+    response = await app_client.get("/api/status")
+    assert response.status_code == 200
+    assert atp_server.port > 0

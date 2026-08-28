@@ -1,0 +1,10 @@
+/* A-Train browser client presentation styles. Implemented in Phase 5. */
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  margin: 2rem;
+}
