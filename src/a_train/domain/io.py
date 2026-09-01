@@ -59,14 +59,12 @@ DEFAULT_TRAIN_TO_ATP = IoMapping(
         SignalDef("cab_active", 0),
         SignalDef("doors_closed", 1),
         SignalDef("vigilance", 2),
-        SignalDef("emergency_handle", 3),
     )
 )
 DEFAULT_ATP_TO_TRAIN = IoMapping(
     (
         SignalDef("warning", 0),
-        SignalDef("service_brake", 1),
-        SignalDef("emergency_brake", 2),
+        SignalDef("supervision_active", 1),
     )
 )
 

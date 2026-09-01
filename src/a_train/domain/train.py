@@ -7,28 +7,29 @@ cab and submit a transport-neutral command to the simulation core, which calls
 the small aggregate API:
 
     apply_control(control)   validate + update control state (no time advance)
-    step(dt)                 update equipment, resolve dynamics, integrate
+    step(dt)                 resolve dynamics, integrate
     get_snapshot()           construct an immutable view
     reset()                  restore configured physical state, clear runtime
 
 The aggregate coordinates its equipment in a documented, stable order (§3.6):
-apply accepted controls, update equipment, resolve dynamics, then construct the
-snapshot. Physics lives in ``physics.py``; it never mutates aggregate state.
+apply accepted controls, resolve dynamics, then construct the snapshot.
+Physics lives in ``physics.py``; it never mutates aggregate state.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from .equipment import (
-    BtmDelivery,
-    BtmEquipment,
-    Cab,
+    EQUIPMENT_REGISTRY,
+    BtmEquipmentSet,
+    CabEquipmentSet,
     DigitalIo,
     Door,
-    DoorCommand,
+    Equipment,
     IoConfig,
-    IoNamed,
 )
 from .io import IoMapping
 from .physics import (
@@ -45,16 +46,13 @@ from .snapshots import TrainSnapshot
 class TrainControl:
     """A normalized train-control request routed to the active cab (§3.3).
 
-    Each field is optional so a single request can update any subset of the
-    control state. ``emergency_brake`` is a latch: ``True`` applies it, ``False``
-    requests release, ``None`` leaves it unchanged.
+    ``drive_demand`` is a signed, normalized lever in [-1.0, 1.0]: positive
+    scales the traction limit, negative scales the deceleration limit. The
+    model knows force and speed only; there is no separate brake state.
     """
 
     cab_id: int
-    traction_demand: float | None = None
-    service_brake_demand: float | None = None
-    emergency_brake: bool | None = None
-    door: str | None = None
+    drive_demand: float | None = None
 
 
 @dataclass(frozen=True)
@@ -69,12 +67,42 @@ class ControlResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class EquipmentSet:
+    """A transport-neutral equipment-set request (§3.5).
+
+    The generic REST equipment endpoint maps its JSON body onto this command;
+    the train dispatcher validates the fields each equipment type requires:
+
+    - ``door``: ``command`` is ``"open"`` or ``"close"``.
+    - ``cab``: ``cab_id`` plus ``command`` ``"activate"`` (transfers authority)
+      or ``"deactivate"``.
+    - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
+    - ``io``: ``direction`` plus either ``bits`` or ``values``.
+    """
+
+    key: str
+    command: str | None = None
+    cab_id: int | None = None
+    data: bytes | None = None
+    direction: str | None = None
+    bits: str | None = None
+    values: Mapping[str, bool] | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class EquipmentConfig:
+    """Configuration for a single pluggable addon equipment instance."""
+
+    key: str
+    params: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(frozen=True, kw_only=True)
 class TrainConfig:
     """Frozen per-train configuration (§3.2).
 
-    Acceleration limits are positive and finite. Emergency-brake deceleration
-    must be at least the service-brake deceleration. This version models
+    Acceleration limits are positive and finite. This version models
     forward-only movement: initial speed is non-negative.
     """
 
@@ -82,12 +110,12 @@ class TrainConfig:
     cab_ids: tuple[int, ...]
     initial_active_cab: int
     max_traction_accel: float
-    max_service_brake_decel: float
-    max_emergency_brake_decel: float
+    max_decel: float
     initial_position: float = 0.0
     initial_speed: float = 0.0
     initial_door_state: str = "closed"
     io_config: IoConfig = field(default_factory=IoConfig)
+    equipment_configs: tuple[EquipmentConfig, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.train_id or not isinstance(self.train_id, str):
@@ -107,12 +135,8 @@ class TrainConfig:
             raise ValueError("initial_speed must be a non-negative finite number")
         if not is_positive_finite(self.max_traction_accel):
             raise ValueError("max_traction_accel must be a positive finite number")
-        if not is_positive_finite(self.max_service_brake_decel):
-            raise ValueError("max_service_brake_decel must be a positive finite number")
-        if not is_positive_finite(self.max_emergency_brake_decel):
-            raise ValueError("max_emergency_brake_decel must be a positive finite number")
-        if self.max_emergency_brake_decel < self.max_service_brake_decel:
-            raise ValueError("max_emergency_brake_decel must be at least max_service_brake_decel")
+        if not is_positive_finite(self.max_decel):
+            raise ValueError("max_decel must be a positive finite number")
         if self.initial_door_state not in ("open", "closed"):
             raise ValueError("initial_door_state must be 'open' or 'closed'")
         if not isinstance(self.io_config.train_to_atp, IoMapping) or not isinstance(
@@ -125,9 +149,7 @@ class TrainConfig:
 class _ControlView:
     """Adapter so ``physics.resolve_acceleration`` reads aggregate control state."""
 
-    emergency_brake: bool
-    service_brake_demand: float
-    traction_demand: float
+    drive_demand: float
     doors_closed: bool
 
 
@@ -136,29 +158,46 @@ class Train:
 
     def __init__(self, config: TrainConfig) -> None:
         self._config = config
-        self._cabs = tuple(
-            Cab(cid, initial_active=(cid == config.initial_active_cab)) for cid in config.cab_ids
-        )
-        self._door = Door(initial_state=config.initial_door_state)
-        self._btm = tuple(BtmEquipment(cid) for cid in config.cab_ids)
-        self._io = DigitalIo(config.io_config)
+
+        # Create addon equipment from config, falling back to defaults
+        # (Cab + Door + BTM + IO). Cab authority stays with the aggregate.
+        self._addon_equipment: list[Equipment] = []
+        if config.equipment_configs:
+            for eq_cfg in config.equipment_configs:
+                factory = EQUIPMENT_REGISTRY[eq_cfg.key]
+                self._addon_equipment.append(
+                    factory(
+                        cab_ids=config.cab_ids,
+                        io_config=config.io_config,
+                        initial_door_state=config.initial_door_state,
+                        initial_active_cab=config.initial_active_cab,
+                        **eq_cfg.params,
+                    )
+                )
+        else:
+            # Default: Cab + Door + BTM per-cab + IO with configured mappings.
+            self._addon_equipment.append(CabEquipmentSet(config.cab_ids, config.initial_active_cab))
+            self._addon_equipment.append(Door(initial_state=config.initial_door_state))
+            self._addon_equipment.append(BtmEquipmentSet(config.cab_ids))
+            self._addon_equipment.append(DigitalIo(config.io_config))
 
         self._position = config.initial_position
         self._speed = config.initial_speed
         self._acceleration = 0.0
 
-        self._traction_demand = 0.0
-        self._service_brake_demand = 0.0
-        self._emergency_brake = False
+        self._drive_demand = 0.0
         self._active_cab = config.initial_active_cab
+
+    def _find_equipment(self, key: str) -> Equipment | None:
+        """Find addon equipment by key, or None if not present."""
+        for eq in self._addon_equipment:
+            if eq.key == key:
+                return eq
+        return None
 
     @property
     def train_id(self) -> str:
         return self._config.train_id
-
-    @property
-    def active_cab(self) -> int:
-        return self._active_cab
 
     def apply_control(self, control: TrainControl) -> ControlResult:
         """Validate a control request and update control state (no time advance).
@@ -175,63 +214,110 @@ class Train:
                     f"{self._config.train_id} (active: {self._active_cab})"
                 ),
             )
-        if control.traction_demand is not None and not is_normalized(control.traction_demand):
-            return ControlResult(ok=False, error="traction_demand must be in [0.0, 1.0]")
-        if control.service_brake_demand is not None and not is_normalized(
-            control.service_brake_demand
-        ):
-            return ControlResult(ok=False, error="service_brake_demand must be in [0.0, 1.0]")
-        if control.door is not None and control.door not in ("open", "close"):
-            return ControlResult(ok=False, error="door must be 'open' or 'close'")
+        if control.drive_demand is not None and not is_normalized(control.drive_demand):
+            return ControlResult(ok=False, error="drive_demand must be in [-1.0, 1.0]")
 
-        if control.traction_demand is not None:
-            self._traction_demand = control.traction_demand
-        if control.service_brake_demand is not None:
-            self._service_brake_demand = control.service_brake_demand
-        if control.emergency_brake is not None:
-            self._emergency_brake = control.emergency_brake
-        if control.door is not None:
-            self._door.receive(DoorCommand(command=control.door))
+        if control.drive_demand is not None:
+            self._drive_demand = control.drive_demand
         return ControlResult()
 
-    def receive_btm(self, cab_id: int, data: bytes) -> ControlResult:
-        """Deliver an opaque BTM byte array to a cab's equipment (§4.6)."""
+    def set_equipment(self, command: EquipmentSet) -> ControlResult:
+        """Apply an equipment-set command immediately (no time advance).
 
-        if cab_id not in self._config.cab_ids:
+        Cab ``activate`` transfers cab authority to the named cab; the other
+        cabs' equipment flags follow. All other equipment state changes are
+        routed to the component and validated at the aggregate boundary.
+        """
+
+        equipment = self._find_equipment(command.key)
+        if equipment is None:
             return ControlResult(
                 ok=False,
-                error=f"cab {cab_id} is not configured on {self._config.train_id}",
+                error=f"no '{command.key}' equipment on {self._config.train_id}",
             )
-        for btm in self._btm:
-            if btm.cab_id == cab_id:
-                btm.receive(BtmDelivery(cab_id=cab_id, data=data))
+
+        if command.key == "door":
+            if not isinstance(equipment, Door):
+                return ControlResult(
+                    ok=False, error="'door' equipment does not accept door commands"
+                )
+            if command.command not in ("open", "close"):
+                return ControlResult(ok=False, error="door command must be 'open' or 'close'")
+            equipment.apply_control(command.command)
+            return ControlResult()
+
+        if command.key == "cab":
+            if command.cab_id not in self._config.cab_ids:
+                return ControlResult(
+                    ok=False,
+                    error=f"cab {command.cab_id} is not configured on {self._config.train_id}",
+                )
+            if command.command == "activate":
+                self._active_cab = command.cab_id
+                if isinstance(equipment, CabEquipmentSet):
+                    equipment.set_active(command.cab_id)
                 return ControlResult()
-        return ControlResult(ok=False, error=f"no BTM equipment for cab {cab_id}")
+            if command.command == "deactivate":
+                if command.cab_id == self._active_cab:
+                    return ControlResult(
+                        ok=False,
+                        error=(
+                            f"cannot deactivate the active cab {command.cab_id}; "
+                            "activate another cab first"
+                        ),
+                    )
+                if isinstance(equipment, CabEquipmentSet):
+                    equipment.apply_control(command.cab_id, "deactivate")
+                return ControlResult()
+            return ControlResult(ok=False, error="cab command must be 'activate' or 'deactivate'")
+
+        if command.key == "btm":
+            if command.cab_id is None or command.data is None:
+                return ControlResult(ok=False, error="btm requires cab_id and data")
+            if not isinstance(equipment, BtmEquipmentSet):
+                return ControlResult(ok=False, error=f"no BTM equipment on {self._config.train_id}")
+            try:
+                equipment.deliver(command.cab_id, command.data)
+            except ValueError as exc:
+                return ControlResult(ok=False, error=str(exc))
+            return ControlResult()
+
+        if command.key == "io":
+            if not isinstance(equipment, DigitalIo):
+                return ControlResult(ok=False, error="'io' equipment does not accept I/O updates")
+            if (command.bits is None) == (command.values is None):
+                return ControlResult(ok=False, error="io requires exactly one of bits or values")
+            try:
+                if command.bits is not None:
+                    equipment.update_bits(command.direction or "", command.bits)
+                else:
+                    equipment.update_named(command.direction or "", command.values or {})
+            except ValueError as exc:
+                return ControlResult(ok=False, error=str(exc))
+            return ControlResult()
+
+        return ControlResult(
+            ok=False,
+            error=f"equipment '{command.key}' does not expose settable state",
+        )
 
     def step(self, dt: float) -> None:
-        """Advance equipment and physics over one fixed step (§3.4, §3.6)."""
+        """Resolve dynamics and integrate over one fixed step (§3.4)."""
 
         # 1. Apply accepted controls (already applied via apply_control).
-        # 2. Update equipment in stable order.
-        for cab in self._cabs:
-            cab.step(dt)
-        self._door.step(dt)
-        for btm in self._btm:
-            btm.step(dt)
-        self._io.step(dt)
-        # The aggregate feeds derived state into its train-to-ATP signals.
-        self._io.receive(
-            IoNamed(
-                direction="train_to_atp",
-                values={"cab_active": True, "doors_closed": self._door.closed},
-            )
-        )
-        # 3. Resolve dynamics and integrate forward-only motion.
+        # 2. Resolve dynamics and integrate forward-only motion.
+        # The aggregate derives equipment state into its train-to-ATP signals.
+        door = self._find_equipment("door")
+        doors_closed = door.closed if isinstance(door, Door) else True
+        for eq in self._addon_equipment:
+            if isinstance(eq, DigitalIo):
+                eq.update_named(
+                    "train_to_atp",
+                    {"cab_active": True, "doors_closed": doors_closed},
+                )
         control = _ControlView(
-            emergency_brake=self._emergency_brake,
-            service_brake_demand=self._service_brake_demand,
-            traction_demand=self._traction_demand,
-            doors_closed=self._door.closed,
+            drive_demand=self._drive_demand,
+            doors_closed=doors_closed,
         )
         accel = resolve_acceleration(control, self._config)
         new_position, new_speed, applied = integrate_forward(
@@ -241,7 +327,7 @@ class Train:
             dt=dt,
         )
         self._position, self._speed, self._acceleration = new_position, new_speed, applied
-        # 4. Snapshot is constructed by get_snapshot().
+        # 3. Snapshot is constructed by get_snapshot().
 
     def get_snapshot(self) -> TrainSnapshot:
         return TrainSnapshot(
@@ -252,14 +338,8 @@ class Train:
             acceleration=self._acceleration,
             position=self._position,
             direction="forward",
-            traction_demand=self._traction_demand,
-            service_brake_demand=self._service_brake_demand,
-            emergency_brake=self._emergency_brake,
-            door_state=self._door.get_snapshot().state,
-            cab=tuple(c.get_snapshot() for c in self._cabs),
-            doors=self._door.get_snapshot(),
-            btm=tuple(b.get_snapshot() for b in self._btm),
-            io=self._io.get_snapshot(),
+            drive_demand=self._drive_demand,
+            equipment={eq.key: eq.read_state() for eq in self._addon_equipment},
         )
 
     def reset(self) -> None:
@@ -268,13 +348,7 @@ class Train:
         self._position = self._config.initial_position
         self._speed = self._config.initial_speed
         self._acceleration = 0.0
-        self._traction_demand = 0.0
-        self._service_brake_demand = 0.0
-        self._emergency_brake = False
+        self._drive_demand = 0.0
         self._active_cab = self._config.initial_active_cab
-        for cab in self._cabs:
-            cab.reset()
-        self._door.reset()
-        for btm in self._btm:
-            btm.reset()
-        self._io.reset()
+        for eq in self._addon_equipment:
+            eq.reset()

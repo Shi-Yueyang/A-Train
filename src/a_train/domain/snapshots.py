@@ -2,14 +2,15 @@
 
 Snapshots are read-only views produced by the train aggregate. They contain
 only scalar values, immutable tuples, and frozen nested dataclasses; they never
-expose a mutable internal object. Adding a new equipment capability means adding
-an optional nested snapshot here without changing existing physical fields, so
-the simulation core and the WebSocket/ATP adapters evolve independently.
+expose a mutable internal object. Equipment state (cabs, doors, BTM, I/O) is
+in the ``equipment`` dict keyed by equipment type, so new equipment can be
+added without changing TrainSnapshot.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -55,8 +56,7 @@ class TrainSnapshot:
     """Read-only view of a single train at a point in simulation time.
 
     Physical fields keep their names and meanings across versions. Equipment
-    state is exposed as optional nested snapshots so a new equipment capability
-    can add a snapshot without touching existing fields or adapter code.
+    state is in the ``equipment`` dict keyed by equipment type.
     """
 
     train_id: str
@@ -66,11 +66,5 @@ class TrainSnapshot:
     acceleration: float = 0.0
     position: float = 0.0
     direction: str = "forward"
-    traction_demand: float = 0.0
-    service_brake_demand: float = 0.0
-    emergency_brake: bool = False
-    door_state: str = "closed"
-    cab: tuple[CabSnapshot, ...] = ()
-    doors: DoorSnapshot | None = None
-    btm: tuple[BtmSnapshot, ...] = ()
-    io: IoSnapshot | None = None
+    drive_demand: float = 0.0
+    equipment: dict[str, Any] = field(default_factory=dict)

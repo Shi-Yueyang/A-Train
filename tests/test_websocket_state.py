@@ -25,8 +25,7 @@ T1 = TrainConfig(
     cab_ids=(1,),
     initial_active_cab=1,
     max_traction_accel=1.0,
-    max_service_brake_decel=1.0,
-    max_emergency_brake_decel=2.0,
+    max_decel=2.0,
 )
 
 

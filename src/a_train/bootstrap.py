@@ -39,8 +39,7 @@ DEFAULT_TRAIN_CONFIGS: tuple[TrainConfig, ...] = (
         cab_ids=(1, 2),
         initial_active_cab=1,
         max_traction_accel=1.5,
-        max_service_brake_decel=1.2,
-        max_emergency_brake_decel=2.0,
+        max_decel=2.0,
         initial_position=0.0,
     ),
 )

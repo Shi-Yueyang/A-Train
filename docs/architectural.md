@@ -115,7 +115,7 @@ Train
     └── External ATP Process 2
 ```
 
-The simulator communicates with ATP via TCP/NDJSON. ATP processes are independent. A failure of one should not crash the simulator. No fail-safe behavior (e.g. automatic braking on ATP loss) is defined; see non-goals.
+The simulator communicates with ATP via TCP/NDJSON. ATP processes are independent. A failure of one should not crash the simulator. No fail-safe behavior (e.g. automatic deceleration on ATP loss) is defined; see non-goals.
 
 **Browser** is a presentation and control client. It must not contain core simulation logic.
 
@@ -307,7 +307,7 @@ access core or domain objects directly.
 
 The integration suite must cover complete workflows for run/pause/reset,
 real-time multiplier configuration, train movement, BTM transmission, and ATP
-brake commands. Each test uses a fixed random seed so a failure can be
+state commands. Each test uses a fixed random seed so a failure can be
 reproduced exactly.
 
 # 3. Train Model
@@ -324,58 +324,57 @@ snapshots for publication, and only the core invokes the train's per-step
 update method.
 
 ATP requests train actions; it never sets position, speed, or acceleration
-directly. The train model determines the physical result of traction and brake
-requests.
+directly. The train model determines the physical result of drive requests.
 
 ## 3.2 Configuration and State
 
 Each train has immutable configuration and mutable runtime state.
 
-| Category       | Required values                                                                                                                                                                  |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Configuration  | Train ID, one or two cab IDs, initial active cab, initial position, maximum traction acceleration, maximum service-brake deceleration, and maximum emergency-brake deceleration. |
-| Physical state | Position in metres, speed in metres per second, and acceleration in metres per second squared.                                                                                   |
-| Control state  | Traction demand, service-brake demand, emergency-brake latch, and door state.                                                                                                    |
+| Category       | Required values                                                                                                            |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Configuration  | Train ID, one or two cab IDs, initial active cab, initial position, maximum traction acceleration, and maximum deceleration. |
+| Physical state | Position in metres, speed in metres per second, and acceleration in metres per second squared.                              |
+| Control state  | Signed drive demand and door state.                                                                                         |
 
 The initial active cab and initial physical state are supplied by simulator
 configuration. `reset` restores those configured values and clears all control
-state, including the emergency-brake latch and door state.
+state, including the door state.
 
 Acceleration limits are positive, finite, per-train configuration values.
-Emergency-brake deceleration must be at least the configured service-brake
-deceleration. This version models forward-only movement: position never
-decreases and speed never becomes negative.
+Drive demand is a signed, normalized lever in `[-1.0, 1.0]`: positive scales
+the maximum traction acceleration, negative scales the maximum deceleration.
+The model knows force and speed only; there is no separate brake concept.
+This version models forward-only movement: position never decreases and speed
+never becomes negative.
 
 ## 3.3 Controls and Cab Authority
 
 The train accepts these normalized commands from its active cab:
 
-| Command              | Range or value     | Effect                                                                    |
-| -------------------- | ------------------ | ------------------------------------------------------------------------- |
-| Traction demand      | `0.0` to `1.0` | Requests a proportion of maximum traction acceleration.                   |
-| Service-brake demand | `0.0` to `1.0` | Requests a proportion of maximum service-brake deceleration.              |
-| Emergency brake      | Applied or release | Applies latched maximum emergency-brake deceleration or requests release. |
-| Door command         | Open or close      | Changes the train door state.                                             |
+| Command              | Range or value     | Effect                                                                                                  |
+| -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
+| Drive demand         | `-1.0` to `1.0` | Signed normalized force lever: positive requests a proportion of maximum traction acceleration, negative requests a proportion of maximum deceleration. |
+| Door command         | Open or close      | Changes the train door state.                                                                            |
 
 ## 3.4 Per-Step Dynamics
 
 The simulation core updates every train once for each fixed simulation step in
 stable train-ID order. For a step duration `dt`, the train resolves one
-acceleration value using this priority:
+acceleration value from the signed drive demand:
 
-1. If the emergency-brake latch is applied, use negative maximum emergency-brake deceleration.
-2. Otherwise, if service-brake demand is greater than zero, use negative maximum service-brake deceleration scaled by the demand.
-3. Otherwise, if traction demand is greater than zero and all doors are closed, use maximum traction acceleration scaled by the demand.
-4. Otherwise, use zero acceleration.
+1. If drive demand is greater than zero and all doors are closed, use maximum traction acceleration scaled by the demand.
+2. Otherwise, if drive demand is less than zero, use negative maximum deceleration scaled by the demand magnitude.
+3. Otherwise, use zero acceleration.
 
 The model integrates the resolved acceleration over `dt`, clamps the resulting
 speed to zero or greater, and updates position using the average of the prior
-and resulting speed. If braking would bring the train to rest within a step,
-the model clamps speed to zero and uses only the distance travelled before
-stopping. It must not create reverse movement through numerical integration.
+and resulting speed. If deceleration would bring the train to rest within a
+step, the model clamps speed to zero and uses only the distance travelled
+before stopping. It must not create reverse movement through numerical
+integration.
 
 Acceleration recorded in the public snapshot is the acceleration actually
-applied during that step. At standstill with no effective traction command, it
+applied during that step. At standstill with no effective drive command, it
 is zero.
 
 ## 3.5 Train-Facing Equipment Boundary
@@ -415,7 +414,7 @@ train snapshot; it never exposes the aggregate or mutable equipment objects.
 Represent configuration with frozen dataclasses and runtime state with private
 mutable dataclasses. Validate all numeric configuration and control inputs at
 the boundary: values must be finite, acceleration limits must be positive, and
-normalized demands must be in the inclusive range `0.0` through `1.0`.
+normalized demands must be in the inclusive range `-1.0` through `1.0`.
 
 ### Physics Integration
 
@@ -440,7 +439,7 @@ $$
 x_1 = x_0 + \frac{v_0 + v_1}{2} \cdot dt
 $$
 
-When braking would make $v_1 < 0$, calculate the stopping duration
+When deceleration would make $v_1 < 0$, calculate the stopping duration
 $t_{stop} = -v_0 / a$, advance only for $t_{stop}$, and return zero speed and
 zero acceleration. This makes manual and wall-clock modes share identical
 train movement behavior.
@@ -449,20 +448,20 @@ train movement behavior.
 
 Model each train-facing equipment capability behind a narrow interface owned
 by the train aggregate. An equipment component may keep private mutable state,
-accept commands or deliveries, update during `step(dt)`, and create its own
-immutable snapshot. It must not import adapters, access the simulation clock,
+accept plain-value controls or deliveries, and create its own immutable
+snapshot. It must not import adapters, access the simulation clock,
 or modify train physical state directly.
 
 ```text
 Equipment component
-  receive(command_or_delivery)
-  step(dt)
-  get_snapshot()
+  key                       # equipment type identifier
+  apply_control(...)        # plain-value command or delivery (per component)
+  read_state()
   reset()
 ```
 
 The aggregate coordinates components in a documented, stable order: apply
-accepted controls, update equipment, resolve train dynamics, then construct the
+accepted controls, resolve train dynamics, then construct the
 snapshot. New equipment such as vigilance, pantograph control, passenger
 systems, or a train-type-specific I/O device can be added by implementing this
 interface and extending the aggregate's configuration and snapshot types. Do
@@ -500,12 +499,12 @@ ATP must never directly modify the train's physical state. For example:
 ```text
 ATP
  │
- │ emergency_brake = true
+ │ drive demand = -1.0
  ▼
-Train Brake Controller
+Train Control
  │
  ▼
-Brake Force
+Decelerating Force
  │
  ▼
 Train Physics
@@ -639,7 +638,7 @@ Example:
   "position": 15320.4,
   "direction": "forward",
 
-  "train_to_atp": "1110"
+  "train_to_atp": "110"
 }
 ```
 
@@ -662,7 +661,7 @@ Example:
 ```json
 {
   "type": "atp_state",
-  "atp_to_train": "100"
+  "atp_to_train": "10"
 }
 ```
 
@@ -716,33 +715,31 @@ Example configuration:
 | 0   | cab_active       |
 | 1   | doors_closed     |
 | 2   | vigilance        |
-| 3   | emergency_handle |
 
 Example:
 
 ```json
-"train_to_atp": "1100"
+"train_to_atp": "110"
 ```
 
-Means: cab_active=1, doors_closed=1, vigilance=0, emergency_handle=0.
+Means: cab_active=1, doors_closed=1, vigilance=0.
 
 **ATP → Train** (`atp_to_train`):
 
 Example configuration:
 
-| Bit | Signal          |
-| --- | --------------- |
-| 0   | warning         |
-| 1   | service_brake   |
-| 2   | emergency_brake |
+| Bit | Signal             |
+| --- | ------------------ |
+| 0   | warning            |
+| 1   | supervision_active |
 
 Example:
 
 ```json
-"atp_to_train": "100"
+"atp_to_train": "10"
 ```
 
-Means: warning=1, service_brake=0, emergency_brake=0.
+Means: warning=1, supervision_active=0.
 
 ---
 
@@ -782,9 +779,12 @@ POST   /api/simulation/time-mode
 
 POST   /api/signals/{id}
 POST   /api/trains/{id}/commands
-
-POST   /api/btm/inject
+POST   /api/trains/{id}/equipment/{key}
 ```
+
+`POST /api/trains/{id}/equipment/{key}` is the generic equipment boundary:
+the JSON body is mapped to a transport-neutral equipment command and applied
+immediately by the core. See `api-spec.md` for the per-equipment fields.
 
 `POST /api/simulation/start` invokes the core's idempotent `run()` command.
 `POST /api/simulation/time-mode` accepts a mode and, for `SCALED` mode, a
@@ -795,12 +795,11 @@ the core; it does not modify simulation objects directly.
 Example:
 
 ```http
-POST /api/btm/inject
+POST /api/trains/TRAIN001/equipment/btm
 ```
 
 ```json
 {
-  "train_id": "TRAIN001",
   "cab_id": 1,
   "data": "ASOk/wCBcg=="
 }
@@ -923,7 +922,7 @@ train-simulator/
 │   ├── domain/                     # Train-world rules; independent of time loop and external transports.
 │   │   ├── __init__.py             # Public domain types.
 │   │   ├── train.py                # Train aggregate and stable per-step update entry point.
-│   │   ├── physics.py              # Traction, braking, acceleration, speed, and position calculations.
+│   │   ├── physics.py              # Drive force, acceleration, speed, and position calculations.
 │   │   ├── equipment.py            # Doors, cabs, BTM equipment, and train-local I/O behavior.
 │   │   ├── signals.py              # Linear-track signal state and signal-aspect rules.
 │   │   └── io.py                   # Named digital-signal definitions and bit-string conversion.
@@ -960,6 +959,7 @@ train-simulator/
 │
 ├── docs/
 │   ├── architectural.md            # System architecture and module contracts.
+│   ├── api-spec.md                 # Implemented HTTP/WebSocket API contract.
 │   └── TODO.md                     # Deferred implementation work.
 │
 ├── pyproject.toml                  # Build metadata, dependencies, tooling, and test configuration.

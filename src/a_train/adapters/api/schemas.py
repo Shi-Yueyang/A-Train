@@ -10,6 +10,8 @@ errors as HTTP 400 via the core's ``CommandResult``.
 
 from __future__ import annotations
 
+import dataclasses
+
 from pydantic import BaseModel, Field
 
 from ...domain.snapshots import TrainSnapshot
@@ -39,39 +41,32 @@ class TrainControlRequest(BaseModel):
     """A normalized train-control request routed to the active cab (§3.3)."""
 
     cab_id: int = Field(description="The cab issuing the command; must be the active cab.")
-    traction_demand: float | None = Field(
-        default=None, description="Proportion of max traction in [0.0, 1.0]."
-    )
-    service_brake_demand: float | None = Field(
-        default=None, description="Proportion of max service brake in [0.0, 1.0]."
-    )
-    emergency_brake: bool | None = Field(
+    drive_demand: float | None = Field(
         default=None,
-        description="True applies the latch, False requests release, None is unchanged.",
+        description="Signed drive lever in [-1.0, 1.0]: positive drives, negative decelerates.",
     )
-    door: str | None = Field(default=None, description="'open' or 'close'.")
 
 
-class CabSnapshotModel(BaseModel):
-    cab_id: int
-    active: bool = False
+class EquipmentSetRequest(BaseModel):
+    """Body for the generic equipment-set endpoint (§3.5).
 
+    Each equipment type uses a subset of the fields; the train dispatcher
+    validates what is required: door -> command, cab -> cab_id + command,
+    btm -> cab_id + data (base64), io -> direction + (bits | values).
+    """
 
-class DoorSnapshotModel(BaseModel):
-    state: str = "closed"
-
-
-class BtmSnapshotModel(BaseModel):
-    cab_id: int = 0
-    pending: bool = False
-    payload_b64: str | None = None
-    received_count: int = 0
-
-
-class IoSnapshotModel(BaseModel):
-    train_to_atp: str = ""
-    atp_to_train: str = ""
-    values: dict[str, bool] = {}
+    command: str | None = Field(
+        default=None,
+        description="Named command: 'open'/'close' (door), 'activate'/'deactivate' (cab).",
+    )
+    cab_id: int | None = Field(default=None, description="Target cab (cab, btm).")
+    data: str | None = Field(default=None, description="Base64-encoded opaque payload (btm, §4.6).")
+    direction: str | None = Field(
+        default=None,
+        description="I/O direction: 'train_to_atp' or 'atp_to_train'.",
+    )
+    bits: str | None = Field(default=None, description="Raw bit string, bit 0 leftmost (io).")
+    values: dict[str, bool] | None = Field(default=None, description="Named on/off values (io).")
 
 
 class TrainResponse(BaseModel):
@@ -82,18 +77,27 @@ class TrainResponse(BaseModel):
     acceleration: float
     position: float
     direction: str
-    traction_demand: float
-    service_brake_demand: float
-    emergency_brake: bool
-    door_state: str
-    cab: list[CabSnapshotModel]
-    doors: DoorSnapshotModel | None = None
-    btm: list[BtmSnapshotModel]
-    io: IoSnapshotModel | None = None
+    drive_demand: float
+    equipment: dict[str, object] = {}
 
 
 class TrainsResponse(BaseModel):
     trains: list[TrainResponse]
+
+
+def _serialize_equipment(equipment: dict[str, object]) -> dict[str, object]:
+    """Serialize frozen equipment snapshots to JSON-safe dicts."""
+
+    def _serialize(value: object) -> object:
+        if dataclasses.is_dataclass(value):
+            return dataclasses.asdict(value)
+        if isinstance(value, tuple):
+            return [_serialize(item) for item in value]
+        if isinstance(value, list):
+            return [_serialize(item) for item in value]
+        return value
+
+    return {key: _serialize(snapshot) for key, snapshot in equipment.items()}
 
 
 def train_snapshot_to_response(snap: TrainSnapshot) -> TrainResponse:
@@ -105,30 +109,8 @@ def train_snapshot_to_response(snap: TrainSnapshot) -> TrainResponse:
         acceleration=snap.acceleration,
         position=snap.position,
         direction=snap.direction,
-        traction_demand=snap.traction_demand,
-        service_brake_demand=snap.service_brake_demand,
-        emergency_brake=snap.emergency_brake,
-        door_state=snap.door_state,
-        cab=[CabSnapshotModel(cab_id=c.cab_id, active=c.active) for c in snap.cab],
-        doors=DoorSnapshotModel(state=snap.doors.state) if snap.doors else None,
-        btm=[
-            BtmSnapshotModel(
-                cab_id=b.cab_id,
-                pending=b.pending,
-                payload_b64=b.payload_b64,
-                received_count=b.received_count,
-            )
-            for b in snap.btm
-        ],
-        io=(
-            IoSnapshotModel(
-                train_to_atp=snap.io.train_to_atp,
-                atp_to_train=snap.io.atp_to_train,
-                values={name: value for name, value in snap.io.values},
-            )
-            if snap.io
-            else None
-        ),
+        drive_demand=snap.drive_demand,
+        equipment=_serialize_equipment(snap.equipment),
     )
 
 
@@ -141,30 +123,8 @@ def _train_to_dict(snap: TrainSnapshot) -> dict:
         "acceleration": snap.acceleration,
         "position": snap.position,
         "direction": snap.direction,
-        "traction_demand": snap.traction_demand,
-        "service_brake_demand": snap.service_brake_demand,
-        "emergency_brake": snap.emergency_brake,
-        "door_state": snap.door_state,
-        "cab": [{"cab_id": c.cab_id, "active": c.active} for c in snap.cab],
-        "doors": {"state": snap.doors.state} if snap.doors else None,
-        "btm": [
-            {
-                "cab_id": b.cab_id,
-                "pending": b.pending,
-                "payload_b64": b.payload_b64,
-                "received_count": b.received_count,
-            }
-            for b in snap.btm
-        ],
-        "io": (
-            {
-                "train_to_atp": snap.io.train_to_atp,
-                "atp_to_train": snap.io.atp_to_train,
-                "values": {name: value for name, value in snap.io.values},
-            }
-            if snap.io
-            else None
-        ),
+        "drive_demand": snap.drive_demand,
+        "equipment": _serialize_equipment(snap.equipment),
     }
 
 

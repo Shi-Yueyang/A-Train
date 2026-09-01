@@ -50,24 +50,13 @@
         </div>
         <div class="controls">
           <fieldset>
-            <legend>Traction demand</legend>
-            <input id="traction" type="range" min="0" max="1" step="0.01" value="0" />
-            <output id="traction-val">0.00</output>
+            <legend>Drive demand</legend>
+            <input id="drive" type="range" min="-1" max="1" step="0.01" value="0" />
+            <output id="drive-val">0.00</output>
           </fieldset>
-          <fieldset>
-            <legend>Service brake demand</legend>
-            <input id="service" type="range" min="0" max="1" step="0.01" value="0" />
-            <output id="service-val">0.00</output>
-          </fieldset>
-          <button id="btn-apply-demands">Apply Demands</button>
+          <button id="btn-apply-demand">Apply Demand</button>
         </div>
         <div class="controls">
-          <fieldset>
-            <legend>Emergency brake</legend>
-            <button id="btn-eb-apply">Apply</button>
-            <button id="btn-eb-release">Release</button>
-            <output id="eb-state">released</output>
-          </fieldset>
           <fieldset>
             <legend>Doors</legend>
             <button id="btn-door-open">Open</button>

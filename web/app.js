@@ -15,7 +15,7 @@ const state = {
   error: null,
   notice: null,
   ws: "connecting",
-  dirty: { traction: false, service: false },
+  dirty: { drive: false },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -154,34 +154,33 @@ function renderTrainState() {
     pre.textContent = "no trains";
     return;
   }
+  const doorState = (sel.equipment && sel.equipment.door && sel.equipment.door.state) || "—";
   const lines = [
     `train_id        ${sel.train_id}`,
     `active_cab      ${sel.active_cab}  (cabs: ${sel.cab_ids.join(", ")})`,
     `position        ${fmt(sel.position)} m`,
     `speed           ${fmt(sel.speed)} m/s`,
     `acceleration    ${fmt(sel.acceleration)} m/s^2`,
-    `traction        ${fmt(sel.traction_demand)}`,
-    `service_brake   ${fmt(sel.service_brake_demand)}`,
-    `emergency_brake ${sel.emergency_brake}`,
-    `door_state      ${sel.door_state}`,
+    `drive_demand    ${fmt(sel.drive_demand)}`,
+    `door_state      ${doorState}`,
   ];
-  if (sel.io) {
-    lines.push(`train_to_atp    ${sel.io.train_to_atp}`);
-    lines.push(`atp_to_train    ${sel.io.atp_to_train}`);
+  const io = sel.equipment && sel.equipment.io;
+  if (io) {
+    lines.push(`train_to_atp    ${io.train_to_atp}`);
+    lines.push(`atp_to_train    ${io.atp_to_train}`);
   }
-  if (sel.btm && sel.btm.length) {
+  const btm = sel.equipment && sel.equipment.btm;
+  if (btm && btm.length) {
     lines.push(
-      `btm             ${sel.btm
+      `btm             ${btm
         .map((b) => `cab${b.cab_id}:${b.received_count}`)
         .join(" ")}`
     );
   }
   pre.textContent = lines.join("\n");
 
-  $("eb-state").textContent = sel.emergency_brake ? "applied" : "released";
-  $("door-state").textContent = sel.door_state;
-  syncSlider("traction", sel.traction_demand);
-  syncSlider("service", sel.service_brake_demand);
+  $("door-state").textContent = doorState;
+  syncSlider("drive", sel.drive_demand);
 }
 
 // Sync a demand slider from the live snapshot, but never while it holds the
@@ -278,8 +277,7 @@ function bind() {
   $("btn-reset").onclick = async () => {
     await postCommand("/simulation/reset", {});
     if (!state.error) {
-      state.dirty.traction = false;
-      state.dirty.service = false;
+      state.dirty.drive = false;
     }
   };
   $("btn-set-mode").onclick = () => {
@@ -294,8 +292,7 @@ function bind() {
     state.selectedTrainId = e.target.value;
     const sel = selectedTrain();
     state.selectedCab = sel ? sel.active_cab : null;
-    state.dirty.traction = false;
-    state.dirty.service = false;
+    state.dirty.drive = false;
     render();
   };
   $("cab-select").onchange = (e) => {
@@ -303,44 +300,26 @@ function bind() {
     render();
   };
 
-  $("traction").oninput = (e) => {
-    state.dirty.traction = true;
-    $("traction-val").textContent = fmt(parseFloat(e.target.value), 2);
+  $("drive").oninput = (e) => {
+    state.dirty.drive = true;
+    $("drive-val").textContent = fmt(parseFloat(e.target.value), 2);
   };
-  $("service").oninput = (e) => {
-    state.dirty.service = true;
-    $("service-val").textContent = fmt(parseFloat(e.target.value), 2);
-  };
-  $("btn-apply-demands").onclick = async () => {
+  $("btn-apply-demand").onclick = async () => {
     await postCommand(`/trains/${state.selectedTrainId}/commands`, {
       cab_id: state.selectedCab,
-      traction_demand: parseFloat($("traction").value),
-      service_brake_demand: parseFloat($("service").value),
+      drive_demand: parseFloat($("drive").value),
     });
     if (!state.error) {
-      state.dirty.traction = false;
-      state.dirty.service = false;
+      state.dirty.drive = false;
     }
   };
-  $("btn-eb-apply").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/commands`, {
-      cab_id: state.selectedCab,
-      emergency_brake: true,
-    });
-  $("btn-eb-release").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/commands`, {
-      cab_id: state.selectedCab,
-      emergency_brake: false,
-    });
   $("btn-door-open").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/commands`, {
-      cab_id: state.selectedCab,
-      door: "open",
+    postCommand(`/trains/${state.selectedTrainId}/equipment/door`, {
+      command: "open",
     });
   $("btn-door-close").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/commands`, {
-      cab_id: state.selectedCab,
-      door: "close",
+    postCommand(`/trains/${state.selectedTrainId}/equipment/door`, {
+      command: "close",
     });
 }
 

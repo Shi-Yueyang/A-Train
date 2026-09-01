@@ -25,6 +25,7 @@ from .commands import (
     AtpStateCommand,
     Command,
     CommandResult,
+    EquipmentCommand,
     PauseCommand,
     ResetCommand,
     RunCommand,
@@ -184,6 +185,8 @@ class SimulationCore:
                 return self._apply_step(command)
             if isinstance(command, TrainControlCommand):
                 return self._apply_train_control(command)
+            if isinstance(command, EquipmentCommand):
+                return self._apply_equipment(command)
             if isinstance(command, _WORLD_COMMAND_TYPES):
                 self._world_buffer.append(command)
                 return CommandResult()
@@ -251,6 +254,13 @@ class SimulationCore:
         if train is None:
             return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
         result = train.apply_control(command.payload)
+        return CommandResult(ok=result.ok, error=result.error)
+
+    def _apply_equipment(self, command: EquipmentCommand) -> CommandResult:
+        train = self._trains.get(command.train_id)
+        if train is None:
+            return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
+        result = train.set_equipment(command.payload)
         return CommandResult(ok=result.ok, error=result.error)
 
     # -- Fixed-step update cycle (§2.5) ----------------------------------

@@ -63,14 +63,14 @@ and transport-neutral snapshots.
   `get_snapshot`, and `reset`.
 * Define frozen per-train configuration and private mutable physical and
   control state.
-* Validate train configuration, cab identity, and normalized traction and
-  service-brake demands at the aggregate boundary.
-* Implement pure fixed-step physics for traction, service braking, emergency
-  braking, zero-speed clamping, and forward-only position integration.
-* Implement cab and door state, BTM equipment, and digital I/O as train-facing
-  components with `receive`, `step`, `get_snapshot`, and `reset` lifecycles.
-* Define the stable aggregate update order: apply accepted controls, update
-  equipment, resolve dynamics, then construct a snapshot.
+* Validate train configuration, cab identity, and the normalized signed
+  drive demand at the aggregate boundary.
+* Implement pure fixed-step physics for drive force, zero-speed clamping,
+  and forward-only position integration.
+* Implement cab, door, BTM equipment, and digital I/O as train-facing
+  components with plain-value control calls, `read_state`, and `reset`.
+* Define the stable aggregate update order: apply accepted controls, resolve
+  dynamics, then construct a snapshot.
 * Implement stable train-ID update order and immutable train snapshots with
   optional nested equipment snapshots.
 * Build bounded subscriber queues for simulation snapshots.
@@ -82,9 +82,10 @@ and transport-neutral snapshots.
 * A valid train-control request submitted through REST changes train control
   state only at the defined simulation boundary; invalid train, cab, or demand
   input returns a clear error and leaves state unchanged.
-* At each fixed step, emergency braking takes priority over service braking,
-  and service braking takes priority over traction.
-* Braking that would stop a train during a step leaves its speed and applied
+* At each fixed step, positive drive demand scales the traction limit and is
+  gated by door-closed state; negative drive demand scales the deceleration
+  limit.
+* Deceleration that would stop a train during a step leaves its speed and applied
   acceleration at zero and never decreases its position.
 * A train reset restores its configured physical state and clears control and
   equipment runtime state.
@@ -110,8 +111,8 @@ the complete browser client planned for Phase 4.
   time, and each train's position, speed, acceleration, and control state.
 * Provide controls to run, pause, reset, select `MANUAL` or `SCALED` mode, set
   a time multiplier, and advance a configurable manual step.
-* Provide controls for traction demand, service-brake demand, emergency-brake
-  application and release, and door state for a selected train and cab.
+* Provide controls for the signed drive demand and for door state for a
+  selected train and cab.
 * Subscribe to the `/ws` snapshot stream on page load and render every received
   snapshot. Commands are submitted through the REST API; the resulting snapshot
   is delivered back over the WebSocket, so the page never polls.
@@ -124,9 +125,9 @@ the complete browser client planned for Phase 4.
 
 * A human can start the simulator, open the served page, and observe the
   initial `STOPPED` state and simulation time `0.0`.
-* In `MANUAL` mode, a human can apply traction, advance time, and observe
-  increasing position and speed; applying service or emergency braking then
-  visibly reduces speed without allowing reverse motion.
+* In `MANUAL` mode, a human can apply a positive drive demand, advance time,
+  and observe increasing position and speed; applying a negative drive demand
+  then visibly reduces speed without allowing reverse motion.
 * Run, pause, reset, time-mode changes, door commands, and invalid control
   inputs produce the same observable state or error result as their REST API
   responses.
@@ -154,7 +155,7 @@ Implement the external ATP boundary and connect it to the running simulation.
   the `HELLO` / `HELLO_ACK` exchange for each configured cab.
 * A manual simulation step produces a correctly framed `TRAIN_STATE` message
   with the matching train and cab identifiers.
-* An `ATP_STATE` message from the test server affects train braking through the
+* An `ATP_STATE` message from the test server affects train dynamics through the
   train model; it never directly sets speed or position.
 * Disconnecting or sending malformed data from one ATP test server is reported
   without stopping the simulation or another cab's connection.

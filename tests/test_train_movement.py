@@ -1,6 +1,6 @@
 """Phase 2 acceptance tests — train world and public state (TODO.md §Phase 2).
 
-Covers the train aggregate API, physics priority and stop-within-step clamping,
+Covers the train aggregate API, signed drive demand and stop-within-step clamping,
 reset, equipment snapshots, REST train-control validation, and snapshot
 immutability. All driven through the public REST API against the real
 application; no core/domain object is touched directly (§6.1).
@@ -20,8 +20,7 @@ T1 = TrainConfig(
     cab_ids=(1, 2),
     initial_active_cab=1,
     max_traction_accel=1.0,
-    max_service_brake_decel=1.0,
-    max_emergency_brake_decel=2.0,
+    max_decel=2.0,
     initial_position=0.0,
 )
 T2 = TrainConfig(
@@ -29,8 +28,7 @@ T2 = TrainConfig(
     cab_ids=(1,),
     initial_active_cab=1,
     max_traction_accel=2.0,
-    max_service_brake_decel=1.5,
-    max_emergency_brake_decel=3.0,
+    max_decel=3.0,
     initial_position=100.0,
 )
 
@@ -62,9 +60,7 @@ def _signature(snap: dict) -> dict:
             round(t["speed"], 12),
             round(t["position"], 12),
             round(t["acceleration"], 12),
-            t["traction_demand"],
-            t["service_brake_demand"],
-            t["emergency_brake"],
+            t["drive_demand"],
         )
         for t in snap["trains"]
     }
@@ -74,8 +70,8 @@ async def test_multiple_trains_produce_repeatable_snapshots() -> None:
     async def run_once() -> dict:
         async with running_app([T1, T2]) as c:
             await _manual_start(c)
-            await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0)
-            await _control(c, "TRAIN002", cab_id=1, traction_demand=0.5)
+            await _control(c, "TRAIN001", cab_id=1, drive_demand=1.0)
+            await _control(c, "TRAIN002", cab_id=1, drive_demand=0.5)
             await _step(c, 0.50)
             return (await c.get("/api/trains")).json()
 
@@ -89,13 +85,13 @@ async def test_multiple_trains_produce_repeatable_snapshots() -> None:
 async def test_reset_and_repeat_gives_the_same_snapshot() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
-        await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0)
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=1.0)
         await _step(c, 0.25)
         before = _signature((await c.get("/api/trains")).json())
 
         await c.post("/api/simulation/reset")
         await _manual_start(c)
-        await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0)
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=1.0)
         await _step(c, 0.25)
         after = _signature((await c.get("/api/trains")).json())
 
@@ -109,104 +105,84 @@ async def test_valid_control_changes_state_and_invalid_is_rejected() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
         initial = await _train(c, "TRAIN001")
-        assert initial["traction_demand"] == 0.0
+        assert initial["drive_demand"] == 0.0
         assert initial["speed"] == 0.0
 
         # Valid request: control state changes through the core, physics not yet.
-        after = await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0)
-        assert after["traction_demand"] == 1.0
+        after = await _control(c, "TRAIN001", cab_id=1, drive_demand=1.0)
+        assert after["drive_demand"] == 1.0
         assert after["speed"] == 0.0  # physics advances only at a fixed step
         assert after["position"] == 0.0
 
         # Invalid demand -> 400, state unchanged.
         r = await c.post(
             "/api/trains/TRAIN001/commands",
-            json={"cab_id": 1, "traction_demand": 1.5},
+            json={"cab_id": 1, "drive_demand": 1.5},
         )
         assert r.status_code == 400
-        assert (await _train(c, "TRAIN001"))["traction_demand"] == 1.0
+        assert (await _train(c, "TRAIN001"))["drive_demand"] == 1.0
 
         # Invalid cab (not active) -> 400, state unchanged.
         r = await c.post(
             "/api/trains/TRAIN001/commands",
-            json={"cab_id": 2, "traction_demand": 0.4},
+            json={"cab_id": 2, "drive_demand": 0.4},
         )
         assert r.status_code == 400
-        assert (await _train(c, "TRAIN001"))["traction_demand"] == 1.0
+        assert (await _train(c, "TRAIN001"))["drive_demand"] == 1.0
 
         # Unknown train -> 400, state unchanged.
         r = await c.post(
             "/api/trains/NOPE/commands",
-            json={"cab_id": 1, "traction_demand": 0.4},
+            json={"cab_id": 1, "drive_demand": 0.4},
         )
         assert r.status_code == 400
 
-        # Door open closes off traction even with a demand set.
-        await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0, door="open")
-        await _step(c, FIXED_STEP)
-        moving_open = await _train(c, "TRAIN001")
-        assert moving_open["speed"] == 0.0  # doors open -> no traction
+
+# -- Criterion: signed demand resolves acceleration at each fixed step ---------
 
 
-# -- Criterion: braking priority (emergency > service > traction) --------------
-
-
-async def test_braking_priority_at_each_fixed_step() -> None:
+async def test_drive_demand_sign_applied_at_each_fixed_step() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
-        # Get moving first so braking does not stop within a single step.
-        await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0)
+        # Get moving first so deceleration does not stop within a single step.
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=1.0)
         await _step(c, 1.0)  # speed == 1.0, accel == 1.0
 
-        # Service brake (1.0) wins over traction (1.0).
-        await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0, service_brake_demand=1.0)
+        # Half negative demand scales max_decel (2.0 * -0.5 = -1.0).
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=-0.5)
         await _step(c, FIXED_STEP)
         snap = await _train(c, "TRAIN001")
         assert snap["acceleration"] == pytest.approx(-1.0, abs=1e-9)
         assert snap["speed"] < 1.0  # decelerating
 
-        # Emergency brake wins over service + traction.
-        await _control(
-            c,
-            "TRAIN001",
-            cab_id=1,
-            traction_demand=1.0,
-            service_brake_demand=1.0,
-            emergency_brake=True,
-        )
+        # Full negative demand scales max_decel.
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=-1.0)
         await _step(c, FIXED_STEP)
         snap = await _train(c, "TRAIN001")
         assert snap["acceleration"] == pytest.approx(-2.0, abs=1e-9)
 
-        # Releasing emergency lets service take priority again.
-        await _control(
-            c,
-            "TRAIN001",
-            cab_id=1,
-            traction_demand=1.0,
-            service_brake_demand=1.0,
-            emergency_brake=False,
-        )
+        # Zero demand coasts with zero acceleration.
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=0.0)
         await _step(c, FIXED_STEP)
         snap = await _train(c, "TRAIN001")
-        assert snap["acceleration"] == pytest.approx(-1.0, abs=1e-9)
+        assert snap["acceleration"] == pytest.approx(0.0, abs=1e-9)
 
 
 # -- Criterion: stop-within-step clamps speed/accel to zero, position not decreased
 
 
-async def test_braking_that_stops_within_a_step() -> None:
+async def test_deceleration_that_stops_within_a_step() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
-        # Reach a small speed of 0.05 m/s (one fixed step of traction 1.0).
-        await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0)
+        # Reach a small speed of 0.05 m/s (one fixed step of demand 1.0).
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=1.0)
         await _step(c, FIXED_STEP)
         moving = await _train(c, "TRAIN001")
         assert moving["speed"] == pytest.approx(0.05, abs=1e-12)
         position_before = moving["position"]
 
-        # Emergency brake (-2.0) would reverse within this step: stop at rest.
-        await _control(c, "TRAIN001", cab_id=1, emergency_brake=True)
+        # Demand -1.0 (decel 2.0) would reverse within this step: stop at rest.
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=-1.0)
         await _step(c, FIXED_STEP)
         stopped = await _train(c, "TRAIN001")
 
@@ -216,7 +192,7 @@ async def test_braking_that_stops_within_a_step() -> None:
         # Distance travelled before stopping: v0/2 * t_stop = 0.05/2 * 0.025.
         assert stopped["position"] == pytest.approx(position_before + 0.000625, abs=1e-12)
 
-        # Further braking at rest keeps it at rest with zero acceleration.
+        # Further decelerating demand at rest keeps it at rest with zero acceleration.
         await _step(c, FIXED_STEP)
         still = await _train(c, "TRAIN001")
         assert still["speed"] == 0.0
@@ -230,31 +206,25 @@ async def test_braking_that_stops_within_a_step() -> None:
 async def test_train_reset_restores_state_and_clears_equipment() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
-        await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0)  # door closed
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=1.0)
         await _step(c, 0.50)  # moves
-        await _control(c, "TRAIN001", cab_id=1, door="open")  # open door (traction blocked)
-        await _step(c, FIXED_STEP)  # coasts with the door open
         moved = await _train(c, "TRAIN001")
         assert moved["position"] > 0.0
         assert moved["speed"] > 0.0
-        assert moved["door_state"] == "open"
-        assert moved["traction_demand"] == 1.0
-        # Equipment fed state during the step.
-        assert moved["io"]["train_to_atp"][1] == "0"  # doors_closed == 0
+        assert moved["drive_demand"] == 1.0
 
         await c.post("/api/simulation/reset")
         reset_state = await _train(c, "TRAIN001")
         assert reset_state["position"] == 0.0  # configured initial
         assert reset_state["speed"] == 0.0
         assert reset_state["acceleration"] == 0.0
-        assert reset_state["traction_demand"] == 0.0
-        assert reset_state["service_brake_demand"] == 0.0
-        assert reset_state["emergency_brake"] is False
-        assert reset_state["door_state"] == "closed"
+        assert reset_state["drive_demand"] == 0.0
+        assert reset_state["equipment"]["door"]["state"] == "closed"
         assert reset_state["active_cab"] == 1
         # Equipment runtime state cleared back to defaults.
-        assert reset_state["io"]["train_to_atp"] == "0000"
-        assert all(b["pending"] is False and b["received_count"] == 0 for b in reset_state["btm"])
+        assert reset_state["equipment"]["io"]["train_to_atp"] == "000"
+        btm = reset_state["equipment"]["btm"]
+        assert all(b["pending"] is False and b["received_count"] == 0 for b in btm)
 
 
 # -- Criterion: equipment adds optional nested snapshots, physical fields intact
@@ -263,7 +233,7 @@ async def test_train_reset_restores_state_and_clears_equipment() -> None:
 async def test_equipment_nested_snapshots_do_not_change_physical_fields() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
-        await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0)
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=1.0)
         await _step(c, FIXED_STEP)
         snap = await _train(c, "TRAIN001")
 
@@ -272,23 +242,18 @@ async def test_equipment_nested_snapshots_do_not_change_physical_fields() -> Non
             assert field in snap
         assert snap["direction"] == "forward"
 
-        # Equipment is exposed as optional nested snapshots.
-        assert isinstance(snap["cab"], list) and len(snap["cab"]) == 2
-        assert snap["cab"][0]["cab_id"] == 1 and snap["cab"][0]["active"] is True
-        assert snap["cab"][1]["active"] is False
-        assert snap["doors"]["state"] == "closed"
-        assert isinstance(snap["btm"], list) and snap["btm"]
+        # Equipment is exposed as optional nested snapshots; cabs are equipment.
+        assert isinstance(snap["equipment"]["cab"], list) and len(snap["equipment"]["cab"]) == 2
+        assert (
+            snap["equipment"]["cab"][0]["cab_id"] == 1
+            and snap["equipment"]["cab"][0]["active"] is True
+        )
+        assert snap["equipment"]["cab"][1]["active"] is False
+        assert snap["equipment"]["door"]["state"] == "closed"
+        assert isinstance(snap["equipment"]["btm"], list) and snap["equipment"]["btm"]
         # IO equipment reflects aggregate-fed state after a step.
-        assert snap["io"]["train_to_atp"][0] == "1"  # cab_active
-        assert snap["io"]["train_to_atp"][1] == "1"  # doors_closed
-
-        # Opening the door changes only the door equipment snapshot, not physical
-        # field names; traction is blocked while a door is open.
-        await _control(c, "TRAIN001", cab_id=1, door="open")
-        await _step(c, FIXED_STEP)
-        snap2 = await _train(c, "TRAIN001")
-        assert snap2["doors"]["state"] == "open"
-        assert snap2["io"]["train_to_atp"][1] == "0"  # doors_closed == 0
+        assert snap["equipment"]["io"]["train_to_atp"][0] == "1"  # cab_active
+        assert snap["equipment"]["io"]["train_to_atp"][1] == "1"  # doors_closed
 
 
 # -- Criterion: snapshots cannot be used to mutate subsequent simulator state --
@@ -297,7 +262,7 @@ async def test_equipment_nested_snapshots_do_not_change_physical_fields() -> Non
 async def test_snapshot_cannot_be_used_to_mutate_simulator_state() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
-        await _control(c, "TRAIN001", cab_id=1, traction_demand=1.0)
+        await _control(c, "TRAIN001", cab_id=1, drive_demand=1.0)
         await _step(c, FIXED_STEP)
         snap = await _train(c, "TRAIN001")
         speed_after_one_step = snap["speed"]

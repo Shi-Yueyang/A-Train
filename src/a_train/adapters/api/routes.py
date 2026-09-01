@@ -8,13 +8,17 @@ mapped to HTTP 400; adapter exceptions never enter ``run_loop()`` (§2.6).
 
 from __future__ import annotations
 
+import base64
+import binascii
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ...domain.train import TrainControl
-from ...simulation.commands import TrainControlCommand
+from ...domain.train import EquipmentSet, TrainControl
+from ...simulation.commands import EquipmentCommand, TrainControlCommand
 from ...simulation.core import SimulationCore
 from ...simulation.snapshots import SimulationSnapshot
 from .schemas import (
+    EquipmentSetRequest,
     StatusResponse,
     StepRequest,
     TimeModeRequest,
@@ -118,12 +122,41 @@ async def control_train(
 ) -> TrainResponse:
     payload = TrainControl(
         cab_id=body.cab_id,
-        traction_demand=body.traction_demand,
-        service_brake_demand=body.service_brake_demand,
-        emergency_brake=body.emergency_brake,
-        door=body.door,
+        drive_demand=body.drive_demand,
     )
     result = await core.submit_command(TrainControlCommand(train_id=train_id, payload=payload))
+    _raise_on_error(result)
+    train = _find_train(core.get_snapshot(), train_id)
+    if train is None:
+        raise HTTPException(status_code=404, detail=f"unknown train: {train_id}")
+    return train_snapshot_to_response(train)
+
+
+@router.post("/trains/{train_id}/equipment/{key}", response_model=TrainResponse)
+async def set_equipment(
+    train_id: str,
+    key: str,
+    body: EquipmentSetRequest,
+    core: SimulationCore = Depends(get_core),
+) -> TrainResponse:
+    """Set train-facing equipment state through the core, applied immediately."""
+
+    data = None
+    if body.data is not None:
+        try:
+            data = base64.b64decode(body.data, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=400, detail="data must be valid base64") from None
+    payload = EquipmentSet(
+        key=key,
+        command=body.command,
+        cab_id=body.cab_id,
+        data=data,
+        direction=body.direction,
+        bits=body.bits,
+        values=body.values,
+    )
+    result = await core.submit_command(EquipmentCommand(train_id=train_id, payload=payload))
     _raise_on_error(result)
     train = _find_train(core.get_snapshot(), train_id)
     if train is None:

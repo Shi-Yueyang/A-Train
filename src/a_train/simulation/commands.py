@@ -71,6 +71,14 @@ class TrainControlCommand(Command):
 
 
 @dataclass(frozen=True, kw_only=True)
+class EquipmentCommand(Command):
+    """An equipment-set request submitted through the REST API."""
+
+    train_id: str
+    payload: Any
+
+
+@dataclass(frozen=True, kw_only=True)
 class CommandResult:
     """Structured result of a command; invalid input is reported here rather
     than raised, so adapter exceptions never enter ``run_loop()`` (§2.6)."""

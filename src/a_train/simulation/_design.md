@@ -206,8 +206,8 @@ If the REST handler awaited a buffered train-control command, the request
 would block until a step occurs — and the step can only be issued after the
 control request returns. That is a deadlock.
 
-Train-control requests only change *control state* (traction/brake/door
-demands); they never advance time. So they are applied immediately at the
+Train-control requests only change *control state* (the signed drive/door
+demand); they never advance time. So they are applied immediately at the
 aggregate boundary (`train.apply_control`), the way §3.6 describes
 `apply_control` ("updates requested control state"). Physics still advances
 only at the fixed-step boundary. This keeps MANUAL stepping deadlock-free and
