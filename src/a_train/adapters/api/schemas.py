@@ -38,9 +38,9 @@ class StepRequest(BaseModel):
 
 
 class TrainControlRequest(BaseModel):
-    """A normalized train-control request routed to the active cab (§3.3)."""
+    """A normalized train-control request from any configured cab (§3.3)."""
 
-    cab_id: int = Field(description="The cab issuing the command; must be the active cab.")
+    cab_id: int = Field(description="The cab issuing the command; must be a configured cab.")
     drive_demand: float | None = Field(
         default=None,
         description="Signed drive lever in [-1.0, 1.0]: positive drives, negative decelerates.",
@@ -72,7 +72,6 @@ class EquipmentSetRequest(BaseModel):
 class TrainResponse(BaseModel):
     train_id: str
     cab_ids: list[int]
-    active_cab: int
     speed: float
     acceleration: float
     position: float
@@ -104,7 +103,6 @@ def train_snapshot_to_response(snap: TrainSnapshot) -> TrainResponse:
     return TrainResponse(
         train_id=snap.train_id,
         cab_ids=list(snap.cab_ids),
-        active_cab=snap.active_cab,
         speed=snap.speed,
         acceleration=snap.acceleration,
         position=snap.position,
@@ -118,7 +116,6 @@ def _train_to_dict(snap: TrainSnapshot) -> dict:
     return {
         "train_id": snap.train_id,
         "cab_ids": list(snap.cab_ids),
-        "active_cab": snap.active_cab,
         "speed": snap.speed,
         "acceleration": snap.acceleration,
         "position": snap.position,

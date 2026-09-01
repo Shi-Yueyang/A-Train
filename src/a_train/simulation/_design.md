@@ -230,7 +230,7 @@ self._train_ids_sorted: tuple[str, ...] = tuple(sorted(self._trains))
 
 - **Routing.** `_apply_train_control(command)` looks up the train by
   `train_id` and calls `train.apply_control(command.payload)`. A missing train
-  or a non-active cab or an out-of-range demand returns
+  or an unconfigured cab or an out-of-range demand returns
   `CommandResult(ok=False)`, which the REST layer maps to HTTP 400; because
   `apply_control` validates before mutating, invalid input leaves state
   unchanged.

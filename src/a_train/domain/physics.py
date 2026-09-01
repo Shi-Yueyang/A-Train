@@ -1,11 +1,12 @@
 """Drive-demand, acceleration, speed, and position calculations (§3.4, §3.6).
 
-Physics is a set of pure functions: they take prior physical state, the
-effective control state, the configured acceleration limits, and a step
-duration, and return the resulting physical state without side effects. Every
-train type applies the same rules, so the stop-within-a-step clamping lives
-here. The model knows force and speed only; a negative demand is a decelerating
-force, not a brake concept.
+Physics is a set of pure functions: they take a drive demand, the prior
+physical state, the configured acceleration limits, and a step duration, and
+return the resulting physical state without side effects. Every train type
+applies the same rules, so the stop-within-a-step clamping lives here. The
+model knows force and speed only; a negative demand is a decelerating force,
+not a brake concept. No train-facing equipment affects the physical
+integration in this version.
 
 Forward-only model: position never decreases and speed is never negative. When
 deceleration would reverse the train within a step, the train stops at the
@@ -33,13 +34,6 @@ def is_normalized(value: float) -> bool:
     return is_finite(value) and -1.0 <= value <= 1.0
 
 
-class ControlState(Protocol):
-    """Structural shape of the control state physics reads."""
-
-    drive_demand: float
-    doors_closed: bool
-
-
 class Limits(Protocol):
     """Structural shape of the per-train acceleration limits."""
 
@@ -48,22 +42,21 @@ class Limits(Protocol):
 
 
 def resolve_acceleration(
-    control: ControlState,
+    drive_demand: float,
     limits: Limits,
 ) -> float:
     """Resolve the single acceleration value for a step from the signed demand.
 
-    Positive demand scales ``max_traction_accel`` and only applies when every
-    door is closed; negative demand scales ``max_decel`` as a decelerating
-    force. Zero demand means zero acceleration. The returned value is signed:
-    positive for drive, negative for deceleration, zero at rest with no
-    effective command.
+    Positive demand scales ``max_traction_accel``; negative demand scales
+    ``max_decel`` as a decelerating force. Zero demand means zero acceleration.
+    The returned value is signed: positive for drive, negative for
+    deceleration, zero at rest with no effective command.
     """
 
-    if control.drive_demand > 0.0 and control.doors_closed:
-        return limits.max_traction_accel * control.drive_demand
-    if control.drive_demand < 0.0:
-        return limits.max_decel * control.drive_demand
+    if drive_demand > 0.0:
+        return limits.max_traction_accel * drive_demand
+    if drive_demand < 0.0:
+        return limits.max_decel * drive_demand
     return 0.0
 
 

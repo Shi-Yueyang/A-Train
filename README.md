@@ -35,7 +35,7 @@ python -m a_train run --host 127.0.0.1 --port 8000
 
 Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) in a browser. The page shows the initial
 `STOPPED` state, simulation time `0.000`, and the configured train (`TRAIN001`,
-cabs 1 and 2, active cab 1).
+cabs 1 and 2).
 
 **Verify movement in `MANUAL` mode:**
 
@@ -49,8 +49,8 @@ cabs 1 and 2, active cab 1).
    **Apply Demand**, then **Step**. Speed must drop; it never goes negative
    and position never decreases.
 5. Click **Open** on the doors, then raise **Drive demand** and click
-   **Apply Demand**. The train must not move while a door is open; click
-   **Close** to restore drive.
+   **Apply Demand**. The door state flips immediately, but the train still
+   moves: equipment does not affect train dynamics in this version.
 
 **Watch live state without refreshing:** the page keeps a WebSocket to `/ws`
 (status badge near the controls: `live` / `connecting…` / `disconnected`; it
@@ -60,15 +60,15 @@ advance on their own — no manual refresh needed. **Pause** freezes the display
 
 **Verify errors don't change state:**
 
-- Select cab **2** (not the active cab) in the **Cab** dropdown and click
-  **Apply Demand**. The message line shows `Rejected: cab 2 is not the active cab …` and the displayed state is unchanged.
+- Enter cab **9** (not configured) in the **Cab** dropdown and click
+  **Apply Demand**. The message line shows `Rejected: cab 9 is not configured …` and the displayed state is unchanged.
 - You can confirm the same result from the API:
 
   ```bash
   curl -X POST http://127.0.0.1:8000/api/trains/TRAIN001/commands \
     -H 'Content-Type: application/json' \
-    -d '{"cab_id": 2, "drive_demand": 1.0}'
-  # 400 {"detail":"cab 2 is not the active cab of TRAIN001 (active: 1)"}
+    -d '{"cab_id": 9, "drive_demand": 1.0}'
+  # 400 {"detail":"cab 9 is not configured on TRAIN001"}
   ```
 
 **Verify reset:**

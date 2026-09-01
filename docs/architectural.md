@@ -91,17 +91,17 @@ ATP never directly accesses simulator objects.
 
 There are three categories of processes.
 
-**Simulator process** contains:
+**Simulator process** is organised in three layers (the same split as the
+repository structure in §7.2):
 
-* train physics
-* train equipment
-* BTM simulation
-* digital I/O
-* signal model
-* simulation state machine and fixed-step clock
-* serialized command processing and state snapshots
-* ATP connections
-* Web API
+* **Domain model** — train aggregates (physics and controls), train-local
+  equipment (doors, cabs, BTM, and digital I/O, §3.5), and the world model
+  (linear track and signals).
+* **Simulation core** — simulation state machine and fixed-step clock,
+  serialized command processing, and read-only state snapshots.
+* **Adapters** (in-process) — ATP connections and the Web API. They translate
+  external protocols into core commands and never touch domain objects
+  directly.
 
 **External ATP processes** — ATP is an external system, not implemented by this project. Each cab connects to its own ATP process:
 
@@ -315,7 +315,8 @@ reproduced exactly.
 ## 3.1 Responsibility and Boundary
 
 The train model owns mutable train state and converts accepted control commands
-into physical motion. It does not know whether a command originated from the
+into physical motion. In this version no train-facing equipment affects the
+physical integration; future train rules may explicitly define such effects. It does not know whether a command originated from the
 browser, an ATP process, or a test. Adapters identify the train and cab, then
 submit a transport-neutral command to the simulation core.
 
@@ -332,11 +333,11 @@ Each train has immutable configuration and mutable runtime state.
 
 | Category       | Required values                                                                                                            |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Configuration  | Train ID, one or two cab IDs, initial active cab, initial position, maximum traction acceleration, and maximum deceleration. |
+| Configuration  | Train ID, one or two cab IDs, initial cab activation flags, initial position, maximum traction acceleration, and maximum deceleration. |
 | Physical state | Position in metres, speed in metres per second, and acceleration in metres per second squared.                              |
 | Control state  | Signed drive demand and door state.                                                                                         |
 
-The initial active cab and initial physical state are supplied by simulator
+The cab activation flags and initial physical state are supplied by simulator
 configuration. `reset` restores those configured values and clears all control
 state, including the door state.
 
@@ -347,9 +348,11 @@ The model knows force and speed only; there is no separate brake concept.
 This version models forward-only movement: position never decreases and speed
 never becomes negative.
 
-## 3.3 Controls and Cab Authority
+## 3.3 Controls
 
-The train accepts these normalized commands from its active cab:
+The train accepts these normalized commands from any configured cab. Cabs are
+train-local equipment (§3.5) and carry no authority; a cab's activation flag
+never affects control acceptance or dynamics:
 
 | Command              | Range or value     | Effect                                                                                                  |
 | -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
@@ -362,7 +365,7 @@ The simulation core updates every train once for each fixed simulation step in
 stable train-ID order. For a step duration `dt`, the train resolves one
 acceleration value from the signed drive demand:
 
-1. If drive demand is greater than zero and all doors are closed, use maximum traction acceleration scaled by the demand.
+1. If drive demand is greater than zero, use maximum traction acceleration scaled by the demand.
 2. Otherwise, if drive demand is less than zero, use negative maximum deceleration scaled by the demand magnitude.
 3. Otherwise, use zero acceleration.
 
@@ -386,8 +389,7 @@ handling remain outside the train model.
 BTM payloads are opaque byte arrays. The train model can receive a BTM
 delivery request for a cab, but does not interpret its contents; the ATP
 adapter delivers the payload over the protocol. Digital I/O is represented as
-named on/off values and does not participate in the physical integration
-unless a future train rule explicitly defines an effect.
+named on/off values and does not participate in the physical integration.
 
 ## 3.6 Implementation Guide
 
@@ -407,8 +409,9 @@ reset()
 `apply_control(command)` validates the command's train and cab identity,
 updates requested control state, and returns a structured result. It does not
 advance time or mutate position, speed, or acceleration. `step(dt)` resolves
-the effective acceleration, advances the physical state, and updates equipment
-for the same duration. `get_snapshot()` returns a newly constructed immutable
+acceleration from the held drive demand alone — no equipment affects the
+dynamics — integrates the physical state, and refreshes the derived
+train-to-ATP I/O signals. `get_snapshot()` returns a newly constructed immutable
 train snapshot; it never exposes the aggregate or mutable equipment objects.
 
 Represent configuration with frozen dataclasses and runtime state with private

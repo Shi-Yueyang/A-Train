@@ -23,12 +23,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .equipment import (
-    EQUIPMENT_REGISTRY,
-    BtmEquipmentSet,
-    CabEquipmentSet,
+    EQUIPMENT_FACTORIES,
+    Btm,
+    Cab,
     DigitalIo,
     Door,
     Equipment,
+    EquipmentContext,
     IoConfig,
 )
 from .io import IoMapping
@@ -44,7 +45,10 @@ from .snapshots import TrainSnapshot
 
 @dataclass(frozen=True, kw_only=True)
 class TrainControl:
-    """A normalized train-control request routed to the active cab (§3.3).
+    """A normalized train-control request from any configured cab (§3.3).
+
+    ``cab_id`` identifies the issuing cab for validation only; cabs carry no
+    authority, and the same demand applied from either cab has the same effect.
 
     ``drive_demand`` is a signed, normalized lever in [-1.0, 1.0]: positive
     scales the traction limit, negative scales the deceleration limit. The
@@ -75,8 +79,8 @@ class EquipmentSet:
     the train dispatcher validates the fields each equipment type requires:
 
     - ``door``: ``command`` is ``"open"`` or ``"close"``.
-    - ``cab``: ``cab_id`` plus ``command`` ``"activate"`` (transfers authority)
-      or ``"deactivate"``.
+    - ``cab``: ``cab_id`` plus ``command`` ``"activate"`` or ``"deactivate"``;
+      sets that cab's local flag only, with no control-side effect.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
     - ``io``: ``direction`` plus either ``bits`` or ``values``.
     """
@@ -90,11 +94,19 @@ class EquipmentSet:
     values: Mapping[str, bool] | None = None
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True)
 class EquipmentConfig:
-    """Configuration for a single pluggable addon equipment instance."""
+    """Configuration for a single pluggable addon equipment instance.
+
+    ``key`` selects the factory in ``EQUIPMENT_FACTORIES``; ``slot`` gives the
+    instance identity within the type (the cab id for per-cab equipment, empty
+    for train-level singletons). One type may be configured any number of
+    times with distinct slots. ``params`` are forwarded as keyword arguments to
+    the factory, so unknown names are rejected at construction.
+    """
 
     key: str
+    slot: str | int = ""
     params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -143,14 +155,21 @@ class TrainConfig:
             self.io_config.atp_to_train, IoMapping
         ):
             raise ValueError("io_config must contain IoMapping values")
-
-
-@dataclass(frozen=True)
-class _ControlView:
-    """Adapter so ``physics.resolve_acceleration`` reads aggregate control state."""
-
-    drive_demand: float
-    doors_closed: bool
+        if not self.equipment_configs:
+            # Standard fit: one Cab + one Btm per cab, one Door, one DigitalIo.
+            object.__setattr__(
+                self,
+                "equipment_configs",
+                tuple(
+                    [EquipmentConfig("cab", cab_id) for cab_id in self.cab_ids]
+                    + [EquipmentConfig("door")]
+                    + [EquipmentConfig("btm", cab_id) for cab_id in self.cab_ids]
+                    + [EquipmentConfig("io")]
+                ),
+            )
+        for eq_cfg in self.equipment_configs:
+            if eq_cfg.key not in EQUIPMENT_FACTORIES:
+                raise ValueError(f"unknown equipment key: {eq_cfg.key!r}")
 
 
 class Train:
@@ -159,41 +178,35 @@ class Train:
     def __init__(self, config: TrainConfig) -> None:
         self._config = config
 
-        # Create addon equipment from config, falling back to defaults
-        # (Cab + Door + BTM + IO). Cab authority stays with the aggregate.
-        self._addon_equipment: list[Equipment] = []
-        if config.equipment_configs:
-            for eq_cfg in config.equipment_configs:
-                factory = EQUIPMENT_REGISTRY[eq_cfg.key]
-                self._addon_equipment.append(
-                    factory(
-                        cab_ids=config.cab_ids,
-                        io_config=config.io_config,
-                        initial_door_state=config.initial_door_state,
-                        initial_active_cab=config.initial_active_cab,
-                        **eq_cfg.params,
-                    )
-                )
-        else:
-            # Default: Cab + Door + BTM per-cab + IO with configured mappings.
-            self._addon_equipment.append(CabEquipmentSet(config.cab_ids, config.initial_active_cab))
-            self._addon_equipment.append(Door(initial_state=config.initial_door_state))
-            self._addon_equipment.append(BtmEquipmentSet(config.cab_ids))
-            self._addon_equipment.append(DigitalIo(config.io_config))
+        # Build every addon equipment instance through the factory registry;
+        # TrainConfig guarantees a fully populated equipment_configs. The
+        # context carries train-scope values; params override per instance.
+        ctx = EquipmentContext(
+            io_config=config.io_config,
+            initial_door_state=config.initial_door_state,
+            initial_active_cab=config.initial_active_cab,
+        )
+        self._equipment: list[Equipment] = [
+            EQUIPMENT_FACTORIES[eq_cfg.key](eq_cfg.slot, ctx, **eq_cfg.params)
+            for eq_cfg in config.equipment_configs
+        ]
 
         self._position = config.initial_position
         self._speed = config.initial_speed
         self._acceleration = 0.0
 
         self._drive_demand = 0.0
-        self._active_cab = config.initial_active_cab
 
-    def _find_equipment(self, key: str) -> Equipment | None:
-        """Find addon equipment by key, or None if not present."""
-        for eq in self._addon_equipment:
-            if eq.key == key:
+    def _one(self, key: str, slot: str | int | None = None) -> Equipment | None:
+        """Find one addon equipment instance by type key and optional slot."""
+        for eq in self._equipment:
+            if eq.key == key and (slot is None or eq.slot == slot):
                 return eq
         return None
+
+    def _all(self, key: str) -> list[Equipment]:
+        """Every addon equipment instance of one type key, in stable order."""
+        return [eq for eq in self._equipment if eq.key == key]
 
     @property
     def train_id(self) -> str:
@@ -206,13 +219,10 @@ class Train:
         and the state is unchanged.
         """
 
-        if control.cab_id != self._active_cab:
+        if control.cab_id not in self._config.cab_ids:
             return ControlResult(
                 ok=False,
-                error=(
-                    f"cab {control.cab_id} is not the active cab of "
-                    f"{self._config.train_id} (active: {self._active_cab})"
-                ),
+                error=f"cab {control.cab_id} is not configured on {self._config.train_id}",
             )
         if control.drive_demand is not None and not is_normalized(control.drive_demand):
             return ControlResult(ok=False, error="drive_demand must be in [-1.0, 1.0]")
@@ -224,22 +234,24 @@ class Train:
     def set_equipment(self, command: EquipmentSet) -> ControlResult:
         """Apply an equipment-set command immediately (no time advance).
 
-        Cab ``activate`` transfers cab authority to the named cab; the other
-        cabs' equipment flags follow. All other equipment state changes are
-        routed to the component and validated at the aggregate boundary.
+        Cab ``activate``/``deactivate`` set that cab's local flag and nothing
+        else; cabs hold no authority, so control acceptance is unaffected.
+        Every equipment state change is routed to the component and validated
+        at the aggregate boundary.
         """
 
-        equipment = self._find_equipment(command.key)
-        if equipment is None:
+        if self._one(command.key) is None:
             return ControlResult(
                 ok=False,
                 error=f"no '{command.key}' equipment on {self._config.train_id}",
             )
 
         if command.key == "door":
+            equipment = self._one("door")
             if not isinstance(equipment, Door):
                 return ControlResult(
-                    ok=False, error="'door' equipment does not accept door commands"
+                    ok=False,
+                    error=f"no 'door' equipment on {self._config.train_id}",
                 )
             if command.command not in ("open", "close"):
                 return ControlResult(ok=False, error="door command must be 'open' or 'close'")
@@ -247,42 +259,33 @@ class Train:
             return ControlResult()
 
         if command.key == "cab":
-            if command.cab_id not in self._config.cab_ids:
+            if command.command not in ("activate", "deactivate"):
+                return ControlResult(
+                    ok=False, error="cab command must be 'activate' or 'deactivate'"
+                )
+            cab = self._one("cab", command.cab_id)
+            if not isinstance(cab, Cab):
                 return ControlResult(
                     ok=False,
                     error=f"cab {command.cab_id} is not configured on {self._config.train_id}",
                 )
-            if command.command == "activate":
-                self._active_cab = command.cab_id
-                if isinstance(equipment, CabEquipmentSet):
-                    equipment.set_active(command.cab_id)
-                return ControlResult()
-            if command.command == "deactivate":
-                if command.cab_id == self._active_cab:
-                    return ControlResult(
-                        ok=False,
-                        error=(
-                            f"cannot deactivate the active cab {command.cab_id}; "
-                            "activate another cab first"
-                        ),
-                    )
-                if isinstance(equipment, CabEquipmentSet):
-                    equipment.apply_control(command.cab_id, "deactivate")
-                return ControlResult()
-            return ControlResult(ok=False, error="cab command must be 'activate' or 'deactivate'")
+            cab.apply_control(command.command)
+            return ControlResult()
 
         if command.key == "btm":
             if command.cab_id is None or command.data is None:
                 return ControlResult(ok=False, error="btm requires cab_id and data")
-            if not isinstance(equipment, BtmEquipmentSet):
-                return ControlResult(ok=False, error=f"no BTM equipment on {self._config.train_id}")
-            try:
-                equipment.deliver(command.cab_id, command.data)
-            except ValueError as exc:
-                return ControlResult(ok=False, error=str(exc))
+            equipment = self._one("btm", command.cab_id)
+            if not isinstance(equipment, Btm):
+                return ControlResult(
+                    ok=False,
+                    error=f"BTM delivery for cab {command.cab_id}: no equipment",
+                )
+            equipment.accept(command.data)
             return ControlResult()
 
         if command.key == "io":
+            equipment = self._one("io")
             if not isinstance(equipment, DigitalIo):
                 return ControlResult(ok=False, error="'io' equipment does not accept I/O updates")
             if (command.bits is None) == (command.values is None):
@@ -302,44 +305,62 @@ class Train:
         )
 
     def step(self, dt: float) -> None:
-        """Resolve dynamics and integrate over one fixed step (§3.4)."""
+        """Integrate forward-only motion over one fixed step (§3.4).
 
-        # 1. Apply accepted controls (already applied via apply_control).
-        # 2. Resolve dynamics and integrate forward-only motion.
-        # The aggregate derives equipment state into its train-to-ATP signals.
-        door = self._find_equipment("door")
-        doors_closed = door.closed if isinstance(door, Door) else True
-        for eq in self._addon_equipment:
-            if isinstance(eq, DigitalIo):
-                eq.update_named(
-                    "train_to_atp",
-                    {"cab_active": True, "doors_closed": doors_closed},
-                )
-        control = _ControlView(
-            drive_demand=self._drive_demand,
-            doors_closed=doors_closed,
-        )
-        accel = resolve_acceleration(control, self._config)
-        new_position, new_speed, applied = integrate_forward(
+        No equipment affects the dynamics; the drive demand is the only input.
+        """
+
+        self._sync_io_signals()
+        accel = resolve_acceleration(self._drive_demand, self._config)
+        self._position, self._speed, self._acceleration = integrate_forward(
             position=self._position,
             speed=self._speed,
             acceleration=accel,
             dt=dt,
         )
-        self._position, self._speed, self._acceleration = new_position, new_speed, applied
-        # 3. Snapshot is constructed by get_snapshot().
+
+    def _sync_io_signals(self) -> None:
+        """Derive the train-to-ATP digital signals from aggregate and equipment state."""
+
+        doors = [d for d in self._all("door") if isinstance(d, Door)]
+        doors_closed = all(d.closed for d in doors) if doors else True
+        cabs = [c for c in self._all("cab") if isinstance(c, Cab)]
+        cab_active = any(c.active for c in cabs) if cabs else False
+        for eq in self._equipment:
+            if isinstance(eq, DigitalIo):
+                eq.update_named(
+                    "train_to_atp",
+                    {"cab_active": cab_active, "doors_closed": doors_closed},
+                )
+
+    def _equipment_snapshot(self) -> dict[str, Any]:
+        """Group per-instance snapshots by type key for the train snapshot.
+
+        Train-level singletons (empty slot, one instance) expose a single
+        snapshot; slotted equipment (per-cab cabs, BTM, multiple doors)
+        exposes a tuple with one entry per instance, §3.5.
+        """
+
+        grouped: dict[str, list[Any]] = {}
+        unslotted: dict[str, bool] = {}
+        for eq in self._equipment:
+            grouped.setdefault(eq.key, []).append(eq.read_state())
+            unslotted[eq.key] = unslotted.get(eq.key, True) and eq.slot == ""
+        return {
+            key: (vals[0] if unslotted[key] and len(vals) == 1 else tuple(vals))
+            for key, vals in grouped.items()
+        }
 
     def get_snapshot(self) -> TrainSnapshot:
         return TrainSnapshot(
             train_id=self._config.train_id,
             cab_ids=self._config.cab_ids,
-            active_cab=self._active_cab,
             speed=self._speed,
             acceleration=self._acceleration,
             position=self._position,
             direction="forward",
             drive_demand=self._drive_demand,
-            equipment={eq.key: eq.read_state() for eq in self._addon_equipment},
+            equipment=self._equipment_snapshot(),
         )
 
     def reset(self) -> None:
@@ -349,6 +370,5 @@ class Train:
         self._speed = self._config.initial_speed
         self._acceleration = 0.0
         self._drive_demand = 0.0
-        self._active_cab = self._config.initial_active_cab
-        for eq in self._addon_equipment:
+        for eq in self._equipment:
             eq.reset()

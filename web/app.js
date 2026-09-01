@@ -45,7 +45,7 @@ function setState(status, trains) {
   }
   const sel = selectedTrain();
   if (sel && !sel.cab_ids.includes(state.selectedCab)) {
-    state.selectedCab = sel.active_cab;
+    state.selectedCab = sel.cab_ids[0];
   }
   render();
 }
@@ -155,9 +155,13 @@ function renderTrainState() {
     return;
   }
   const doorState = (sel.equipment && sel.equipment.door && sel.equipment.door.state) || "—";
+  const cabs = (sel.equipment && sel.equipment.cab) || [];
+  const cabText = cabs.length
+    ? cabs.map((e) => `${e.cab_id}${e.active ? " (on)" : ""}`).join(", ")
+    : sel.cab_ids.join(", ");
   const lines = [
     `train_id        ${sel.train_id}`,
-    `active_cab      ${sel.active_cab}  (cabs: ${sel.cab_ids.join(", ")})`,
+    `cabs            ${cabText}`,
     `position        ${fmt(sel.position)} m`,
     `speed           ${fmt(sel.speed)} m/s`,
     `acceleration    ${fmt(sel.acceleration)} m/s^2`,
@@ -291,7 +295,7 @@ function bind() {
   $("train-select").onchange = (e) => {
     state.selectedTrainId = e.target.value;
     const sel = selectedTrain();
-    state.selectedCab = sel ? sel.active_cab : null;
+    state.selectedCab = sel ? sel.cab_ids[0] : null;
     state.dirty.drive = false;
     render();
   };

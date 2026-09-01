@@ -122,10 +122,10 @@ async def test_valid_control_changes_state_and_invalid_is_rejected() -> None:
         assert r.status_code == 400
         assert (await _train(c, "TRAIN001"))["drive_demand"] == 1.0
 
-        # Invalid cab (not active) -> 400, state unchanged.
+        # Invalid cab (not configured) -> 400, state unchanged.
         r = await c.post(
             "/api/trains/TRAIN001/commands",
-            json={"cab_id": 2, "drive_demand": 0.4},
+            json={"cab_id": 9, "drive_demand": 0.4},
         )
         assert r.status_code == 400
         assert (await _train(c, "TRAIN001"))["drive_demand"] == 1.0
@@ -220,7 +220,8 @@ async def test_train_reset_restores_state_and_clears_equipment() -> None:
         assert reset_state["acceleration"] == 0.0
         assert reset_state["drive_demand"] == 0.0
         assert reset_state["equipment"]["door"]["state"] == "closed"
-        assert reset_state["active_cab"] == 1
+        cab_flags = {e["cab_id"]: e["active"] for e in reset_state["equipment"]["cab"]}
+        assert cab_flags == {1: True, 2: False}  # configured cabs restored
         # Equipment runtime state cleared back to defaults.
         assert reset_state["equipment"]["io"]["train_to_atp"] == "000"
         btm = reset_state["equipment"]["btm"]

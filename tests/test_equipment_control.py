@@ -1,8 +1,8 @@
 """Equipment state through the generic REST endpoint.
 
 Covers immediate application (no fixed step needed), per-type validation,
-cab-authority transfer, and error isolation, all observed through the public
-API against the real application (§6.1).
+cab flags as plain equipment state, and error isolation, all observed through
+the public API against the real application (§6.1).
 """
 
 from __future__ import annotations
@@ -42,10 +42,10 @@ async def _step(c, delta: float) -> None:
     await c.post("/api/simulation/step", json={"delta": delta})
 
 
-# -- Doors: immediate state change, traction interlock -------------------------
+# -- Doors: immediate state change, no effect on dynamics ----------------------
 
 
-async def test_door_state_applies_immediately_and_gates_drive() -> None:
+async def test_door_state_applies_immediately_without_affecting_drive() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
 
@@ -56,12 +56,7 @@ async def test_door_state_applies_immediately_and_gates_drive() -> None:
         await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 1.0})
         await _step(c, 0.50)
         moving = await _train(c)
-        assert moving["position"] == 0.0  # doors open: drive suppressed
-
-        status, snap = await _equipment(c, "door", command="close")
-        assert status == 200 and snap["equipment"]["door"]["state"] == "closed"
-        await _step(c, 0.50)
-        assert (await _train(c))["position"] > 0.0
+        assert moving["position"] > 0.0  # door open: dynamics unaffected
 
 
 # -- Invalid input: 400 and state unchanged ------------------------------------
@@ -128,10 +123,10 @@ async def test_io_bits_and_named_values_update() -> None:
         assert status == 400  # neither bits nor values
 
 
-# -- Cab activation transfers authority ----------------------------------------
+# -- Cab activation is a plain equipment flag, no authority --------------------
 
 
-async def test_cab_activate_transfers_authority() -> None:
+async def test_cab_activate_is_local_flag_with_no_control_effect() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
 
@@ -141,26 +136,49 @@ async def test_cab_activate_transfers_authority() -> None:
 
         status, snap = await _equipment(c, "cab", cab_id=2, command="activate")
         assert status == 200
-        assert snap["active_cab"] == 2
         flags = {entry["cab_id"]: entry["active"] for entry in snap["equipment"]["cab"]}
-        assert flags == {1: False, 2: True}
+        assert flags == {1: True, 2: True}  # flags independent, no transfer
 
-        # The former active cab is now rejected.
+        # The former cab is still accepted; cabs carry no authority.
         r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 0.0})
-        assert r.status_code == 400
-
-        # Cab 2 is accepted.
-        r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 2, "drive_demand": -0.25})
         assert r.status_code == 200
 
-        # The active cab cannot be deactivated.
-        status, body = await _equipment(c, "cab", cab_id=2, command="deactivate")
-        assert status == 400
-        assert "active cab" in body["detail"]
+        # Both cabs can be deactivated in any order.
+        for cab_id in (1, 2):
+            status, _ = await _equipment(c, "cab", cab_id=cab_id, command="deactivate")
+            assert status == 200
+        flags = {
+            entry["cab_id"]: entry["active"]
+            for entry in (await _train(c))["equipment"]["cab"]
+        }
+        assert flags == {1: False, 2: False}
 
-        # Reset restores the configured authority.
+        # An unconfigured cab is rejected.
+        status, _ = await _equipment(c, "cab", cab_id=9, command="activate")
+        assert status == 400
+
+        # Reset restores the configured activation flags.
         await c.post("/api/simulation/reset")
-        assert (await _train(c))["active_cab"] == 1
+        reset_flags = {
+            entry["cab_id"]: entry["active"] for entry in (await _train(c))["equipment"]["cab"]
+        }
+        assert reset_flags == {1: True, 2: False}
+
+
+async def test_drive_accepted_from_any_configured_cab() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 2, "drive_demand": 1.0})
+        assert r.status_code == 200
+        await _step(c, 0.50)
+        assert (await _train(c))["speed"] > 0.0
+
+        r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 0.0})
+        assert r.status_code == 200
+
+        r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 9, "drive_demand": 0.0})
+        assert r.status_code == 400  # cab not configured
 
 
 @pytest.mark.parametrize("command", ["open", "close"])

@@ -154,12 +154,12 @@ step boundary.
 
 | Field            | Type           | Notes                                                                                                                                                             |
 | ---------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cab_id`       | integer        | Must be the train's active cab.                                                                                                                                   |
-| `drive_demand` | number or null | Signed lever in`[-1.0, 1.0]`: positive drives (traction limit, requires doors closed), negative decelerates (decel limit). Omitted or null leaves it unchanged. |
+| `cab_id`       | integer        | Must be one of the train's configured cabs. Cabs carry no authority (§3.3); any configured cab is accepted.                                                                                                                   |
+| `drive_demand` | number or null | Signed lever in`[-1.0, 1.0]`: positive drives (traction limit), negative decelerates (decel limit). Omitted or null leaves it unchanged. |
 
 **Response 200**: `TrainResponse`.
 
-**Errors**: 400 unknown train; cab is not the active cab; `drive_demand`
+**Errors**: 400 unknown train; `cab_id` is not a configured cab; `drive_demand`
 outside `[-1.0, 1.0]` or not finite.
 
 ### POST /api/trains//equipment/
@@ -167,9 +167,9 @@ outside `[-1.0, 1.0]` or not finite.
 Sets train-facing equipment state through the generic equipment endpoint
 (§3.5). `{key}` is the registered equipment type. Equipment changes are applied
 immediately by the core (like train controls) and do not advance simulation
-time; the effect on physics (e.g. the door/traction interlock) appears at the
-next fixed step. The dispatcher validates the body against the target equipment
-and returns 400 with the component's error message on invalid input.
+time; equipment does not affect train dynamics in this version (§3.1). The
+dispatcher validates the body against the target equipment and returns 400
+with the component's error message on invalid input.
 
 **Request body** (`EquipmentSetRequest` — the fields used depend on `{key}`):
 
@@ -187,7 +187,7 @@ and returns 400 with the component's error message on invalid input.
 | Key      | Behavior                                                                                                                                                                                               |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `door` | `command` `"open"` / `"close"` sets the train door state.                                                                                                                                        |
-| `cab`  | `"activate"` transfers cab authority to `cab_id` (the previous active cab becomes inactive); `"deactivate"` is accepted only for a non-active cab. `reset` restores the configured active cab. |
+| `cab`  | `"activate"` / `"deactivate"` sets `cab_id`'s local activation flag only; cabs carry no authority, flags are independent, and control acceptance is unaffected. `reset` restores the configured flags. |
 | `btm`  | Delivers opaque`data` to `cab_id`'s BTM equipment; delivery count and payload appear in `equipment.btm`.                                                                                         |
 | `io`   | Applies`bits` or `values` to `direction`.                                                                                                                                                        |
 
@@ -221,7 +221,6 @@ by equipment type (§3.5).
 {
   "train_id": "TRAIN001",
   "cab_ids": [1, 2],
-  "active_cab": 1,
   "speed": 0.5,
   "acceleration": 1.5,
   "position": 0.0125,
@@ -258,7 +257,6 @@ by equipment type (§3.5).
 | ---------------- | ------ | --------------------------------------------------------------- |
 | `train_id`     | string | Stable identifier.                                              |
 | `cab_ids`      | array  | Configured cabs.                                                |
-| `active_cab`   | int    | The cab holding authority (§3.3).                              |
 | `speed`        | number | m/s, never negative.                                            |
 | `acceleration` | number | m/s², the value actually applied during the last step (§3.4). |
 | `position`     | number | m along the linear track, never decreases.                      |
@@ -270,7 +268,7 @@ by equipment type (§3.5).
 
 | Key      | Shape                                                        | Notes                                                                                       |
 | -------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `cab`  | array of`{ cab_id: int, active: bool }`                    | One entry per configured cab.                                                               |
+| `cab`  | array of`{ cab_id: int, active: bool }`                    | One entry per configured cab; `active` is a local flag with no control-side effect (§3.3).                 |
 | `door` | `{ state: "open" \| "closed" }`                             | Train-level door state.                                                                     |
 | `btm`  | array of`{ cab_id, pending, payload_b64, received_count }` | Payload bytes are opaque to the simulator and base64-encoded (§4.6).                       |
 | `io`   | `{ train_to_atp, atp_to_train, values }`                   | Bit strings ordered bit 0 leftmost;`values` lists the train-to-ATP named signals (§4.7). |

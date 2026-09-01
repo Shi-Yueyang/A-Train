@@ -61,7 +61,6 @@ class TrainSnapshot:
 
     train_id: str
     cab_ids: tuple[int, ...] = ()
-    active_cab: int = 0
     speed: float = 0.0
     acceleration: float = 0.0
     position: float = 0.0

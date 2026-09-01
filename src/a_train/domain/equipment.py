@@ -9,9 +9,12 @@ state directly. Adapters translate protocol data into equipment calls and
 publish snapshot data.
 
 Addon equipment (Cab, Door, BTM, I/O, and future equipment) implements the
-``Equipment`` protocol and registers in ``EQUIPMENT_REGISTRY``. The train
-iterates addon equipment generically; cab authority stays with the train
-aggregate.
+``Equipment`` protocol: a ``key`` naming the type plus a ``slot`` naming the
+instance (empty for train-level singletons, the cab id for per-cab equipment).
+``EQUIPMENT_FACTORIES`` maps type key to a factory and may be invoked any
+number of times; a factory receives ``(slot, EquipmentContext, **params)`` —
+instance identity, train-scope configuration, and per-instance overrides. The
+train holds one flat list of instances and iterates it generically.
 """
 
 from __future__ import annotations
@@ -35,11 +38,16 @@ from .snapshots import BtmSnapshot, CabSnapshot, DoorSnapshot, IoSnapshot
 
 @runtime_checkable
 class Equipment(Protocol):
-    """Common lifecycle interface for pluggable addon equipment."""
+    """Common lifecycle interface for pluggable addon equipment instances."""
 
     @property
     def key(self) -> str:
-        """Unique equipment type identifier (e.g. 'btm', 'io')."""
+        """Equipment type identifier (e.g. 'btm', 'io')."""
+        ...
+
+    @property
+    def slot(self) -> str | int:
+        """Instance identity within the type ('' for train-level singletons)."""
         ...
 
     def read_state(self) -> Any:
@@ -51,23 +59,28 @@ class Equipment(Protocol):
         ...
 
 
-# -- Equipment registry -------------------------------------------------------
+# -- Equipment factories ------------------------------------------------------
 
-EQUIPMENT_REGISTRY: dict[str, Callable[..., Equipment]] = {}
+EQUIPMENT_FACTORIES: dict[str, Callable[..., Equipment]] = {}
 
 # -- Door --------------------------------------------------------------------
 
 
 class Door:
-    """Train-level door state. Door motion is instantaneous on ``apply_control``."""
+    """One train door's state. Door motion is instantaneous on ``apply_control``."""
 
     key = "door"
 
-    def __init__(self, *, initial_state: str = "closed") -> None:
+    def __init__(self, slot: str = "", *, initial_state: str = "closed") -> None:
         if initial_state not in ("open", "closed"):
             raise ValueError(f"invalid initial door state: {initial_state!r}")
+        self._slot = slot
         self._initial = initial_state
         self._state = initial_state
+
+    @property
+    def slot(self) -> str:
+        return self._slot
 
     @property
     def closed(self) -> bool:
@@ -90,7 +103,9 @@ class Door:
 
 
 class Cab:
-    """One cab's local state. The train aggregate owns cab authority."""
+    """One cab's local state: an activation flag with no control-side effect."""
+
+    key = "cab"
 
     def __init__(self, cab_id: int, *, initial_active: bool = False) -> None:
         self._cab_id = cab_id
@@ -99,6 +114,10 @@ class Cab:
 
     @property
     def cab_id(self) -> int:
+        return self._cab_id
+
+    @property
+    def slot(self) -> int:
         return self._cab_id
 
     @property
@@ -118,43 +137,13 @@ class Cab:
         self._active = self._initial_active
 
 
-class CabEquipmentSet:
-    """Composite cab equipment managing one ``Cab`` per cab (§3.5)."""
-
-    key = "cab"
-
-    def __init__(self, cab_ids: tuple[int, ...], initial_active_cab: int = 0) -> None:
-        self._instances = {
-            cid: Cab(cid, initial_active=(cid == initial_active_cab)) for cid in cab_ids
-        }
-
-    def apply_control(self, cab_id: int, command: str) -> None:
-        """Route an activate/deactivate command to one cab."""
-        instance = self._instances.get(cab_id)
-        if instance is None:
-            raise ValueError(
-                f"cab command for {cab_id}: no equipment (known cabs: {sorted(self._instances)})"
-            )
-        instance.apply_control(command)
-
-    def set_active(self, cab_id: int) -> None:
-        """Make one cab active and every other cab inactive."""
-        for cid, instance in self._instances.items():
-            instance.apply_control("activate" if cid == cab_id else "deactivate")
-
-    def read_state(self) -> tuple[CabSnapshot, ...]:
-        return tuple(instance.read_state() for instance in self._instances.values())
-
-    def reset(self) -> None:
-        for instance in self._instances.values():
-            instance.reset()
-
-
 # -- BTM ---------------------------------------------------------------------
 
 
-class BtmEquipment:
+class Btm:
     """Simulated BTM equipment for one cab. Payloads are opaque bytes."""
+
+    key = "btm"
 
     def __init__(self, cab_id: int) -> None:
         self._cab_id = cab_id
@@ -163,6 +152,10 @@ class BtmEquipment:
 
     @property
     def cab_id(self) -> int:
+        return self._cab_id
+
+    @property
+    def slot(self) -> int:
         return self._cab_id
 
     def accept(self, data: bytes) -> None:
@@ -184,32 +177,6 @@ class BtmEquipment:
         self._received_count = 0
 
 
-class BtmEquipmentSet:
-    """Composite BTM equipment managing one ``BtmEquipment`` per cab (§4.6)."""
-
-    key = "btm"
-
-    def __init__(self, cab_ids: tuple[int, ...]) -> None:
-        self._instances = {cid: BtmEquipment(cid) for cid in cab_ids}
-
-    def deliver(self, cab_id: int, data: bytes) -> None:
-        """Route an opaque byte array to one cab's BTM equipment."""
-        instance = self._instances.get(cab_id)
-        if instance is None:
-            raise ValueError(
-                f"BTM delivery for cab {cab_id}: no equipment "
-                f"(known cabs: {sorted(self._instances)})"
-            )
-        instance.accept(data)
-
-    def read_state(self) -> tuple[BtmSnapshot, ...]:
-        return tuple(instance.read_state() for instance in self._instances.values())
-
-    def reset(self) -> None:
-        for instance in self._instances.values():
-            instance.reset()
-
-
 # -- Digital I/O -------------------------------------------------------------
 
 
@@ -225,6 +192,7 @@ class DigitalIo:
     """Named on/off values with bit-string framing in both directions."""
 
     key = "io"
+    slot = ""
 
     _DIRECTIONS = ("train_to_atp", "atp_to_train")
 
@@ -274,28 +242,50 @@ class DigitalIo:
         self._atp_values = {s.name: False for s in self._config.atp_to_train.signals}
 
 
-# -- Equipment registration ---------------------------------------------------
+# -- Equipment factory registration -------------------------------------------
+
+
+@dataclass(frozen=True, kw_only=True)
+class EquipmentContext:
+    """Train-scope configuration factories may need to build instances."""
+
+    io_config: IoConfig
+    initial_door_state: str
+    initial_active_cab: int
 
 
 def _create_cab(
-    cab_ids: tuple[int, ...], initial_active_cab: int = 0, **_kwargs: Any
-) -> CabEquipmentSet:
-    return CabEquipmentSet(cab_ids, initial_active_cab)
+    slot: str | int,
+    ctx: EquipmentContext,
+    *,
+    initial_active: bool | None = None,
+) -> Cab:
+    cab_id = int(slot)
+    if initial_active is None:
+        initial_active = cab_id == ctx.initial_active_cab
+    return Cab(cab_id, initial_active=initial_active)
 
 
-def _create_door(initial_door_state: str = "closed", **_kwargs: Any) -> Door:
-    return Door(initial_state=initial_door_state)
+def _create_door(
+    slot: str | int,
+    ctx: EquipmentContext,
+    *,
+    initial_state: str | None = None,
+) -> Door:
+    if initial_state is None:
+        initial_state = ctx.initial_door_state
+    return Door(str(slot), initial_state=initial_state)
 
 
-def _create_btm(cab_ids: tuple[int, ...], **_kwargs: Any) -> BtmEquipmentSet:
-    return BtmEquipmentSet(cab_ids)
+def _create_btm(slot: str | int, _ctx: EquipmentContext) -> Btm:
+    return Btm(int(slot))
 
 
-def _create_io(io_config: IoConfig | None = None, **_kwargs: Any) -> DigitalIo:
-    return DigitalIo(io_config)
+def _create_io(slot: str | int, ctx: EquipmentContext) -> DigitalIo:
+    return DigitalIo(ctx.io_config)
 
 
-EQUIPMENT_REGISTRY["cab"] = _create_cab
-EQUIPMENT_REGISTRY["door"] = _create_door
-EQUIPMENT_REGISTRY["btm"] = _create_btm
-EQUIPMENT_REGISTRY["io"] = _create_io
+EQUIPMENT_FACTORIES["cab"] = _create_cab
+EQUIPMENT_FACTORIES["door"] = _create_door
+EQUIPMENT_FACTORIES["btm"] = _create_btm
+EQUIPMENT_FACTORIES["io"] = _create_io

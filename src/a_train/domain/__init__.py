@@ -8,12 +8,11 @@ digital I/O, and the immutable snapshot types the aggregate publishes.
 from __future__ import annotations
 
 from .equipment import (
-    BtmEquipment,
-    BtmEquipmentSet,
+    Btm,
     Cab,
-    CabEquipmentSet,
     DigitalIo,
     Door,
+    EquipmentContext,
     IoConfig,
 )
 from .io import DEFAULT_ATP_TO_TRAIN, DEFAULT_TRAIN_TO_ATP, IoMapping, SignalDef
@@ -34,11 +33,9 @@ from .snapshots import (
 from .train import ControlResult, EquipmentSet, Train, TrainConfig, TrainControl
 
 __all__ = [
-    "BtmEquipment",
-    "BtmEquipmentSet",
+    "Btm",
     "BtmSnapshot",
     "Cab",
-    "CabEquipmentSet",
     "CabSnapshot",
     "ControlResult",
     "DEFAULT_ATP_TO_TRAIN",
@@ -46,6 +43,7 @@ __all__ = [
     "DigitalIo",
     "Door",
     "DoorSnapshot",
+    "EquipmentContext",
     "EquipmentSet",
     "IoConfig",
     "IoMapping",
