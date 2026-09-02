@@ -52,7 +52,7 @@ class EquipmentSetRequest(BaseModel):
 
     Each equipment type uses a subset of the fields; the train dispatcher
     validates what is required: door -> command, cab -> cab_id + command,
-    btm -> cab_id + data (base64), io -> direction + (bits | values).
+    btm -> cab_id + data (base64).
     """
 
     command: str | None = Field(
@@ -60,13 +60,7 @@ class EquipmentSetRequest(BaseModel):
         description="Named command: 'open'/'close' (door), 'activate'/'deactivate' (cab).",
     )
     cab_id: int | None = Field(default=None, description="Target cab (cab, btm).")
-    data: str | None = Field(default=None, description="Base64-encoded opaque payload (btm, §4.6).")
-    direction: str | None = Field(
-        default=None,
-        description="I/O direction: 'train_to_atp' or 'atp_to_train'.",
-    )
-    bits: str | None = Field(default=None, description="Raw bit string, bit 0 leftmost (io).")
-    values: dict[str, bool] | None = Field(default=None, description="Named on/off values (io).")
+    data: str | None = Field(default=None, description="Base64-encoded opaque payload (btm, §4.5).")
 
 
 class TrainResponse(BaseModel):

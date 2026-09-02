@@ -152,9 +152,6 @@ async def set_equipment(
         command=body.command,
         cab_id=body.cab_id,
         data=data,
-        direction=body.direction,
-        bits=body.bits,
-        values=body.values,
     )
     result = await core.submit_command(EquipmentCommand(train_id=train_id, payload=payload))
     _raise_on_error(result)

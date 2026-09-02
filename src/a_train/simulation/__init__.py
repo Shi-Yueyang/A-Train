@@ -6,7 +6,6 @@ Re-exports the transport-neutral data types and the ``SimulationCore`` owner.
 from __future__ import annotations
 
 from .commands import (
-    AtpStateCommand,
     Command,
     CommandResult,
     EquipmentCommand,
@@ -22,7 +21,6 @@ from .snapshots import (
     BtmSnapshot,
     CabSnapshot,
     DoorSnapshot,
-    IoSnapshot,
     SimulationSnapshot,
     SimulationState,
     TimeMode,
@@ -30,14 +28,12 @@ from .snapshots import (
 )
 
 __all__ = [
-    "AtpStateCommand",
     "BtmSnapshot",
     "CabSnapshot",
     "Command",
     "CommandResult",
     "DoorSnapshot",
     "EquipmentCommand",
-    "IoSnapshot",
     "PauseCommand",
     "ResetCommand",
     "RunCommand",

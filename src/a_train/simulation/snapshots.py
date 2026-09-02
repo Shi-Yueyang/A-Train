@@ -18,7 +18,6 @@ from ..domain.snapshots import (
     BtmSnapshot,
     CabSnapshot,
     DoorSnapshot,
-    IoSnapshot,
     TrainSnapshot,
 )
 
@@ -54,7 +53,6 @@ __all__ = [
     "BtmSnapshot",
     "CabSnapshot",
     "DoorSnapshot",
-    "IoSnapshot",
     "SimulationSnapshot",
     "SimulationState",
     "TimeMode",

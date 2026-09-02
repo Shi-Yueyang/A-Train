@@ -67,7 +67,7 @@ and transport-neutral snapshots.
   drive demand at the aggregate boundary.
 * Implement pure fixed-step physics for drive force, zero-speed clamping,
   and forward-only position integration.
-* Implement cab, door, BTM equipment, and digital I/O as train-facing
+* Implement cab, door, and BTM equipment as train-facing
   components with plain-value control calls, `read_state`, and `reset`.
 * Define the stable aggregate update order: apply accepted controls, resolve
   dynamics, then construct a snapshot.
@@ -146,7 +146,6 @@ Implement the external ATP boundary and connect it to the running simulation.
 * Implement protocol message validation and NDJSON framing.
 * Implement one reconnecting TCP client per configured train cab.
 * Send `HELLO`, handle `HELLO_ACK`, and publish `TRAIN_STATE` and `BTM_RX`.
-* Convert accepted `ATP_STATE` messages into queued core commands.
 * Record train-to-ATP and ATP-to-train traffic as NDJSON.
 
 ### ATP Integration Passing Criteria
@@ -155,8 +154,6 @@ Implement the external ATP boundary and connect it to the running simulation.
   the `HELLO` / `HELLO_ACK` exchange for each configured cab.
 * A manual simulation step produces a correctly framed `TRAIN_STATE` message
   with the matching train and cab identifiers.
-* An `ATP_STATE` message from the test server affects train dynamics through the
-  train model; it never directly sets speed or position.
 * Disconnecting or sending malformed data from one ATP test server is reported
   without stopping the simulation or another cab's connection.
 * The recorded NDJSON contains simulation time, direction, message type, and

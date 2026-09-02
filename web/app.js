@@ -168,11 +168,6 @@ function renderTrainState() {
     `drive_demand    ${fmt(sel.drive_demand)}`,
     `door_state      ${doorState}`,
   ];
-  const io = sel.equipment && sel.equipment.io;
-  if (io) {
-    lines.push(`train_to_atp    ${io.train_to_atp}`);
-    lines.push(`atp_to_train    ${io.atp_to_train}`);
-  }
   const btm = sel.equipment && sel.equipment.btm;
   if (btm && btm.length) {
     lines.push(

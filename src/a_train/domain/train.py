@@ -18,7 +18,6 @@ Physics lives in ``physics.py``; it never mutates aggregate state.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -26,13 +25,10 @@ from .equipment import (
     EQUIPMENT_FACTORIES,
     Btm,
     Cab,
-    DigitalIo,
     Door,
     Equipment,
     EquipmentContext,
-    IoConfig,
 )
-from .io import IoMapping
 from .physics import (
     integrate_forward,
     is_finite,
@@ -82,16 +78,12 @@ class EquipmentSet:
     - ``cab``: ``cab_id`` plus ``command`` ``"activate"`` or ``"deactivate"``;
       sets that cab's local flag only, with no control-side effect.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
-    - ``io``: ``direction`` plus either ``bits`` or ``values``.
     """
 
     key: str
     command: str | None = None
     cab_id: int | None = None
     data: bytes | None = None
-    direction: str | None = None
-    bits: str | None = None
-    values: Mapping[str, bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -126,7 +118,6 @@ class TrainConfig:
     initial_position: float = 0.0
     initial_speed: float = 0.0
     initial_door_state: str = "closed"
-    io_config: IoConfig = field(default_factory=IoConfig)
     equipment_configs: tuple[EquipmentConfig, ...] = ()
 
     def __post_init__(self) -> None:
@@ -151,12 +142,8 @@ class TrainConfig:
             raise ValueError("max_decel must be a positive finite number")
         if self.initial_door_state not in ("open", "closed"):
             raise ValueError("initial_door_state must be 'open' or 'closed'")
-        if not isinstance(self.io_config.train_to_atp, IoMapping) or not isinstance(
-            self.io_config.atp_to_train, IoMapping
-        ):
-            raise ValueError("io_config must contain IoMapping values")
         if not self.equipment_configs:
-            # Standard fit: one Cab + one Btm per cab, one Door, one DigitalIo.
+            # Standard fit: one Cab + one Btm per cab, one Door.
             object.__setattr__(
                 self,
                 "equipment_configs",
@@ -164,7 +151,6 @@ class TrainConfig:
                     [EquipmentConfig("cab", cab_id) for cab_id in self.cab_ids]
                     + [EquipmentConfig("door")]
                     + [EquipmentConfig("btm", cab_id) for cab_id in self.cab_ids]
-                    + [EquipmentConfig("io")]
                 ),
             )
         for eq_cfg in self.equipment_configs:
@@ -182,7 +168,6 @@ class Train:
         # TrainConfig guarantees a fully populated equipment_configs. The
         # context carries train-scope values; params override per instance.
         ctx = EquipmentContext(
-            io_config=config.io_config,
             initial_door_state=config.initial_door_state,
             initial_active_cab=config.initial_active_cab,
         )
@@ -203,10 +188,6 @@ class Train:
             if eq.key == key and (slot is None or eq.slot == slot):
                 return eq
         return None
-
-    def _all(self, key: str) -> list[Equipment]:
-        """Every addon equipment instance of one type key, in stable order."""
-        return [eq for eq in self._equipment if eq.key == key]
 
     @property
     def train_id(self) -> str:
@@ -284,21 +265,6 @@ class Train:
             equipment.accept(command.data)
             return ControlResult()
 
-        if command.key == "io":
-            equipment = self._one("io")
-            if not isinstance(equipment, DigitalIo):
-                return ControlResult(ok=False, error="'io' equipment does not accept I/O updates")
-            if (command.bits is None) == (command.values is None):
-                return ControlResult(ok=False, error="io requires exactly one of bits or values")
-            try:
-                if command.bits is not None:
-                    equipment.update_bits(command.direction or "", command.bits)
-                else:
-                    equipment.update_named(command.direction or "", command.values or {})
-            except ValueError as exc:
-                return ControlResult(ok=False, error=str(exc))
-            return ControlResult()
-
         return ControlResult(
             ok=False,
             error=f"equipment '{command.key}' does not expose settable state",
@@ -310,7 +276,6 @@ class Train:
         No equipment affects the dynamics; the drive demand is the only input.
         """
 
-        self._sync_io_signals()
         accel = resolve_acceleration(self._drive_demand, self._config)
         self._position, self._speed, self._acceleration = integrate_forward(
             position=self._position,
@@ -318,20 +283,6 @@ class Train:
             acceleration=accel,
             dt=dt,
         )
-
-    def _sync_io_signals(self) -> None:
-        """Derive the train-to-ATP digital signals from aggregate and equipment state."""
-
-        doors = [d for d in self._all("door") if isinstance(d, Door)]
-        doors_closed = all(d.closed for d in doors) if doors else True
-        cabs = [c for c in self._all("cab") if isinstance(c, Cab)]
-        cab_active = any(c.active for c in cabs) if cabs else False
-        for eq in self._equipment:
-            if isinstance(eq, DigitalIo):
-                eq.update_named(
-                    "train_to_atp",
-                    {"cab_active": cab_active, "doors_closed": doors_closed},
-                )
 
     def _equipment_snapshot(self) -> dict[str, Any]:
         """Group per-instance snapshots by type key for the train snapshot.

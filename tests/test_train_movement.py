@@ -222,8 +222,6 @@ async def test_train_reset_restores_state_and_clears_equipment() -> None:
         assert reset_state["equipment"]["door"]["state"] == "closed"
         cab_flags = {e["cab_id"]: e["active"] for e in reset_state["equipment"]["cab"]}
         assert cab_flags == {1: True, 2: False}  # configured cabs restored
-        # Equipment runtime state cleared back to defaults.
-        assert reset_state["equipment"]["io"]["train_to_atp"] == "000"
         btm = reset_state["equipment"]["btm"]
         assert all(b["pending"] is False and b["received_count"] == 0 for b in btm)
 
@@ -252,9 +250,6 @@ async def test_equipment_nested_snapshots_do_not_change_physical_fields() -> Non
         assert snap["equipment"]["cab"][1]["active"] is False
         assert snap["equipment"]["door"]["state"] == "closed"
         assert isinstance(snap["equipment"]["btm"], list) and snap["equipment"]["btm"]
-        # IO equipment reflects aggregate-fed state after a step.
-        assert snap["equipment"]["io"]["train_to_atp"][0] == "1"  # cab_active
-        assert snap["equipment"]["io"]["train_to_atp"][1] == "1"  # doors_closed
 
 
 # -- Criterion: snapshots cannot be used to mutate subsequent simulator state --

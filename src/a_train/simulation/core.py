@@ -8,8 +8,7 @@ state.
 
 Control commands (``run``/``pause``/``reset``/``set_time_mode``/``step`` and
 the train-control command) are applied immediately and produce a snapshot at
-once. ``AtpStateCommand`` is buffered and applied in enqueue sequence at the
-next nominal fixed-step boundary (Phase 3 fills in its application).
+once.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from collections.abc import Sequence
 
 from ..domain.train import Train, TrainConfig
 from .commands import (
-    AtpStateCommand,
     Command,
     CommandResult,
     EquipmentCommand,
@@ -41,9 +39,6 @@ _DEFAULT_FIXED_STEP = 0.05
 # next fixed step is only a float-epsilon away.
 _MIN_TICK_WAIT = 0.001
 _DEFAULT_SUBSCRIBER_MAXSIZE = 64
-
-# Commands applied at the next fixed-step boundary rather than immediately.
-_WORLD_COMMAND_TYPES: tuple[type[Command], ...] = (AtpStateCommand,)
 
 
 class SimulationCore:
@@ -70,7 +65,6 @@ class SimulationCore:
 
         self._sequence = 0
         self._results: dict[int, asyncio.Future[CommandResult]] = {}
-        self._world_buffer: list[Command] = []
 
         self._trains: dict[str, Train] = {cfg.train_id: Train(cfg) for cfg in train_configs}
         self._train_ids_sorted: tuple[str, ...] = tuple(sorted(self._trains))
@@ -163,10 +157,6 @@ class SimulationCore:
 
     def _handle_command(self, command: Command) -> None:
         result = self._dispatch(command)
-        if isinstance(command, _WORLD_COMMAND_TYPES):
-            # Buffered world commands are applied at the next fixed step; their
-            # result is resolved after application.
-            return
         self._latest_snapshot = self._build_snapshot()
         self._publish_snapshot()
         self._resolve(command.sequence, result)
@@ -187,9 +177,6 @@ class SimulationCore:
                 return self._apply_train_control(command)
             if isinstance(command, EquipmentCommand):
                 return self._apply_equipment(command)
-            if isinstance(command, _WORLD_COMMAND_TYPES):
-                self._world_buffer.append(command)
-                return CommandResult()
             return CommandResult(ok=False, error=f"unknown command: {type(command).__name__}")
         except Exception as exc:  # noqa: BLE001 - never escape into run_loop
             return CommandResult(ok=False, error=f"command failed: {exc}")
@@ -215,7 +202,6 @@ class SimulationCore:
         self._simulation_time = 0.0
         self._accumulator = 0.0
         self._monotonic_ref = None
-        self._world_buffer.clear()
         for train in self._trains.values():
             train.reset()
         return CommandResult()
@@ -271,32 +257,14 @@ class SimulationCore:
             self._run_fixed_step(self._fixed_step)
 
     def _run_fixed_step(self, duration: float) -> None:
-        # 1. Apply queued ATP/train-control commands in arrival order.
-        for command in list(self._world_buffer):
-            result = self._apply_world_command(command)
-            self._resolve(command.sequence, result)
-        self._world_buffer.clear()
-        # 2. Advance simulation time to the nominal-step end.
+        # 1. Advance simulation time to the nominal-step end.
         self._simulation_time += duration
-        # 3. Update each train's equipment and physics in stable train-ID order.
+        # 2. Update each train's equipment and physics in stable train-ID order.
         for train_id in self._train_ids_sorted:
             self._trains[train_id].step(duration)
-        # 4. Produce a read-only state snapshot.
+        # 3. Produce a read-only state snapshot.
         self._latest_snapshot = self._build_snapshot()
         self._publish_snapshot()
-
-    def _apply_world_command(self, command: Command) -> CommandResult:
-        if isinstance(command, AtpStateCommand):
-            return self._apply_atp_state(command)
-        return CommandResult(ok=False, error=f"unknown world command: {type(command).__name__}")
-
-    def _apply_atp_state(self, command: AtpStateCommand) -> CommandResult:
-        # Phase 3: convert the atp_to_train bit string into train control through
-        # the train model. No trains accept ATP state yet.
-        train = self._trains.get(command.train_id)
-        if train is None:
-            return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
-        return CommandResult()
 
     # -- Helpers ---------------------------------------------------------
 

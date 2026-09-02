@@ -16,7 +16,6 @@ The system shall:
 * Communicate with external ATP processes using **TCP**.
 * Use a **text-based protocol** for easy debugging.
 * Transport arbitrary binary BTM datagrams.
-* Support digital ON/OFF I/O.
 * Provide a simple **web UI**, not high-end 3D graphics.
 * Run completely **headless** for automated testing.
 * Make it easy to add new train types.
@@ -95,7 +94,7 @@ There are three categories of processes.
 repository structure in §7.2):
 
 * **Domain model** — train aggregates (physics and controls), train-local
-  equipment (doors, cabs, BTM, and digital I/O, §3.5), and the world model
+  equipment (doors, cabs, BTM, §3.5), and the world model
   (linear track and signals).
 * **Simulation core** — simulation state machine and fixed-step clock,
   serialized command processing, and read-only state snapshots.
@@ -138,7 +137,7 @@ adapters submit commands to the core and publish state produced by it.
 
 The core is the sole writer of train state. Browser controls and ATP input are
 converted into commands. Control commands are applied immediately by the core
-loop; world commands are applied at the next nominal fixed-step boundary.
+loop.
 
 ## 2.2 Simulation State
 
@@ -278,10 +277,10 @@ execution on exactly the same code path.
 ### Commands and Snapshots
 
 Define the command types `RunCommand`, `PauseCommand`, `ResetCommand`,
-`SetTimeModeCommand`, `StepCommand`, `AtpStateCommand`, and
+`SetTimeModeCommand`, `StepCommand`, and
 `TrainControlCommand`. Assign each command a monotonically increasing enqueue
-sequence and process commands in that sequence at the beginning of every fixed
-step. Return a structured command result for invalid input; do not let adapter
+sequence and process commands in that sequence. Return a structured command
+result for invalid input; do not let adapter
 exceptions enter `run_loop()`.
 
 Build one snapshot at the end of each nominal fixed step and after every
@@ -382,21 +381,20 @@ is zero.
 
 ## 3.5 Train-Facing Equipment Boundary
 
-Doors, cabs, BTM equipment, and digital I/O are train-local equipment. Their
+Doors, cabs, and BTM equipment are train-local equipment. Their
 state may be included in a train snapshot, but their transport and protocol
 handling remain outside the train model.
 
 BTM payloads are opaque byte arrays. The train model can receive a BTM
 delivery request for a cab, but does not interpret its contents; the ATP
-adapter delivers the payload over the protocol. Digital I/O is represented as
-named on/off values and does not participate in the physical integration.
+adapter delivers the payload over the protocol.
 
 ## 3.6 Implementation Guide
 
 Implement the train model in `domain/train.py` as the aggregate that owns one
 train's mutable state. Keep calculations that do not require aggregate state
-in `domain/physics.py`, and keep cab, door, BTM, and I/O behavior in
-`domain/equipment.py` and `domain/io.py`. The simulation core calls only a
+in `domain/physics.py`, and keep cab, door, and BTM behavior in
+`domain/equipment.py`. The simulation core calls only a
 small aggregate API:
 
 ```text
@@ -410,8 +408,7 @@ reset()
 updates requested control state, and returns a structured result. It does not
 advance time or mutate position, speed, or acceleration. `step(dt)` resolves
 acceleration from the held drive demand alone — no equipment affects the
-dynamics — integrates the physical state, and refreshes the derived
-train-to-ATP I/O signals. `get_snapshot()` returns a newly constructed immutable
+dynamics — and integrates the physical state. `get_snapshot()` returns a newly constructed immutable
 train snapshot; it never exposes the aggregate or mutable equipment objects.
 
 Represent configuration with frozen dataclasses and runtime state with private
@@ -465,8 +462,8 @@ Equipment component
 
 The aggregate coordinates components in a documented, stable order: apply
 accepted controls, resolve train dynamics, then construct the
-snapshot. New equipment such as vigilance, pantograph control, passenger
-systems, or a train-type-specific I/O device can be added by implementing this
+snapshot. New equipment such as vigilance, pantograph control, or passenger
+systems can be added by implementing this
 interface and extending the aggregate's configuration and snapshot types. Do
 not add protocol-specific behavior to an equipment component; adapters
 translate protocol data into equipment commands and publish snapshot data.
@@ -550,7 +547,6 @@ Simulator                         ATP
     │<──── HELLO_ACK ─────────────│
     │                              │
     │──── TRAIN_STATE ───────────>│
-    │<──── ATP_STATE ─────────────│
 ```
 
 Each ATP process has exactly one connection to the simulator.
@@ -592,7 +588,6 @@ HELLO
 HELLO_ACK
 
 TRAIN_STATE
-ATP_STATE
 
 BTM_RX
 
@@ -639,9 +634,7 @@ Example:
   "speed": 22.31,
   "acceleration": -0.15,
   "position": 15320.4,
-  "direction": "forward",
-
-  "train_to_atp": "110"
+  "direction": "forward"
 }
 ```
 
@@ -655,20 +648,7 @@ position       m
 
 Position is the distance along the single linear track from a fixed origin (see non-goals).
 
-## 4.5 ATP_STATE
-
-ATP sends its current outputs (ATP → Train).
-
-Example:
-
-```json
-{
-  "type": "atp_state",
-  "atp_to_train": "10"
-}
-```
-
-## 4.6 BTM Protocol
+## 4.5 BTM Protocol
 
 BTM data flows in one direction only: Train → ATP.
 
@@ -700,49 +680,6 @@ The message becomes:
   "data": "ASOk/wCBcg=="
 }
 ```
-
-## 4.7 Digital I/O
-
-Digital signals are represented as bit strings.
-
-Each bit position has a defined meaning. The bit string is ordered from bit 0 (leftmost) to bit N (rightmost).
-
-The meaning of each bit is **configurable** per train type or ATP configuration. The tables below are examples only.
-
-**Train → ATP** (`train_to_atp`):
-
-Example configuration:
-
-| Bit | Signal           |
-| --- | ---------------- |
-| 0   | cab_active       |
-| 1   | doors_closed     |
-| 2   | vigilance        |
-
-Example:
-
-```json
-"train_to_atp": "110"
-```
-
-Means: cab_active=1, doors_closed=1, vigilance=0.
-
-**ATP → Train** (`atp_to_train`):
-
-Example configuration:
-
-| Bit | Signal             |
-| --- | ------------------ |
-| 0   | warning            |
-| 1   | supervision_active |
-
-Example:
-
-```json
-"atp_to_train": "10"
-```
-
-Means: warning=1, supervision_active=0.
 
 ---
 
@@ -822,7 +759,7 @@ Simulator ───────────────> Browser
 }
 ```
 
-The UI can update train position, speed, signals, BTM, ATP state, digital I/O, and faults without polling continuously.
+The UI can update train position, speed, signals, BTM, and faults without polling continuously.
 
 The state message includes `simulation_state`, `simulation_time`, `time_mode`,
 `time_multiplier`, and world state.
@@ -873,7 +810,6 @@ Example:
 
 ```text
 {"time":10.00,"direction":"train_to_atp","type":"train_state",...}
-{"time":10.02,"direction":"atp_to_train","type":"atp_state",...}
 {"time":20.00,"direction":"train_to_atp","type":"btm_rx",...}
 ```
 
@@ -926,9 +862,8 @@ train-simulator/
 │   │   ├── __init__.py             # Public domain types.
 │   │   ├── train.py                # Train aggregate and stable per-step update entry point.
 │   │   ├── physics.py              # Drive force, acceleration, speed, and position calculations.
-│   │   ├── equipment.py            # Doors, cabs, BTM equipment, and train-local I/O behavior.
-│   │   ├── signals.py              # Linear-track signal state and signal-aspect rules.
-│   │   └── io.py                   # Named digital-signal definitions and bit-string conversion.
+│   │   ├── equipment.py            # Doors, cabs, and BTM equipment behavior.
+│   │   └── signals.py              # Linear-track signal state and signal-aspect rules.
 │   │
 │   ├── adapters/                   # I/O boundaries that translate external data into core commands.
 │   │   ├── __init__.py             # Adapter package marker; no runtime behavior.

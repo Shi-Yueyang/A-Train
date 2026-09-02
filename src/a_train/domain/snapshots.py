@@ -2,7 +2,7 @@
 
 Snapshots are read-only views produced by the train aggregate. They contain
 only scalar values, immutable tuples, and frozen nested dataclasses; they never
-expose a mutable internal object. Equipment state (cabs, doors, BTM, I/O) is
+expose a mutable internal object. Equipment state (cabs, doors, BTM) is
 in the ``equipment`` dict keyed by equipment type, so new equipment can be
 added without changing TrainSnapshot.
 """
@@ -40,15 +40,6 @@ class BtmSnapshot:
     pending: bool = False
     payload_b64: str | None = None
     received_count: int = 0
-
-
-@dataclass(frozen=True)
-class IoSnapshot:
-    """Read-only view of the digital I/O bit strings and named values."""
-
-    train_to_atp: str = ""
-    atp_to_train: str = ""
-    values: tuple[tuple[str, bool], ...] = ()
 
 
 @dataclass(frozen=True)

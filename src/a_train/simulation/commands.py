@@ -54,15 +54,6 @@ class StepCommand(Command):
 
 
 @dataclass(frozen=True, kw_only=True)
-class AtpStateCommand(Command):
-    """Apply an external ATP's digital outputs through the train model."""
-
-    train_id: str
-    cab_id: int
-    atp_to_train: str
-
-
-@dataclass(frozen=True, kw_only=True)
 class TrainControlCommand(Command):
     """A train-control request submitted through the REST API."""
 

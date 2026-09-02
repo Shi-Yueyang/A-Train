@@ -177,10 +177,7 @@ with the component's error message on invalid input.
 | ------------- | ------------------ | ----------------- | ------------------------------------------------------------ |
 | `command`   | string             | `door`, `cab` | `"open"` / `"close"`; `"activate"` / `"deactivate"`. |
 | `cab_id`    | integer            | `cab`, `btm`  | Target cab.                                                  |
-| `data`      | string             | `btm`           | Base64 opaque payload (§4.6); invalid base64 → 400.        |
-| `direction` | string             | `io`            | `"train_to_atp"` or `"atp_to_train"`.                    |
-| `bits`      | string             | `io`            | Raw bit string, bit 0 leftmost (§4.7).                      |
-| `values`    | map string → bool | `io`            | Named on/off values; exactly one of`bits` or `values`.   |
+| `data`      | string             | `btm`           | Base64 opaque payload (§4.5); invalid base64 → 400.        |
 
 **Semantics per equipment key**:
 
@@ -189,7 +186,6 @@ with the component's error message on invalid input.
 | `door` | `command` `"open"` / `"close"` sets the train door state.                                                                                                                                        |
 | `cab`  | `"activate"` / `"deactivate"` sets `cab_id`'s local activation flag only; cabs carry no authority, flags are independent, and control acceptance is unaffected. `reset` restores the configured flags. |
 | `btm`  | Delivers opaque`data` to `cab_id`'s BTM equipment; delivery count and payload appear in `equipment.btm`.                                                                                         |
-| `io`   | Applies`bits` or `values` to `direction`.                                                                                                                                                        |
 
 **Example**:
 
@@ -239,16 +235,7 @@ by equipment type (§3.5).
         "payload_b64": null,
         "received_count": 0
       }
-    ],
-    "io": {
-      "train_to_atp": "110",
-      "atp_to_train": "00",
-      "values": [
-        ["cab_active", true],
-        ["doors_closed", true],
-        ["vigilance", false]
-      ]
-    }
+    ]
   }
 }
 ```
@@ -270,8 +257,7 @@ by equipment type (§3.5).
 | -------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | `cab`  | array of`{ cab_id: int, active: bool }`                    | One entry per configured cab; `active` is a local flag with no control-side effect (§3.3).                 |
 | `door` | `{ state: "open" \| "closed" }`                             | Train-level door state.                                                                     |
-| `btm`  | array of`{ cab_id, pending, payload_b64, received_count }` | Payload bytes are opaque to the simulator and base64-encoded (§4.6).                       |
-| `io`   | `{ train_to_atp, atp_to_train, values }`                   | Bit strings ordered bit 0 leftmost;`values` lists the train-to-ATP named signals (§4.7). |
+| `btm`  | array of`{ cab_id, pending, payload_b64, received_count }` | Payload bytes are opaque to the simulator and base64-encoded (§4.5).                       |
 
 Future addons add optional keys without changing existing fields; a train
 without an equipment type simply omits its key.

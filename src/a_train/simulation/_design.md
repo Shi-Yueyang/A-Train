@@ -107,9 +107,8 @@ idempotent:
 
 - `_apply_run`: `STOPPED|PAUSED -> RUNNING`; no-op if already `RUNNING`.
 - `_apply_pause`: `RUNNING -> PAUSED`; no-op if already `PAUSED|STOPPED`.
-- `_apply_reset`: any `-> STOPPED`, time `0.0`, accumulator cleared, world
-  buffer cleared, and every owned train restored to its configured state via
-  `train.reset()`.
+- `_apply_reset`: any `-> STOPPED`, time `0.0`, accumulator cleared, and every
+  owned train restored to its configured state via `train.reset()`.
 
 Every state transition resets `_monotonic_ref = None` so that time spent in the
 previous state (especially paused) is never carried into the next running
@@ -171,40 +170,24 @@ non-multiple like `0.12` advances `0.10` and keeps `0.02` for the next step.
 
 Per §2.5, each nominal fixed step performs:
 
-1. **Apply queued world commands** in `sequence` order — drain
-   `_world_buffer`, calling `_apply_world_command` (currently only
-   `AtpStateCommand`, a no-op until Phase 3) and resolving each command's
-   result Future.
-2. **Advance simulation time** to the step end (`simulation_time += duration`).
-3. **Update each train's equipment and physics in stable train-ID order** —
+1. **Advance simulation time** to the step end (`simulation_time += duration`).
+2. **Update each train's equipment and physics in stable train-ID order** —
    `for train_id in self._train_ids_sorted: self._trains[train_id].step(duration)`.
-4. **Produce a snapshot** — `_build_snapshot()` + `_publish_snapshot()`.
+3. **Produce a snapshot** — `_build_snapshot()` + `_publish_snapshot()`.
 
 The train's own `step(dt)` runs the aggregate's stable order (apply accepted
 controls → update equipment → resolve dynamics → integrate forward-only
 motion), so the core only steps each aggregate once per fixed step.
 
-## 7. Control vs. world commands
+## 7. Control commands
 
-`_handle_command` splits commands into two families:
+`_handle_command` applies every command **immediately** on receipt (not
+deferred to a step boundary), then a fresh snapshot is built and the
+command's Future is resolved. This is what makes `await core.pause()` — and
+`await core.submit_command(TrainControlCommand)` — return a current snapshot
+right away.
 
-- **Control** (`Run`/`Pause`/`Reset`/`SetTimeMode`/`Step`/`TrainControl`):
-  applied **immediately** on receipt (not deferred to a step boundary), then a
-  fresh snapshot is built and the command's Future is resolved. This is what
-  makes `await core.pause()` — and `await core.submit_command(TrainControlCommand)`
-  — return a current snapshot right away.
-- **World** (`AtpState`): **buffered** into `_world_buffer` and applied at the
-  next fixed-step boundary (step 1 above). Its Future is resolved only after
-  application. (Phase 3 fills in ATP-state application.)
-
-### Why `TrainControlCommand` is immediate, not buffered
-
-`docs/architectural.md` §2.6 says ATP and train-control commands are buffered
-to the next fixed-step boundary. In `MANUAL` mode (the deterministic test mode,
-§6.1) the "next fixed step" only happens when the caller invokes `step(delta)`.
-If the REST handler awaited a buffered train-control command, the request
-would block until a step occurs — and the step can only be issued after the
-control request returns. That is a deadlock.
+### Why `TrainControlCommand` is immediate
 
 Train-control requests only change *control state* (the signed drive/door
 demand); they never advance time. So they are applied immediately at the
@@ -213,10 +196,6 @@ aggregate boundary (`train.apply_control`), the way §3.6 describes
 only at the fixed-step boundary. This keeps MANUAL stepping deadlock-free and
 deterministic while preserving the invariant that adapters never mutate world
 state directly — every change goes through `run_loop()`.
-
-`AtpStateCommand` remains a buffered world command; Phase 3 converts its bit
-string into train control at the fixed step, where wall-clock modes make
-buffering safe.
 
 ## 8. Train world ownership
 

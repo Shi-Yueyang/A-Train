@@ -1,9 +1,7 @@
 """Creates clients and bridges snapshots and ATP commands (§4, §2.6).
 
 The manager owns one ``AtpClient`` per configured train cab. It receives the
-core's snapshot and dispatches ``TRAIN_STATE`` / ``BTM_RX`` messages, and
-converts accepted ``ATP_STATE`` messages into queued ``AtpStateCommand``
-objects on the core's command queue.
+core's snapshot and dispatches ``TRAIN_STATE`` / ``BTM_RX`` messages.
 
 Phase 0: no cab endpoints are configured, so ``start()`` and ``stop()`` are
 no-ops and the manager stays ready for Phase 4 to populate clients.

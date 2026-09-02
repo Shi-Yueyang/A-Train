@@ -2,7 +2,7 @@
 
 The protocol uses TCP + NDJSON (one JSON object per line). The newline provides
 application-level message framing. Validated message types include ``HELLO``,
-``HELLO_ACK``, ``TRAIN_STATE``, ``ATP_STATE``, ``BTM_RX``, ``HEARTBEAT``,
+``HELLO_ACK``, ``TRAIN_STATE``, ``BTM_RX``, ``HEARTBEAT``,
 ``HEARTBEAT_ACK``, and ``ERROR``. Phase 4 implements validation and framing.
 """
 

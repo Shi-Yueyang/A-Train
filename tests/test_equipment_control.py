@@ -102,27 +102,6 @@ async def test_btm_delivery_through_equipment_endpoint() -> None:
         assert r.status_code == 400  # invalid base64
 
 
-# -- Digital I/O ---------------------------------------------------------------
-
-
-async def test_io_bits_and_named_values_update() -> None:
-    async with running_app([T1]) as c:
-        await _manual_start(c)
-
-        status, snap = await _equipment(c, "io", direction="atp_to_train", bits="10")
-        assert status == 200
-        assert snap["equipment"]["io"]["atp_to_train"] == "10"
-
-        status, snap = await _equipment(c, "io", direction="atp_to_train", values={"warning": True})
-        assert status == 200
-        assert snap["equipment"]["io"]["atp_to_train"] == "10"
-
-        status, _ = await _equipment(c, "io", direction="sideways", bits="1")
-        assert status == 400
-        status, _ = await _equipment(c, "io", direction="atp_to_train")
-        assert status == 400  # neither bits nor values
-
-
 # -- Cab activation is a plain equipment flag, no authority --------------------
 
 
@@ -148,8 +127,7 @@ async def test_cab_activate_is_local_flag_with_no_control_effect() -> None:
             status, _ = await _equipment(c, "cab", cab_id=cab_id, command="deactivate")
             assert status == 200
         flags = {
-            entry["cab_id"]: entry["active"]
-            for entry in (await _train(c))["equipment"]["cab"]
+            entry["cab_id"]: entry["active"] for entry in (await _train(c))["equipment"]["cab"]
         }
         assert flags == {1: False, 2: False}
 
