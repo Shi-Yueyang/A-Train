@@ -21,6 +21,8 @@ from typing import Any
 class TestAtpServer:
     """A controllable asyncio TCP server speaking NDJSON."""
 
+    __test__ = False  # support helper; not a pytest test class
+
     def __init__(self) -> None:
         self._server: asyncio.Server | None = None
         self._port: int = 0
@@ -36,6 +38,15 @@ class TestAtpServer:
     @property
     def port(self) -> int:
         return self._port
+
+    @property
+    def connection_count(self) -> int:
+        return len(self._clients)
+
+    def drop_client(self, index: int = 0) -> None:
+        """Close one accepted connection server-side, as a link reset would."""
+
+        self._clients[index].close()
 
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter

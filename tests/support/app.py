@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 import httpx
 from asgi_lifespan import LifespanManager
 
+from a_train.adapters.atp.manager import AtpEndpoint
 from a_train.bootstrap import create_app
 from a_train.domain.train import TrainConfig
 
@@ -23,8 +24,17 @@ from a_train.domain.train import TrainConfig
 @asynccontextmanager
 async def running_app(
     train_configs: Sequence[TrainConfig] | None = None,
+    atp_endpoints: Sequence[AtpEndpoint] = (),
+    *,
+    atp_retry_delay: float = 0.05,
+    atp_handshake_timeout: float = 5.0,
 ) -> AsyncIterator[httpx.AsyncClient]:
-    app = create_app(train_configs)
+    app = create_app(
+        train_configs,
+        atp_endpoints,
+        atp_retry_delay=atp_retry_delay,
+        atp_handshake_timeout=atp_handshake_timeout,
+    )
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

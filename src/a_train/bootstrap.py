@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 
 from .adapters.api.app import create_app as build_app
-from .adapters.atp.manager import AtpManager
+from .adapters.atp.manager import AtpEndpoint, AtpManager
 from .domain.train import TrainConfig
 from .simulation.commands import Command
 from .simulation.core import SimulationCore
@@ -46,7 +46,14 @@ DEFAULT_TRAIN_CONFIGS: tuple[TrainConfig, ...] = (
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI, train_configs: Sequence[TrainConfig] | None = None):
+async def lifespan(
+    app: FastAPI,
+    train_configs: Sequence[TrainConfig] | None = None,
+    atp_endpoints: Sequence[AtpEndpoint] = (),
+    *,
+    atp_retry_delay: float = 1.0,
+    atp_handshake_timeout: float = 10.0,
+):
     # Startup: assemble production components and start background tasks.
     command_queue: asyncio.Queue[Command] = asyncio.Queue()
     snapshot_subscribers: list[asyncio.Queue[SimulationSnapshot]] = []
@@ -59,7 +66,12 @@ async def lifespan(app: FastAPI, train_configs: Sequence[TrainConfig] | None = N
     )
     core_task = asyncio.create_task(core.run_loop(), name="simulation-core")
 
-    atp_manager = AtpManager(command_queue=command_queue)
+    atp_manager = AtpManager(
+        command_queue=command_queue,
+        endpoints=atp_endpoints,
+        retry_delay=atp_retry_delay,
+        handshake_timeout=atp_handshake_timeout,
+    )
     await atp_manager.start()
 
     app.state.core = core
@@ -79,15 +91,28 @@ async def lifespan(app: FastAPI, train_configs: Sequence[TrainConfig] | None = N
             pass
 
 
-def create_app(train_configs: Sequence[TrainConfig] | None = None) -> FastAPI:
+def create_app(
+    train_configs: Sequence[TrainConfig] | None = None,
+    atp_endpoints: Sequence[AtpEndpoint] = (),
+    *,
+    atp_retry_delay: float = 1.0,
+    atp_handshake_timeout: float = 10.0,
+) -> FastAPI:
     """Build the FastAPI application with the production lifespan wired in."""
 
     configs = train_configs
     train_configs_capture: Sequence[TrainConfig] | None = configs
+    endpoints_capture = tuple(atp_endpoints)
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
-        async with lifespan(app, train_configs=train_configs_capture):
+        async with lifespan(
+            app,
+            train_configs=train_configs_capture,
+            atp_endpoints=endpoints_capture,
+            atp_retry_delay=atp_retry_delay,
+            atp_handshake_timeout=atp_handshake_timeout,
+        ):
             yield
 
     return build_app(_lifespan)
