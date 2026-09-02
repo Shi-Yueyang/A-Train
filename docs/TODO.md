@@ -137,25 +137,52 @@ the complete browser client planned for Phase 4.
 * Reset visibly restores the configured initial state and clears control and
   equipment runtime state.
 
-## Phase 3: ATP TCP/NDJSON Integration
+## Phase 3.1: ATP Communication Channel
 
-Implement the external ATP boundary and connect it to the running simulation.
+Establish the transport to the external ATP processes and complete the
+connection handshake. Only `HELLO` / `HELLO_ACK` appear on the wire; no
+simulation content is sent.
 
-### ATP Integration Work
+### ATP Channel Work
+
+* Implement the client connection-state machine: connect, retry, and reconnect
+  per §4.2.
+* Implement one reconnecting TCP client per configured train cab.
+* Send `HELLO` and handle `HELLO_ACK` on each established connection.
+
+### ATP Channel Passing Criteria
+
+* The application opens a TCP connection to the integration test ATP server
+  for each configured cab and completes the `HELLO` / `HELLO_ACK` exchange.
+* A test server that is down at startup is retried and the handshake
+  completes once it appears, without restarting the simulator.
+* Dropping one ATP test server connection is reported without stopping the
+  simulation or another cab's connection.
+
+## Phase 3.2: ATP Protocol and Content Publishing
+
+Speak the NDJSON protocol over the established channel, send the real
+content, and record it.
+
+### ATP Protocol and Content Work
 
 * Implement protocol message validation and NDJSON framing.
-* Implement one reconnecting TCP client per configured train cab.
-* Send `HELLO`, handle `HELLO_ACK`, and publish `TRAIN_STATE` and `BTM_RX`.
+* Reject or report malformed or unexpected messages with `ERROR` semantics.
+* Implement `HEARTBEAT` / `HEARTBEAT_ACK` keepalive.
+* Publish `TRAIN_STATE` for each cab from the core's snapshots after each
+  nominal fixed step and control-state transition.
+* Deliver BTM payload data as `BTM_RX` messages when the train model accepts
+  a BTM delivery.
 * Record train-to-ATP and ATP-to-train traffic as NDJSON.
 
-### ATP Integration Passing Criteria
+### ATP Protocol and Content Passing Criteria
 
-* The application connects to the integration test ATP server and completes
-  the `HELLO` / `HELLO_ACK` exchange for each configured cab.
+* Sending malformed data from one ATP test server is reported without
+  stopping the simulation or another cab's connection.
 * A manual simulation step produces a correctly framed `TRAIN_STATE` message
   with the matching train and cab identifiers.
-* Disconnecting or sending malformed data from one ATP test server is reported
-  without stopping the simulation or another cab's connection.
+* A BTM delivery through the equipment endpoint produces a `BTM_RX` message
+  whose decoded `data` equals the delivered bytes.
 * The recorded NDJSON contains simulation time, direction, message type, and
   train/cab identity for every recorded protocol message.
 
