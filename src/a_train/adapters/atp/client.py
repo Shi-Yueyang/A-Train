@@ -4,8 +4,9 @@ The simulator acts as the TCP client; ATP acts as the TCP server. Each client
 owns exactly one cab's connection and runs a connection loop:
 
     CONNECTING --TCP open--> HANDSHAKING --HELLO_ACK accepted--> READY
-        ^                        |  |                            |
-        +------- backoff wait <--+  +------ peer closed / error -+
+        ^                         |                                |
+        |                         +---- peer closed / error -------+
+        +--- backoff wait (state DISCONNECTED) <--+---------------+
 
 Every attempt sends ``HELLO``, waits for an accepted ``HELLO_ACK``, and — once
 READY — keeps reading so peer closure and protocol failures are detected. Any
@@ -14,17 +15,21 @@ error, unexpected close) returns to ``CONNECTING`` after an exponential backoff
 capped at ``max_retry_delay``; a session that reached READY resets the backoff
 so recovery from a dropped link is fast (§4.2 connection sequence).
 
-Phase 3.1 establishes the channel and handshake only: no ``TRAIN_STATE`` /
-``BTM_RX`` publishing and no inbound content handling — messages received
-while READY are logged and ignored until Phase 3.2.
+Phase 3.1 establishes the full channel: configuration-driven connect, retry,
+reconnect, handshake, and a persistent READY session. The writer accepts
+framed outbound messages (``send_message``); inbound messages are consumed
+intact without content-level interpretation -- ``TRAIN_STATE`` / ``BTM_RX``
+publishing and message semantics arrive with Phase 3.2.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from contextlib import suppress
 from enum import Enum
+from typing import Any
 
 from .protocol import encode_message, read_message
 
@@ -38,6 +43,7 @@ class ClientState(Enum):
     CONNECTING = "CONNECTING"
     HANDSHAKING = "HANDSHAKING"
     READY = "READY"
+    DISCONNECTED = "DISCONNECTED"
     STOPPED = "STOPPED"
 
 
@@ -65,6 +71,7 @@ class AtpClient:
 
         self._state = ClientState.IDLE
         self._task: asyncio.Task[None] | None = None
+        self._writer: asyncio.StreamWriter | None = None
 
     @property
     def train_id(self) -> str:
@@ -73,6 +80,14 @@ class AtpClient:
     @property
     def cab_id(self) -> int:
         return self._cab_id
+
+    @property
+    def host(self) -> str:
+        return self._host
+
+    @property
+    def port(self) -> int:
+        return self._port
 
     @property
     def state(self) -> ClientState:
@@ -103,6 +118,23 @@ class AtpClient:
                 await self._task
             self._task = None
 
+    def send_message(self, message: Mapping[str, Any]) -> bool:
+        """Write one framed NDJSON message on the READY connection (§4.2).
+
+        Returns True if the bytes were queued for the peer, False if the
+        channel is not READY or the write failed (the connection loop then
+        reconnects). Content interpretation is Phase 3.2.
+        """
+
+        writer = self._writer
+        if self._state is not ClientState.READY or writer is None:
+            return False
+        try:
+            writer.write(encode_message(message))
+        except (ConnectionError, OSError, RuntimeError):
+            return False
+        return True
+
     async def _run(self) -> None:
         delay = self._retry_delay
         while True:
@@ -114,7 +146,7 @@ class AtpClient:
                 raise
             except (OSError, ValueError, asyncio.TimeoutError) as exc:
                 logger.warning("%s: connection failed: %s; retrying", self._ident(), exc)
-            self._state = ClientState.CONNECTING
+            self._state = ClientState.DISCONNECTED
             await asyncio.sleep(delay)
             delay = self._retry_delay if reached_ready else min(delay * 2, self._max_retry_delay)
 
@@ -131,9 +163,13 @@ class AtpClient:
             if ack is None or ack.get("type") != "hello_ack" or not ack.get("accepted", False):
                 logger.warning("%s: handshake rejected or timed out (%r)", self._ident(), ack)
                 return False
+            self._writer = writer
             self._state = ClientState.READY
             logger.info("%s: handshake complete", self._ident())
-            await self._hold(reader)
+            try:
+                await self._hold(reader)
+            finally:
+                self._writer = None
             return True
         finally:
             writer.close()

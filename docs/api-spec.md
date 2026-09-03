@@ -66,6 +66,33 @@ Runs the core. Idempotent while already running. Body: none.
 
 **Response 200**: `StatusResponse` after the transition.
 
+### GET /api/atp/status
+
+Read-only view of each configured cab's ATP channel (Phase 3.1, §4.2).
+`connections` is empty when no ATP endpoints are configured.
+
+**Response 200**:
+
+```json
+{
+  "connections": [
+    {
+      "train_id": "TRAIN001",
+      "cab_id": 1,
+      "host": "127.0.0.1",
+      "port": 9101,
+      "state": "READY",
+      "ready": true
+    }
+  ]
+}
+```
+
+| Field   | Type   | Notes                                                                     |
+| ------- | ------ | ------------------------------------------------------------------------- |
+| `state` | string | `IDLE` / `CONNECTING` / `HANDSHAKING` / `READY` / `DISCONNECTED` / `STOPPED`. |
+| `ready` | bool   | True only while `state` is `READY` (handshake complete, channel persistent). |
+
 ### POST /api/simulation/pause
 
 Pauses the core. Idempotent while paused or stopped. Body: none.

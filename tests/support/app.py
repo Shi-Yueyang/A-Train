@@ -24,11 +24,13 @@ from a_train.domain.train import TrainConfig
 @asynccontextmanager
 async def running_app(
     train_configs: Sequence[TrainConfig] | None = None,
-    atp_endpoints: Sequence[AtpEndpoint] = (),
+    atp_endpoints: Sequence[AtpEndpoint] | None = None,
     *,
     atp_retry_delay: float = 0.05,
     atp_handshake_timeout: float = 5.0,
 ) -> AsyncIterator[httpx.AsyncClient]:
+    """``atp_endpoints=None`` uses the production env-var path (config.py)."""
+
     app = create_app(
         train_configs,
         atp_endpoints,

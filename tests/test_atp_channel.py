@@ -135,3 +135,96 @@ async def test_dropped_connection_is_reported_and_isolated(
                 assert any("handshake complete" in rec.getMessage() for rec in caplog.records)
     finally:
         await server.stop()
+
+
+# -- Criterion: a READY connection is persistent; inbound NDJSON lines are ------
+# -- consumed intact without content-level interpretation ------------------------
+
+
+async def test_ready_connection_survives_unknown_inbound_messages() -> None:
+    server = TestAtpServer()
+    port = await server.start()
+    try:
+        async with running_app([T1], _cabs(port)) as c:
+            for _ in range(2):
+                await server.wait_for_message()
+            await server.send({"type": "hello_ack", "accepted": True})
+            await _wait_until(lambda: len(_manager(c).ready_endpoints) == 2)
+
+            await server.send({"type": "heartbeat"})
+            await server.send({"type": "future_phase_3_message", "payload": [1, 2, 3]})
+            await asyncio.sleep(0.1)
+
+            assert len(_manager(c).ready_endpoints) == 2
+            assert server.connection_count == 2
+    finally:
+        await server.stop()
+
+
+# -- Criterion: the write path accepts framed NDJSON bytes on a READY channel ---
+
+
+async def test_send_message_writes_framed_ndjson_to_peer() -> None:
+    server = TestAtpServer()
+    port = await server.start()
+    try:
+        async with running_app([T1], [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]) as c:
+            manager = _manager(c)
+
+            hello = await server.wait_for_message()
+            assert hello["type"] == "hello"
+            # Not READY yet: the channel refuses outbound content.
+            assert manager.send_message("TRAIN001", 1, {"type": "train_state"}) is False
+
+            await server.send({"type": "hello_ack", "accepted": True})
+            await _wait_until(lambda: manager.ready_endpoints == frozenset({("TRAIN001", 1)}))
+
+            message = {"type": "train_state", "train_id": "TRAIN001", "cab_id": 1, "speed": 0.0}
+            assert manager.send_message("TRAIN001", 1, message) is True
+            assert await server.wait_for_message() == message
+
+            # Unconfigured cab: refused, session untouched.
+            assert manager.send_message("TRAIN001", 2, message) is False
+            assert manager.ready_endpoints == frozenset({("TRAIN001", 1)})
+    finally:
+        await server.stop()
+
+
+# -- Criterion: each cab's connection state is observable through the REST API --
+
+
+async def test_rest_reports_connection_states_through_the_lifecycle() -> None:
+    port = _free_port()
+    async with running_app([T1], [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]) as c:
+        await asyncio.sleep(0.15)  # refused attempts put the client in backoff
+
+        async def _status_until(*states: str, timeout: float = 5.0) -> dict:
+            async def _poll() -> dict:
+                while True:
+                    body = (await c.get("/api/atp/status")).json()
+                    conn = body["connections"][0]
+                    if conn["state"] in states:
+                        return conn
+                    await asyncio.sleep(0.02)
+
+            return await asyncio.wait_for(_poll(), timeout)
+
+        conn = await _status_until("DISCONNECTED", "CONNECTING")
+        assert conn["train_id"] == "TRAIN001"
+        assert conn["cab_id"] == 1
+        assert conn["host"] == "127.0.0.1" and conn["port"] == port
+        assert conn["ready"] is False
+
+        server = TestAtpServer()
+        await server.start(port=port)
+        try:
+            hello = await server.wait_for_message()
+            assert hello["type"] == "hello"
+            await server.send({"type": "hello_ack", "accepted": True})
+            ready = await _status_until("READY")
+            assert ready["ready"] is True
+
+            server.drop_client(0)
+            await _status_until("DISCONNECTED", "CONNECTING")
+        finally:
+            await server.stop()

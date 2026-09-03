@@ -849,6 +849,7 @@ train-simulator/
 ├── src/a_train/
 │   ├── __init__.py                 # Public package version and exports only.
 │   ├── __main__.py                 # `python -m a_train` command-line entry point.
+│   ├── config.py                   # ATP endpoint configuration for `run` (§4.2, Phase 3.1).
 │   ├── bootstrap.py                # Creates the core and adapters; owns process startup and shutdown.
 │   │
 │   ├── simulation/                 # Simulation-time orchestration; no HTTP or TCP handling.

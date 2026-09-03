@@ -14,6 +14,7 @@ core; they never mutate world state directly.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
@@ -22,6 +23,7 @@ from fastapi import FastAPI
 
 from .adapters.api.app import create_app as build_app
 from .adapters.atp.manager import AtpEndpoint, AtpManager
+from .config import ATP_ENDPOINTS_ENV, decode_env
 from .domain.train import TrainConfig
 from .simulation.commands import Command
 from .simulation.core import SimulationCore
@@ -49,7 +51,7 @@ DEFAULT_TRAIN_CONFIGS: tuple[TrainConfig, ...] = (
 async def lifespan(
     app: FastAPI,
     train_configs: Sequence[TrainConfig] | None = None,
-    atp_endpoints: Sequence[AtpEndpoint] = (),
+    atp_endpoints: Sequence[AtpEndpoint] | None = None,
     *,
     atp_retry_delay: float = 1.0,
     atp_handshake_timeout: float = 10.0,
@@ -66,9 +68,10 @@ async def lifespan(
     )
     core_task = asyncio.create_task(core.run_loop(), name="simulation-core")
 
+    endpoints = _endpoints_from_environment() if atp_endpoints is None else tuple(atp_endpoints)
     atp_manager = AtpManager(
         command_queue=command_queue,
-        endpoints=atp_endpoints,
+        endpoints=endpoints,
         retry_delay=atp_retry_delay,
         handshake_timeout=atp_handshake_timeout,
     )
@@ -91,18 +94,32 @@ async def lifespan(
             pass
 
 
+def _endpoints_from_environment() -> tuple[AtpEndpoint, ...]:
+    """Decode ATP endpoints set by the ``run`` command (§4.2, config.py)."""
+
+    entries = decode_env(os.environ.get(ATP_ENDPOINTS_ENV, ""))
+    return tuple(AtpEndpoint(e["train_id"], e["cab_id"], e["host"], e["port"]) for e in entries)
+
+
 def create_app(
     train_configs: Sequence[TrainConfig] | None = None,
-    atp_endpoints: Sequence[AtpEndpoint] = (),
+    atp_endpoints: Sequence[AtpEndpoint] | None = None,
     *,
     atp_retry_delay: float = 1.0,
     atp_handshake_timeout: float = 10.0,
 ) -> FastAPI:
-    """Build the FastAPI application with the production lifespan wired in."""
+    """Build the FastAPI application with the production lifespan wired in.
+
+    ``atp_endpoints=None`` (the uvicorn factory default) loads the endpoints
+    from the ``A_TRAIN_ATP_ENDPOINTS`` environment variable; pass a sequence
+    (including the empty tuple) to configure them explicitly.
+    """
 
     configs = train_configs
     train_configs_capture: Sequence[TrainConfig] | None = configs
-    endpoints_capture = tuple(atp_endpoints)
+    endpoints_capture: Sequence[AtpEndpoint] | None = (
+        None if atp_endpoints is None else tuple(atp_endpoints)
+    )
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):

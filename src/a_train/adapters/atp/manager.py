@@ -5,21 +5,22 @@ process has exactly one connection). ``start()`` launches every client's
 connection loop; ``stop()`` cancels them. It also exposes handshake
 observability (``clients``, ``ready_endpoints``) without touching world state.
 
-Phase 3.1 establishes channels and the ``HELLO`` / ``HELLO_ACK`` handshake
-only. The manager receives no core snapshots for publishing and converts no
-inbound content into queued commands; ``TRAIN_STATE`` / ``BTM_RX`` publishing
-and content handling arrive with Phase 3.2.
+Phase 3.1 establishes the full channel: endpoints come from the run-command
+configuration, each client holds a persistent reconnecting connection, and
+``send_message`` writes framed bytes to a READY cab. ``TRAIN_STATE`` /
+``BTM_RX`` publishing and content handling arrive with Phase 3.2.
 
-With no endpoints configured (the default), ``start()`` and ``stop()`` are
-no-ops and the application behaves exactly as before Phase 3.
+With no endpoints configured (the default when the environment variable is
+unset), ``start()`` and ``stop()`` are no-ops and the application behaves
+exactly as before Phase 3.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .client import AtpClient
 
@@ -65,6 +66,14 @@ class AtpManager:
         """(train_id, cab_id) pairs whose channel has completed the handshake."""
 
         return frozenset((c.train_id, c.cab_id) for c in self._clients if c.ready)
+
+    def send_message(self, train_id: str, cab_id: int, message: Mapping[str, Any]) -> bool:
+        """Write one framed message to one cab's ATP process; False if absent/not READY."""
+
+        for client in self._clients:
+            if client.train_id == train_id and client.cab_id == cab_id:
+                return client.send_message(message)
+        return False
 
     async def start(self) -> None:
         for endpoint in self._endpoints:

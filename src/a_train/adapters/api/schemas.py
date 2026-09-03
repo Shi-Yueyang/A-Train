@@ -78,6 +78,23 @@ class TrainsResponse(BaseModel):
     trains: list[TrainResponse]
 
 
+class AtpConnectionResponse(BaseModel):
+    """One cab's ATP channel state (Phase 3.1 observability, §4.2)."""
+
+    train_id: str
+    cab_id: int
+    host: str
+    port: int
+    state: str = Field(
+        description="IDLE / CONNECTING / HANDSHAKING / READY / DISCONNECTED / STOPPED."
+    )
+    ready: bool
+
+
+class AtpStatusResponse(BaseModel):
+    connections: list[AtpConnectionResponse]
+
+
 def _serialize_equipment(equipment: dict[str, object]) -> dict[str, object]:
     """Serialize frozen equipment snapshots to JSON-safe dicts."""
 

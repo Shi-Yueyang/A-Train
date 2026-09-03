@@ -7,6 +7,8 @@ server (headless). The web UI is an optional client.
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -29,6 +31,21 @@ def _build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--reload", action="store_true", help="Enable uvicorn auto-reload (development)."
     )
+    run_p.add_argument(
+        "--atp",
+        action="append",
+        default=[],
+        metavar="TRAIN_ID:CAB_ID=HOST:PORT",
+        help=(
+            "Connect to an external ATP process; repeatable, one per cab, "
+            "e.g. --atp TRAIN001:1=127.0.0.1:9101"
+        ),
+    )
+    run_p.add_argument(
+        "--atp-config",
+        metavar="FILE",
+        help='JSON file: {"atp_endpoints": [{"train_id", "cab_id", "host", "port"}, ...]}',
+    )
 
     return parser
 
@@ -38,13 +55,37 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        return _run_server(host=args.host, port=args.port, reload=args.reload)
+        return _run_server(
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            atp_config=args.atp_config,
+            atp_specs=args.atp,
+        )
     parser.error(f"unknown command: {args.command!r}")
     return 2
 
 
-def _run_server(host: str, port: int, reload: bool) -> int:
+def _run_server(
+    host: str,
+    port: int,
+    reload: bool,
+    atp_config: str | None = None,
+    atp_specs: list[str] | None = None,
+) -> int:
     import uvicorn
+
+    from .config import ATP_ENDPOINTS_ENV, ConfigError, encode_env, resolve_endpoints
+
+    try:
+        endpoints = resolve_endpoints(atp_config, atp_specs or ())
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if endpoints:
+        os.environ[ATP_ENDPOINTS_ENV] = encode_env(endpoints)
+    else:
+        os.environ.pop(ATP_ENDPOINTS_ENV, None)
 
     uvicorn.run(
         "a_train.bootstrap:create_app",

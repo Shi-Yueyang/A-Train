@@ -18,6 +18,8 @@ from ...simulation.commands import EquipmentCommand, TrainControlCommand
 from ...simulation.core import SimulationCore
 from ...simulation.snapshots import SimulationSnapshot
 from .schemas import (
+    AtpConnectionResponse,
+    AtpStatusResponse,
     EquipmentSetRequest,
     StatusResponse,
     StepRequest,
@@ -59,6 +61,26 @@ def _find_train(snap: SimulationSnapshot, train_id: str):
 @router.get("/status", response_model=StatusResponse)
 async def get_status(core: SimulationCore = Depends(get_core)) -> StatusResponse:
     return _to_status(core.get_snapshot())
+
+
+@router.get("/atp/status", response_model=AtpStatusResponse)
+async def get_atp_status(request: Request) -> AtpStatusResponse:
+    """Report each configured cab's ATP channel state (§4.2, Phase 3.1)."""
+
+    manager = request.app.state.atp_manager
+    return AtpStatusResponse(
+        connections=[
+            AtpConnectionResponse(
+                train_id=client.train_id,
+                cab_id=client.cab_id,
+                host=client.host,
+                port=client.port,
+                state=client.state.value,
+                ready=client.ready,
+            )
+            for client in manager.clients
+        ]
+    )
 
 
 @router.post("/simulation/start", response_model=StatusResponse)
