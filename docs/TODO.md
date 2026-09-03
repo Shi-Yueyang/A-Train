@@ -179,8 +179,8 @@ publishing, and keepalive remain in Phase 3.2.
 
 ## Phase 3.2: ATP Protocol and Content Publishing
 
-Speak the NDJSON protocol over the established channel, send the real
-content, and record it.
+Speak the NDJSON protocol over the established channel and send the real
+content.
 
 ### ATP Protocol and Content Work
 
@@ -191,7 +191,6 @@ content, and record it.
   nominal fixed step and control-state transition.
 * Deliver BTM payload data as `BTM_RX` messages when the train model accepts
   a BTM delivery.
-* Record train-to-ATP and ATP-to-train traffic as NDJSON.
 
 ### ATP Protocol and Content Passing Criteria
 
@@ -201,8 +200,6 @@ content, and record it.
   with the matching train and cab identifiers.
 * A BTM delivery through the equipment endpoint produces a `BTM_RX` message
   whose decoded `data` equals the delivered bytes.
-* The recorded NDJSON contains simulation time, direction, message type, and
-  train/cab identity for every recorded protocol message.
 
 ## Phase 4: Web Control and Live State
 
@@ -243,14 +240,16 @@ integration.
 ### Release Passing Criteria
 
 * Re-running the same initial state and command sequence produces identical
-  recorded state and protocol traffic after excluding connection-establishment
-  timing.
+  state and protocol traffic (observed through the test ATP server) after
+  excluding connection-establishment timing.
 * The complete integration suite passes on Linux and Windows.
 * README instructions allow a new developer to install dependencies, start the
   simulator, and connect a test ATP process.
 
 ## Deferred Until a New Phase
 
+* Train <-> ATP traffic recording (§6.2): removed with Phase 3.2; re-add as
+  its own phase if audit trails are needed.
 * More than one-dimensional track topology.
 * High-fidelity 3D graphics.
 * Multiplayer or distributed simulation.

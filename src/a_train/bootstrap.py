@@ -23,7 +23,7 @@ from fastapi import FastAPI
 
 from .adapters.api.app import create_app as build_app
 from .adapters.atp.manager import AtpEndpoint, AtpManager
-from .config import ATP_ENDPOINTS_ENV, decode_env
+from .config import ATP_ENDPOINTS_ENV, ATP_HEARTBEAT_ENV, decode_env
 from .domain.train import TrainConfig
 from .simulation.commands import Command
 from .simulation.core import SimulationCore
@@ -55,6 +55,7 @@ async def lifespan(
     *,
     atp_retry_delay: float = 1.0,
     atp_handshake_timeout: float = 10.0,
+    atp_heartbeat_interval: float | None = None,
 ):
     # Startup: assemble production components and start background tasks.
     command_queue: asyncio.Queue[Command] = asyncio.Queue()
@@ -69,11 +70,15 @@ async def lifespan(
     core_task = asyncio.create_task(core.run_loop(), name="simulation-core")
 
     endpoints = _endpoints_from_environment() if atp_endpoints is None else tuple(atp_endpoints)
+    heartbeat = (
+        _heartbeat_from_environment() if atp_heartbeat_interval is None else atp_heartbeat_interval
+    )
     atp_manager = AtpManager(
-        command_queue=command_queue,
+        core,
         endpoints=endpoints,
         retry_delay=atp_retry_delay,
         handshake_timeout=atp_handshake_timeout,
+        heartbeat_interval=heartbeat,
     )
     await atp_manager.start()
 
@@ -101,18 +106,30 @@ def _endpoints_from_environment() -> tuple[AtpEndpoint, ...]:
     return tuple(AtpEndpoint(e["train_id"], e["cab_id"], e["host"], e["port"]) for e in entries)
 
 
+def _heartbeat_from_environment() -> float | None:
+    raw = os.environ.get(ATP_HEARTBEAT_ENV, "")
+    if not raw.strip():
+        return None
+    interval = float(raw)
+    if interval <= 0:
+        raise ValueError(f"{ATP_HEARTBEAT_ENV} must be a positive number of seconds")
+    return interval
+
+
 def create_app(
     train_configs: Sequence[TrainConfig] | None = None,
     atp_endpoints: Sequence[AtpEndpoint] | None = None,
     *,
     atp_retry_delay: float = 1.0,
     atp_handshake_timeout: float = 10.0,
+    atp_heartbeat_interval: float | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with the production lifespan wired in.
 
     ``atp_endpoints=None`` (the uvicorn factory default) loads the endpoints
     from the ``A_TRAIN_ATP_ENDPOINTS`` environment variable; pass a sequence
-    (including the empty tuple) to configure them explicitly.
+    (including the empty tuple) to configure them explicitly. The heartbeat
+    interval follows the same env-first pattern (§4.2).
     """
 
     configs = train_configs
@@ -129,6 +146,7 @@ def create_app(
             atp_endpoints=endpoints_capture,
             atp_retry_delay=atp_retry_delay,
             atp_handshake_timeout=atp_handshake_timeout,
+            atp_heartbeat_interval=atp_heartbeat_interval,
         ):
             yield
 

@@ -21,15 +21,19 @@ ruff check .
 ruff format .
 ```
 
-## Configuring ATP endpoints (Phase 3.1)
+## Configuring ATP endpoints (Phases 3.1-3.2)
 
 By default the server runs with no ATP connections. Configure one endpoint per
 cab on the `run` command; each becomes a persistent reconnecting TCP client
-that completes the `HELLO` / `HELLO_ACK` handshake (§4.2). No protocol content
-is exchanged yet — publishing arrives in Phase 3.2.
+that completes the `HELLO` / `HELLO_ACK` handshake (§4.2). Phase 3.2 content
+flows over those channels: `TRAIN_STATE` after every snapshot, `BTM_RX` per
+BTM delivery, `HEARTBEAT` keepalive when configured, inbound `TRAIN_COMMAND`
+driving the train, and `ERROR` reporting.
 
 ```bash
-python -m a_train run --atp TRAIN001:1=127.0.0.1:9101 --atp TRAIN001:2=127.0.0.1:9102
+python -m a_train run \
+  --atp TRAIN001:1=127.0.0.1:9101 --atp TRAIN001:2=127.0.0.1:9102 \
+  --atp-heartbeat 10
 
 # or a JSON file: {"atp_endpoints": [{"train_id": "TRAIN001", "cab_id": 1,
 #                                     "host": "127.0.0.1", "port": 9101}]}

@@ -47,6 +47,18 @@ async def _wait_until(predicate: Callable[[], bool], timeout: float = 5.0) -> No
     await asyncio.wait_for(_poll(), timeout)
 
 
+async def _next_message(server, mtype: str, timeout: float = 10.0) -> dict:
+    """Pop from the shared server deque until a message of the given type."""
+
+    async def _poll() -> dict:
+        while True:
+            message = await server.wait_for_message(timeout=timeout)
+            if message.get("type") == mtype:
+                return message
+
+    return await asyncio.wait_for(_poll(), timeout)
+
+
 def _free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -117,7 +129,7 @@ async def test_dropped_connection_is_reported_and_isolated(
                 await _wait_until(lambda: server.connection_count == 1)
 
                 # The dropped cab reconnects and completes a fresh handshake.
-                hello = await server.wait_for_message()
+                hello = await _next_message(server, "hello")
                 assert hello["type"] == "hello"
                 await server.send({"type": "hello_ack", "accepted": True})
                 await _wait_until(lambda: len(_manager(c).ready_endpoints) == 2)
@@ -130,8 +142,12 @@ async def test_dropped_connection_is_reported_and_isolated(
                 assert status["simulation_time"] == pytest.approx(0.5)
                 assert status["simulation_state"] == "RUNNING"
 
-                # The drop and the recovery are reported through logs.
-                assert any("closed by peer" in rec.getMessage() for rec in caplog.records)
+                # The drop and the recovery are reported through logs. A
+                # server-side close may surface as clean EOF or as a reset.
+                assert any(
+                    "closed by peer" in rec.getMessage() or "connection failed" in rec.getMessage()
+                    for rec in caplog.records
+                )
                 assert any("handshake complete" in rec.getMessage() for rec in caplog.records)
     finally:
         await server.stop()
@@ -179,9 +195,9 @@ async def test_send_message_writes_framed_ndjson_to_peer() -> None:
             await server.send({"type": "hello_ack", "accepted": True})
             await _wait_until(lambda: manager.ready_endpoints == frozenset({("TRAIN001", 1)}))
 
-            message = {"type": "train_state", "train_id": "TRAIN001", "cab_id": 1, "speed": 0.0}
+            message = {"type": "phase31_probe", "n": 1}
             assert manager.send_message("TRAIN001", 1, message) is True
-            assert await server.wait_for_message() == message
+            assert await _next_message(server, "phase31_probe") == message
 
             # Unconfigured cab: refused, session untouched.
             assert manager.send_message("TRAIN001", 2, message) is False

@@ -1,14 +1,15 @@
-"""Creates clients and owns one per configured ATP endpoint (§4, §2.6).
+"""Creates clients and bridges snapshots and ATP commands (§4, §2.6).
 
 The manager holds one ``AtpClient`` per configured train cab (§4.2: each ATP
 process has exactly one connection). ``start()`` launches every client's
-connection loop; ``stop()`` cancels them. It also exposes handshake
-observability (``clients``, ``ready_endpoints``) without touching world state.
+connection loop, subscribes one bounded snapshot queue per cab, and runs a
+publisher task per client that turns core snapshots into ``TRAIN_STATE`` and
+``BTM_RX`` lines (§4.4, §4.5). Inbound ATP content is validated and converted
+into commands submitted to the core (§4.1); rejected input is answered with an
+``ERROR`` message (§4.3).
 
-Phase 3.1 establishes the full channel: endpoints come from the run-command
-configuration, each client holds a persistent reconnecting connection, and
-``send_message`` writes framed bytes to a READY cab. ``TRAIN_STATE`` /
-``BTM_RX`` publishing and content handling arrive with Phase 3.2.
+Publisher and inbound tasks perform all protocol I/O outside ``run_loop()``,
+so a slow or chatty ATP peer cannot delay physics (§2.6).
 
 With no endpoints configured (the default when the environment variable is
 unset), ``start()`` and ``stop()`` are no-ops and the application behaves
@@ -18,14 +19,22 @@ exactly as before Phase 3.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+import logging
+from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from ...domain.train import EquipmentSet, TrainControl
+from ...simulation.commands import EquipmentCommand, TrainControlCommand
 from .client import AtpClient
+from .protocol import make_error, parse_train_command
 
 if TYPE_CHECKING:
-    from ...simulation.commands import Command
+    from ...simulation.core import SimulationCore
+
+logger = logging.getLogger("a_train.adapters.atp")
 
 
 @dataclass(frozen=True)
@@ -39,23 +48,27 @@ class AtpEndpoint:
 
 
 class AtpManager:
-    """Owns the TCP clients for all configured external ATP processes."""
+    """Owns the TCP clients, publishers, and inbound handling for all cabs."""
 
     def __init__(
         self,
-        command_queue: asyncio.Queue[Command] | None = None,
+        core: SimulationCore,
         endpoints: Sequence[AtpEndpoint] = (),
         *,
         retry_delay: float = 1.0,
         max_retry_delay: float = 30.0,
         handshake_timeout: float = 10.0,
+        heartbeat_interval: float | None = None,
     ) -> None:
-        self._command_queue = command_queue
+        self._core = core
         self._endpoints = tuple(endpoints)
         self._retry_delay = retry_delay
         self._max_retry_delay = max_retry_delay
         self._handshake_timeout = handshake_timeout
+        self._heartbeat_interval = heartbeat_interval
         self._clients: list[AtpClient] = []
+        self._publisher_tasks: dict[AtpClient, asyncio.Task[None]] = {}
+        self._queues: dict[AtpClient, asyncio.Queue[Any]] = {}
 
     @property
     def clients(self) -> tuple[AtpClient, ...]:
@@ -67,7 +80,7 @@ class AtpManager:
 
         return frozenset((c.train_id, c.cab_id) for c in self._clients if c.ready)
 
-    def send_message(self, train_id: str, cab_id: int, message: Mapping[str, Any]) -> bool:
+    def send_message(self, train_id: str, cab_id: int, message: dict[str, Any]) -> bool:
         """Write one framed message to one cab's ATP process; False if absent/not READY."""
 
         for client in self._clients:
@@ -85,6 +98,14 @@ class AtpManager:
                 retry_delay=self._retry_delay,
                 max_retry_delay=self._max_retry_delay,
                 handshake_timeout=self._handshake_timeout,
+                heartbeat_interval=self._heartbeat_interval,
+            )
+            client.set_inbound_handler(partial(self._handle_inbound, client))
+            queue = self._core.subscribe()
+            self._queues[client] = queue
+            self._publisher_tasks[client] = asyncio.create_task(
+                self._publish_loop(client, queue),
+                name=f"atp-publisher {endpoint.train_id} cab {endpoint.cab_id}",
             )
             await client.start()
             self._clients.append(client)
@@ -92,4 +113,76 @@ class AtpManager:
     async def stop(self) -> None:
         for client in self._clients:
             await client.stop()
+            task = self._publisher_tasks.pop(client, None)
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            queue = self._queues.pop(client, None)
+            if queue is not None:
+                self._core.unsubscribe(queue)
         self._clients.clear()
+
+    async def _publish_loop(self, client: AtpClient, queue: asyncio.Queue[Any]) -> None:
+        while True:
+            snapshot = await queue.get()
+            client.publish(snapshot)
+
+    # -- Inbound ATP content (§4.1, §4.3) --------------------------------------
+
+    async def _handle_inbound(self, client: AtpClient, message: dict[str, Any]) -> None:
+        mtype = message.get("type")
+        if mtype == "train_command":
+            await self._handle_train_command(client, message)
+        elif mtype == "error":
+            logger.warning("%s: ATP reported error: %r", client.ident, message)
+        else:
+            client.send_message(
+                make_error(
+                    "unknown_message_type",
+                    f"unexpected message type: {mtype!r}",
+                    train_id=client.train_id,
+                    cab_id=client.cab_id,
+                )
+            )
+
+    async def _handle_train_command(self, client: AtpClient, message: dict[str, Any]) -> None:
+        try:
+            drive_demand, door = parse_train_command(message, client.train_id, client.cab_id)
+        except ValueError as exc:
+            client.send_message(
+                make_error(
+                    "invalid_train_command",
+                    str(exc),
+                    train_id=client.train_id,
+                    cab_id=client.cab_id,
+                )
+            )
+            return
+
+        commands: list[Any] = []
+        if drive_demand is not None:
+            commands.append(
+                TrainControlCommand(
+                    train_id=client.train_id,
+                    payload=TrainControl(cab_id=client.cab_id, drive_demand=drive_demand),
+                )
+            )
+        if door is not None:
+            commands.append(
+                EquipmentCommand(
+                    train_id=client.train_id,
+                    payload=EquipmentSet(key="door", command=door),
+                )
+            )
+        for command in commands:
+            result = await self._core.submit_command(command)
+            if not result.ok:
+                client.send_message(
+                    make_error(
+                        "command_rejected",
+                        result.error or "command rejected",
+                        train_id=client.train_id,
+                        cab_id=client.cab_id,
+                    )
+                )

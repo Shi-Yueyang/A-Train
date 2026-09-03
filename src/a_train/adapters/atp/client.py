@@ -11,29 +11,42 @@ owns exactly one cab's connection and runs a connection loop:
 Every attempt sends ``HELLO``, waits for an accepted ``HELLO_ACK``, and — once
 READY — keeps reading so peer closure and protocol failures are detected. Any
 failure (connection refused, timeout, rejected or malformed handshake, stream
-error, unexpected close) returns to ``CONNECTING`` after an exponential backoff
-capped at ``max_retry_delay``; a session that reached READY resets the backoff
-so recovery from a dropped link is fast (§4.2 connection sequence).
+error, unexpected close, heartbeat ack overdue) returns to ``CONNECTING`` after
+an exponential backoff capped at ``max_retry_delay``; a session that reached
+READY resets the backoff so recovery from a dropped link is fast (§4.2).
 
-Phase 3.1 establishes the full channel: configuration-driven connect, retry,
-reconnect, handshake, and a persistent READY session. The writer accepts
-framed outbound messages (``send_message``); inbound messages are consumed
-intact without content-level interpretation -- ``TRAIN_STATE`` / ``BTM_RX``
-publishing and message semantics arrive with Phase 3.2.
+Phase 3.2 adds the content over the established channel: ``publish`` converts
+core snapshots into cyclic ``TRAIN_STATE`` and event-driven ``BTM_RX`` lines;
+a configurable ``HEARTBEAT`` keepalive probes the link; inbound content is
+validated, answered with ``ERROR`` on malformed lines (§4.3), and dispatched
+to the manager for ATP-command handling.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from enum import Enum
 from typing import Any
 
-from .protocol import encode_message, read_message
+from ...simulation.snapshots import SimulationSnapshot
+from .protocol import (
+    decode_line,
+    encode_message,
+    make_btm_rx,
+    make_error,
+    make_heartbeat,
+    make_heartbeat_ack,
+    make_hello,
+    make_train_state,
+    read_message,
+)
 
 logger = logging.getLogger("a_train.adapters.atp")
+
+InboundHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class ClientState(Enum):
@@ -60,6 +73,8 @@ class AtpClient:
         retry_delay: float = 1.0,
         max_retry_delay: float = 30.0,
         handshake_timeout: float = 10.0,
+        heartbeat_interval: float | None = None,
+        on_message: InboundHandler | None = None,
     ) -> None:
         self._train_id = train_id
         self._cab_id = cab_id
@@ -68,10 +83,14 @@ class AtpClient:
         self._retry_delay = retry_delay
         self._max_retry_delay = max_retry_delay
         self._handshake_timeout = handshake_timeout
+        self._heartbeat_interval = heartbeat_interval
+        self._on_message = on_message
 
         self._state = ClientState.IDLE
         self._task: asyncio.Task[None] | None = None
         self._writer: asyncio.StreamWriter | None = None
+        self._last_snapshot: SimulationSnapshot | None = None
+        self._last_btm_count: int | None = None
 
     @property
     def train_id(self) -> str:
@@ -97,8 +116,14 @@ class AtpClient:
     def ready(self) -> bool:
         return self._state is ClientState.READY
 
-    def _ident(self) -> str:
+    @property
+    def ident(self) -> str:
         return f"ATP {self._train_id} cab {self._cab_id} ({self._host}:{self._port})"
+
+    def set_inbound_handler(self, handler: InboundHandler) -> None:
+        """Attach the manager callback for inbound non-keepalive messages (§4.1)."""
+
+        self._on_message = handler
 
     async def start(self) -> None:
         """Launch the connection loop as a background task on the running loop."""
@@ -118,12 +143,14 @@ class AtpClient:
                 await self._task
             self._task = None
 
+    # -- Outbound transport (§4.4, §4.5) --------------------------------------
+
     def send_message(self, message: Mapping[str, Any]) -> bool:
         """Write one framed NDJSON message on the READY connection (§4.2).
 
         Returns True if the bytes were queued for the peer, False if the
         channel is not READY or the write failed (the connection loop then
-        reconnects). Content interpretation is Phase 3.2.
+        reconnects).
         """
 
         writer = self._writer
@@ -135,6 +162,38 @@ class AtpClient:
             return False
         return True
 
+    def publish(self, snapshot: SimulationSnapshot) -> None:
+        """Publish one core snapshot as this cab's protocol content (§4.4, §4.5).
+
+        Writes ``TRAIN_STATE`` for every
+        READY snapshot and ``BTM_RX`` only when this cab's BTM delivery count
+        increased. Snapshots arriving before READY are remembered and
+        re-published on handshake completion.
+        """
+
+        self._last_snapshot = snapshot
+        if self._state is ClientState.READY:
+            self._publish_now(snapshot)
+
+    def _publish_now(self, snapshot: SimulationSnapshot) -> None:
+        train = next((t for t in snapshot.trains if t.train_id == self._train_id), None)
+        if train is None:
+            return
+        self.send_message(make_train_state(self._train_id, self._cab_id, train))
+        self._publish_btm(train.equipment.get("btm"))
+
+    def _publish_btm(self, entries: Any) -> None:
+        entry = next((e for e in entries or () if e.cab_id == self._cab_id), None)
+        if entry is None:
+            return
+        count = entry.received_count
+        if self._last_btm_count is not None and count > self._last_btm_count:
+            if entry.payload_b64 is not None:
+                self.send_message(make_btm_rx(entry.payload_b64))
+        self._last_btm_count = count
+
+    # -- Connection loop -------------------------------------------------------
+
     async def _run(self) -> None:
         delay = self._retry_delay
         while True:
@@ -145,7 +204,7 @@ class AtpClient:
             except asyncio.CancelledError:
                 raise
             except (OSError, ValueError, asyncio.TimeoutError) as exc:
-                logger.warning("%s: connection failed: %s; retrying", self._ident(), exc)
+                logger.warning("%s: connection failed: %s; retrying", self.ident, exc)
             self._state = ClientState.DISCONNECTED
             await asyncio.sleep(delay)
             delay = self._retry_delay if reached_ready else min(delay * 2, self._max_retry_delay)
@@ -156,16 +215,18 @@ class AtpClient:
         reader, writer = await asyncio.open_connection(self._host, self._port)
         try:
             self._state = ClientState.HANDSHAKING
-            hello = {"type": "hello", "train_id": self._train_id, "cab_id": self._cab_id}
+            hello = make_hello(self._train_id, self._cab_id)
             writer.write(encode_message(hello))
             await writer.drain()
             ack = await asyncio.wait_for(read_message(reader), self._handshake_timeout)
             if ack is None or ack.get("type") != "hello_ack" or not ack.get("accepted", False):
-                logger.warning("%s: handshake rejected or timed out (%r)", self._ident(), ack)
+                logger.warning("%s: handshake rejected or timed out (%r)", self.ident, ack)
                 return False
             self._writer = writer
             self._state = ClientState.READY
-            logger.info("%s: handshake complete", self._ident())
+            logger.info("%s: handshake complete", self.ident)
+            if self._last_snapshot is not None:
+                self._publish_now(self._last_snapshot)
             try:
                 await self._hold(reader)
             finally:
@@ -177,15 +238,51 @@ class AtpClient:
                 await writer.wait_closed()
 
     async def _hold(self, reader: asyncio.StreamReader) -> None:
-        """Consume inbound messages while READY until the peer closes (§4.3).
+        """Consume inbound messages while READY until the peer closes, or keep
+        the link warm with heartbeats when an interval is configured (§4.3)."""
 
-        Phase 3.1 defines no inbound content: every valid message is logged at
-        debug level; a malformed message raises so the caller reconnects.
-        """
-
+        loop = asyncio.get_running_loop()
+        awaiting_ack = False
+        next_beat = loop.time() + self._heartbeat_interval if self._heartbeat_interval else None
         while True:
-            message = await read_message(reader)
-            if message is None:
-                logger.info("%s: closed by peer", self._ident())
+            if next_beat is None:
+                line = await reader.readline()
+            else:
+                now = loop.time()
+                if now >= next_beat:
+                    if awaiting_ack:
+                        logger.warning("%s: heartbeat ack overdue; reconnecting", self.ident)
+                        return
+                    self.send_message(make_heartbeat(self._train_id, self._cab_id))
+                    awaiting_ack = True
+                    next_beat = now + self._heartbeat_interval
+                try:
+                    line = await asyncio.wait_for(
+                        reader.readline(), max(next_beat - loop.time(), 0.001)
+                    )
+                except asyncio.TimeoutError:
+                    continue
+            if not line:
+                logger.info("%s: closed by peer", self.ident)
                 return
-            logger.debug("%s: received %s (content handling is Phase 3.2)", self._ident(), message)
+            try:
+                message = decode_line(line)
+            except ValueError as exc:
+                # A framing-valid but invalid line is reported, not fatal (§4.3).
+                logger.warning("%s: %s", self.ident, exc)
+                self.send_message(
+                    make_error(
+                        "malformed_message",
+                        str(exc),
+                        train_id=self._train_id,
+                        cab_id=self._cab_id,
+                    )
+                )
+                continue
+            mtype = message.get("type")
+            if mtype == "heartbeat":
+                self.send_message(make_heartbeat_ack(self._train_id, self._cab_id))
+            elif mtype == "heartbeat_ack":
+                awaiting_ack = False
+            elif self._on_message is not None:
+                await self._on_message(message)

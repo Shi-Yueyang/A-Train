@@ -46,6 +46,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help='JSON file: {"atp_endpoints": [{"train_id", "cab_id", "host", "port"}, ...]}',
     )
+    run_p.add_argument(
+        "--atp-heartbeat",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="HEARTBEAT keepalive interval per ATP connection (default: disabled).",
+    )
 
     return parser
 
@@ -61,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
             reload=args.reload,
             atp_config=args.atp_config,
             atp_specs=args.atp,
+            atp_heartbeat=args.atp_heartbeat,
         )
     parser.error(f"unknown command: {args.command!r}")
     return 2
@@ -72,10 +80,17 @@ def _run_server(
     reload: bool,
     atp_config: str | None = None,
     atp_specs: list[str] | None = None,
+    atp_heartbeat: float | None = None,
 ) -> int:
     import uvicorn
 
-    from .config import ATP_ENDPOINTS_ENV, ConfigError, encode_env, resolve_endpoints
+    from .config import (
+        ATP_ENDPOINTS_ENV,
+        ATP_HEARTBEAT_ENV,
+        ConfigError,
+        encode_env,
+        resolve_endpoints,
+    )
 
     try:
         endpoints = resolve_endpoints(atp_config, atp_specs or ())
@@ -86,6 +101,10 @@ def _run_server(
         os.environ[ATP_ENDPOINTS_ENV] = encode_env(endpoints)
     else:
         os.environ.pop(ATP_ENDPOINTS_ENV, None)
+    if atp_heartbeat is not None:
+        os.environ[ATP_HEARTBEAT_ENV] = str(atp_heartbeat)
+    else:
+        os.environ.pop(ATP_HEARTBEAT_ENV, None)
 
     uvicorn.run(
         "a_train.bootstrap:create_app",

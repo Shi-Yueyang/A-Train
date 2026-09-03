@@ -1,10 +1,9 @@
 """ATP adapter public exports (§4).
 
-The adapter owns one reconnecting TCP client per configured train cab, encodes
-and decodes the NDJSON protocol, and bridges core snapshots and ATP commands.
-Phase 3.1 implements the channel: connect/retry/reconnect and the
-``HELLO`` / ``HELLO_ACK`` handshake; Phase 3.2 adds message validation and
-content publishing.
+The adapter owns one reconnecting TCP client per configured train cab, frames
+and validates the NDJSON protocol, publishes ``TRAIN_STATE`` / ``BTM_RX``
+content from core snapshots, and converts inbound ``TRAIN_COMMAND`` messages
+into core commands.
 """
 
 from __future__ import annotations

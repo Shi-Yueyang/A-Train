@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 ATP_ENDPOINTS_ENV = "A_TRAIN_ATP_ENDPOINTS"
+ATP_HEARTBEAT_ENV = "A_TRAIN_ATP_HEARTBEAT"
 
 _MAX_PORT = 65535
 

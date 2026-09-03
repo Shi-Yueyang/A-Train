@@ -28,6 +28,7 @@ async def running_app(
     *,
     atp_retry_delay: float = 0.05,
     atp_handshake_timeout: float = 5.0,
+    atp_heartbeat_interval: float | None = None,
 ) -> AsyncIterator[httpx.AsyncClient]:
     """``atp_endpoints=None`` uses the production env-var path (config.py)."""
 
@@ -36,6 +37,7 @@ async def running_app(
         atp_endpoints,
         atp_retry_delay=atp_retry_delay,
         atp_handshake_timeout=atp_handshake_timeout,
+        atp_heartbeat_interval=atp_heartbeat_interval,
     )
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)

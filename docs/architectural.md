@@ -588,6 +588,7 @@ HELLO
 HELLO_ACK
 
 TRAIN_STATE
+TRAIN_COMMAND
 
 BTM_RX
 
@@ -680,6 +681,57 @@ The message becomes:
   "data": "ASOk/wCBcg=="
 }
 ```
+
+## 4.6 TRAIN_COMMAND (ATP → Train)
+
+An ATP process requests a normalized train action through its own cab's
+channel (see §4.1: ATP requests, physics decides). The message must carry the
+connection's `cab_id` (and `train_id` if present); any identity mismatch is
+answered with `ERROR` and nothing is applied.
+
+```json
+{
+  "type": "train_command",
+  "train_id": "TRAIN001",
+  "cab_id": 1,
+  "drive_demand": -1.0,
+  "door": "close"
+}
+```
+
+`drive_demand` (finite, `[-1.0, 1.0]`) and `door` (`"open"`/`"close"`) are
+optional individually but at least one is required. The adapter converts the
+message into the same transport-neutral commands the REST API submits
+(`TrainControlCommand`, `EquipmentCommand`); core rejection is reported back
+as `ERROR` with code `command_rejected`.
+
+## 4.7 HEARTBEAT keepalive
+
+The simulator sends `HEARTBEAT` (with train/cab identity) on a configured
+interval while READY, and answers any inbound `HEARTBEAT` with
+`HEARTBEAT_ACK`. A peer that fails to acknowledge one full interval is
+treated as a dead link: the session is dropped and reconnects per §4.2.
+Interval `0`/unset disables keepalive.
+
+## 4.8 ERROR
+
+Every malformed or unexpected inbound message is answered (where the framing
+survives) and reported, without stopping the simulation or other cab's
+connection:
+
+```json
+{
+  "type": "error",
+  "code": "malformed_message",
+  "detail": "malformed NDJSON line: b'...'",
+  "train_id": "TRAIN001",
+  "cab_id": 1
+}
+```
+
+Codes: `malformed_message` (unframed line), `unknown_message_type`,
+`invalid_train_command` (identity or payload validation), and
+`command_rejected` (core refused the resulting command).
 
 ---
 
@@ -804,14 +856,11 @@ without opening a browser.
 
 ## 6.2 Recording
 
-Record important Train ↔ ATP traffic as NDJSON for debugging and audit.
-
-Example:
-
-```text
-{"time":10.00,"direction":"train_to_atp","type":"train_state",...}
-{"time":20.00,"direction":"train_to_atp","type":"btm_rx",...}
-```
+**Not implemented** (removed from Phase 3.2 scope; see TODO deferred list).
+The original intent stands: record important Train ↔ ATP traffic as NDJSON
+for debugging and audit, one line per message carrying simulation time,
+direction, message type, and train/cab identity. Note the key collision to
+resolve on re-addition: `train_state` carries its own `direction` field.
 
 ---
 
