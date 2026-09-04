@@ -140,9 +140,10 @@ the complete browser client planned for Phase 4.
 ## Phase 3.1: ATP Communication Channel
 
 Establish the fully configured, persistent TCP transport to the external ATP
-processes: the connection is set up end to end and stays up. Only `HELLO` /
-`HELLO_ACK` appear on the wire; protocol message semantics, content
-publishing, and keepalive remain in Phase 3.2.
+processes: the connection is set up end to end and stays up. There is no
+application-level handshake — the channel carries content the moment TCP
+opens (one ATP server per cab makes the endpoint mapping the identity);
+message semantics, content publishing, and keepalive remain in Phase 3.2.
 
 ### ATP Channel Work
 
@@ -153,11 +154,10 @@ publishing, and keepalive remain in Phase 3.2.
 * Implement the client connection-state machine: connect, retry, and reconnect
   per §4.2.
 * Implement one reconnecting TCP client per configured train cab.
-* Send `HELLO` and handle `HELLO_ACK` on each established connection.
-* Hold each established connection open indefinitely: after the handshake the
-  reader consumes incoming framed lines without content-level interpretation,
-  and the writer accepts framed bytes; malformed-message `ERROR` semantics and
-  application messages arrive in Phase 3.2.
+* Hold each established connection open indefinitely: the reader consumes
+  incoming framed lines without content-level interpretation, and the writer
+  accepts framed bytes; malformed-message `ERROR` semantics and application
+  messages arrive in Phase 3.2.
 * Report each cab's connection state (e.g. `CONNECTING` / `HANDSHAKING` /
   `READY` / `DISCONNECTED`) in the log so an operator can verify the channel
   without a test server.
@@ -165,14 +165,14 @@ publishing, and keepalive remain in Phase 3.2.
 ### ATP Channel Passing Criteria
 
 * The application opens a TCP connection for each configured ATP endpoint and
-  completes the `HELLO` / `HELLO_ACK` exchange; the endpoints come from the
-  `run` command configuration, exercised in tests through the same wiring the
-  production server uses.
+  is `READY` as soon as TCP opens; the endpoints come from the `run` command
+  configuration, exercised in tests through the same wiring the production
+  server uses.
 * A `READY` connection with no further traffic stays open, and NDJSON lines
-  sent in either direction after the handshake are consumed or written intact
-  without dropping the session.
-* A test server that is down at startup is retried and the handshake
-  completes once it appears, without restarting the simulator.
+  sent in either direction are consumed or written intact without dropping
+  the session.
+* A test server that is down at startup is retried and the channel reaches
+  `READY` once it appears, without restarting the simulator.
 * Dropping one ATP test server connection is reported without stopping the
   simulation or another cab's connection, and that cab's connection
   re-establishes on its own.

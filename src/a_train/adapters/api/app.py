@@ -10,6 +10,7 @@ are never shadowed.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
@@ -21,8 +22,12 @@ from .websocket import ws_router
 
 Lifespan = Callable[[FastAPI], AsyncIterator[None]]
 
-# src/a_train/adapters/api/app.py -> repo root -> web
-_WEB_DIR = Path(__file__).resolve().parents[4] / "web"
+if getattr(sys, "frozen", False):
+    # PyInstaller bundle: web/ ships alongside the extracted package root.
+    _WEB_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "web"
+else:
+    # src/a_train/adapters/api/app.py -> repo root -> web
+    _WEB_DIR = Path(__file__).resolve().parents[4] / "web"
 
 
 def create_app(lifespan: Lifespan) -> FastAPI:

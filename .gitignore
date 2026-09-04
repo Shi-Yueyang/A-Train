@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-build/
+/build/work/
 dist/
 
 # Virtual environments

@@ -1,8 +1,8 @@
 """Phase 3.1 acceptance tests — ATP communication channel (TODO.md §Phase 3.1).
 
-The application opens one reconnecting TCP connection per configured cab,
-completes the HELLO / HELLO_ACK handshake on each, retries while a server is
-down, and isolates a dropped connection from the simulation and other cabs.
+The application opens one reconnecting TCP connection per configured cab and
+is READY the moment TCP opens (no handshake); it retries while a server is
+down and isolates a dropped connection from the simulation and other cabs.
 All observed against the real application and a production-protocol test TCP
 server (§6.1); no production module is mocked.
 """
@@ -65,22 +65,24 @@ def _free_port() -> int:
         return int(probe.getsockname()[1])
 
 
-# -- Criterion: connection + handshake per configured cab -----------------------
+# -- Criterion: each configured cab reaches READY as soon as TCP opens ----------
 
 
-async def test_hello_handshake_completes_for_each_configured_cab() -> None:
+async def test_channels_become_ready_without_handshake() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
         async with running_app([T1], _cabs(port)) as c:
-            hellos = [await server.wait_for_message() for _ in range(2)]
-            assert all(m["type"] == "hello" for m in hellos)
-            assert {m["cab_id"] for m in hellos} == {1, 2}
-            assert all(m["train_id"] == "TRAIN001" for m in hellos)
-
-            await server.send({"type": "hello_ack", "accepted": True})
             await _wait_until(lambda: len(_manager(c).ready_endpoints) == 2)
             assert _manager(c).ready_endpoints == frozenset({("TRAIN001", 1), ("TRAIN001", 2)})
+            assert server.connection_count == 2
+
+            # Content flows on the fresh connections with no handshake first.
+            seen_cabs: set[int] = set()
+            while len(seen_cabs) < 2:
+                state = await _next_message(server, "train_state")
+                assert state["train_id"] == "TRAIN001"
+                seen_cabs.add(state["cab_id"])
     finally:
         await server.stop()
 
@@ -88,7 +90,7 @@ async def test_hello_handshake_completes_for_each_configured_cab() -> None:
 # -- Criterion: server down at startup is retried until it appears --------------
 
 
-async def test_handshake_completes_when_server_appears_later() -> None:
+async def test_channel_becomes_ready_when_server_appears_later() -> None:
     port = _free_port()
     async with running_app([T1], [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]) as c:
         await asyncio.sleep(0.15)  # several refused retries already elapsed
@@ -97,16 +99,14 @@ async def test_handshake_completes_when_server_appears_later() -> None:
         server = TestAtpServer()
         await server.start(port=port)
         try:
-            hello = await server.wait_for_message()
-            assert hello["type"] == "hello" and hello["cab_id"] == 1
-            await server.send({"type": "hello_ack", "accepted": True})
             await _wait_until(lambda: _manager(c).ready_endpoints == frozenset({("TRAIN001", 1)}))
+            assert server.connection_count == 1
         finally:
             await server.stop()
 
 
 # -- Criterion: a dropped connection is reported, simulation and other ----------
-# -- cabs keep running; the dropped cab reconnects and re-handshakes -------------
+# -- cabs keep running; the dropped cab reconnects on its own --------------------
 
 
 async def test_dropped_connection_is_reported_and_isolated(
@@ -117,21 +117,15 @@ async def test_dropped_connection_is_reported_and_isolated(
     try:
         with caplog.at_level(logging.INFO, logger="a_train.adapters.atp"):
             async with running_app([T1], _cabs(port)) as c:
-                for _ in range(2):
-                    await server.wait_for_message()
-                await server.send({"type": "hello_ack", "accepted": True})
                 await _wait_until(lambda: len(_manager(c).ready_endpoints) == 2)
 
                 await c.post("/api/simulation/time-mode", json={"mode": "MANUAL"})
                 await c.post("/api/simulation/start")
 
                 server.drop_client(0)
-                await _wait_until(lambda: server.connection_count == 1)
+                await _wait_until(lambda: len(_manager(c).ready_endpoints) < 2)
 
-                # The dropped cab reconnects and completes a fresh handshake.
-                hello = await _next_message(server, "hello")
-                assert hello["type"] == "hello"
-                await server.send({"type": "hello_ack", "accepted": True})
+                # The dropped cab re-establishes without a restart.
                 await _wait_until(lambda: len(_manager(c).ready_endpoints) == 2)
                 assert server.connection_count == 2
 
@@ -148,13 +142,13 @@ async def test_dropped_connection_is_reported_and_isolated(
                     "closed by peer" in rec.getMessage() or "connection failed" in rec.getMessage()
                     for rec in caplog.records
                 )
-                assert any("handshake complete" in rec.getMessage() for rec in caplog.records)
+                assert any("channel established" in rec.getMessage() for rec in caplog.records)
     finally:
         await server.stop()
 
 
-# -- Criterion: a READY connection is persistent; inbound NDJSON lines are ------
-# -- consumed intact without content-level interpretation ------------------------
+# -- Criterion: inbound NDJSON lines are consumed intact; unknown types get -----
+# -- an ERROR answer and the session survives ------------------------------------
 
 
 async def test_ready_connection_survives_unknown_inbound_messages() -> None:
@@ -162,13 +156,11 @@ async def test_ready_connection_survives_unknown_inbound_messages() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _cabs(port)) as c:
-            for _ in range(2):
-                await server.wait_for_message()
-            await server.send({"type": "hello_ack", "accepted": True})
             await _wait_until(lambda: len(_manager(c).ready_endpoints) == 2)
 
             await server.send({"type": "heartbeat"})
             await server.send({"type": "future_phase_3_message", "payload": [1, 2, 3]})
+            await _next_message(server, "error")
             await asyncio.sleep(0.1)
 
             assert len(_manager(c).ready_endpoints) == 2
@@ -181,18 +173,16 @@ async def test_ready_connection_survives_unknown_inbound_messages() -> None:
 
 
 async def test_send_message_writes_framed_ndjson_to_peer() -> None:
-    server = TestAtpServer()
-    port = await server.start()
-    try:
-        async with running_app([T1], [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]) as c:
-            manager = _manager(c)
+    port = _free_port()
+    async with running_app([T1], [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]) as c:
+        manager = _manager(c)
 
-            hello = await server.wait_for_message()
-            assert hello["type"] == "hello"
-            # Not READY yet: the channel refuses outbound content.
-            assert manager.send_message("TRAIN001", 1, {"type": "train_state"}) is False
+        # Channel down: the write path refuses.
+        assert manager.send_message("TRAIN001", 1, {"type": "phase31_probe", "n": 0}) is False
 
-            await server.send({"type": "hello_ack", "accepted": True})
+        server = TestAtpServer()
+        await server.start(port=port)
+        try:
             await _wait_until(lambda: manager.ready_endpoints == frozenset({("TRAIN001", 1)}))
 
             message = {"type": "phase31_probe", "n": 1}
@@ -202,8 +192,8 @@ async def test_send_message_writes_framed_ndjson_to_peer() -> None:
             # Unconfigured cab: refused, session untouched.
             assert manager.send_message("TRAIN001", 2, message) is False
             assert manager.ready_endpoints == frozenset({("TRAIN001", 1)})
-    finally:
-        await server.stop()
+        finally:
+            await server.stop()
 
 
 # -- Criterion: each cab's connection state is observable through the REST API --
@@ -234,9 +224,6 @@ async def test_rest_reports_connection_states_through_the_lifecycle() -> None:
         server = TestAtpServer()
         await server.start(port=port)
         try:
-            hello = await server.wait_for_message()
-            assert hello["type"] == "hello"
-            await server.send({"type": "hello_ack", "accepted": True})
             ready = await _status_until("READY")
             assert ready["ready"] is True
 

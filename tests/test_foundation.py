@@ -41,15 +41,16 @@ async def test_atp_server_speaks_ndjson(atp_server) -> None:
     assert port > 0
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     try:
-        writer.write((json.dumps({"type": "hello", "train_id": "T1"}) + "\n").encode("utf-8"))
+        sent = {"type": "train_state", "train_id": "T1", "cab_id": 1, "speed": 0.0}
+        writer.write((json.dumps(sent) + "\n").encode("utf-8"))
         await writer.drain()
 
         received = await atp_server.wait_for_message()
-        assert received["type"] == "hello"
+        assert received == sent
 
-        await atp_server.send({"type": "hello_ack", "accepted": True})
+        await atp_server.send({"type": "heartbeat_ack"})
         line = await reader.readline()
-        assert json.loads(line.decode("utf-8"))["accepted"] is True
+        assert json.loads(line.decode("utf-8"))["type"] == "heartbeat_ack"
     finally:
         writer.close()
         await writer.wait_closed()

@@ -7,6 +7,7 @@ server (headless). The web UI is an optional client.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 
@@ -97,6 +98,11 @@ def _run_server(
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+    # uvicorn configures only its own loggers; give a_train records (e.g. the
+    # ATP "channel established" line) a matching INFO-level root handler.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:\t%(message)s")
+
     if endpoints:
         os.environ[ATP_ENDPOINTS_ENV] = encode_env(endpoints)
     else:
@@ -105,6 +111,14 @@ def _run_server(
         os.environ[ATP_HEARTBEAT_ENV] = str(atp_heartbeat)
     else:
         os.environ.pop(ATP_HEARTBEAT_ENV, None)
+
+    if getattr(sys, "frozen", False):
+        # Frozen executables cannot resolve the ``module:attr`` factory string;
+        # build the app object directly and skip reload (no source tree).
+        from .bootstrap import create_app
+
+        uvicorn.run(create_app(), host=host, port=port)
+        return 0
 
     uvicorn.run(
         "a_train.bootstrap:create_app",

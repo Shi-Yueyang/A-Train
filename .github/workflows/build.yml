@@ -1,0 +1,79 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install
+        run: uv sync --frozen --all-extras
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Test
+        run: uv run pytest
+
+  build:
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: a-train-linux
+            binary: dist/a-train
+          - os: windows-latest
+            artifact: a-train-windows
+            binary: dist/a-train.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install
+        run: uv sync --frozen --all-extras
+      - name: Build executable
+        shell: bash
+        run: |
+          uv run pyinstaller --noconfirm --distpath dist --workpath build/work build/a-train.spec
+          ls -l dist
+      - name: Smoke test
+        shell: bash
+        run: |
+          "${{ matrix.binary }}" run --help > /dev/null
+          "${{ matrix.binary }}" run --port 8790 --atp TRAIN001:1=127.0.0.1:9599 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            sleep 1
+            if curl -sf http://127.0.0.1:8790/api/status > /dev/null; then
+              echo "server up after ${i}s"
+              curl -sf http://127.0.0.1:8790/api/atp/status
+              curl -sf -o /dev/null http://127.0.0.1:8790/
+              exit 0
+            fi
+          done
+          echo "server never came up"
+          exit 1
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error

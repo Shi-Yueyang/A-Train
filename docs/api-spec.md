@@ -91,7 +91,7 @@ Read-only view of each configured cab's ATP channel (Phase 3.1, §4.2).
 | Field   | Type   | Notes                                                                     |
 | ------- | ------ | ------------------------------------------------------------------------- |
 | `state` | string | `IDLE` / `CONNECTING` / `HANDSHAKING` / `READY` / `DISCONNECTED` / `STOPPED`. |
-| `ready` | bool   | True only while `state` is `READY` (handshake complete, channel persistent). |
+| `ready` | bool   | True while the TCP channel is open (`READY`). |
 
 ### POST /api/simulation/pause
 

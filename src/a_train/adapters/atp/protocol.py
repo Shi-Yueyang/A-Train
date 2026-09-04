@@ -1,38 +1,19 @@
 """NDJSON framing and protocol message validation (§4.2, §4.3).
 
 The protocol uses TCP + NDJSON (one JSON object per line). TCP provides the
-transport; the newline provides application-level message framing. Phase 3.2
-adds per-message validation and builders for every wire type: ``HELLO`` /
-``HELLO_ACK``, cyclic ``TRAIN_STATE``, ``BTM_RX`` (opaque base64 payload,
+transport; the newline provides application-level message framing. There is
+no handshake message: the channel is live the moment TCP opens. Builders and
+validators cover cyclic ``TRAIN_STATE``, ``BTM_RX`` (opaque base64 payload,
 §4.5), ``HEARTBEAT`` / ``HEARTBEAT_ACK`` keepalive, ``TRAIN_COMMAND`` (inbound
 ATP action request, §4.1), and ``ERROR`` reporting.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import math
 from collections.abc import Mapping
 from typing import Any
-
-
-async def read_message(reader: asyncio.StreamReader) -> dict[str, Any] | None:
-    """Read one NDJSON message from a stream reader.
-
-    Returns the decoded message, or ``None`` on clean end-of-stream (peer
-    closed between messages). Malformed JSON, an oversized line, or a message
-    without the mandatory ``type`` field (§4.3) raises ``ValueError`` so the
-    caller can treat it as a protocol failure.
-    """
-
-    try:
-        line = await reader.readline()
-    except asyncio.LimitOverrunError as exc:
-        raise ValueError(f"NDJSON line exceeds the reader limit: {exc}") from exc
-    if not line:
-        return None
-    return decode_line(line)
 
 
 def decode_line(line: bytes) -> dict[str, Any]:
@@ -54,10 +35,6 @@ def encode_message(message: Mapping[str, Any]) -> bytes:
 
 
 # -- Outbound message builders (§4.3-§4.5) -------------------------------------
-
-
-def make_hello(train_id: str, cab_id: int) -> dict[str, Any]:
-    return {"type": "hello", "train_id": train_id, "cab_id": cab_id}
 
 
 def make_heartbeat(train_id: str, cab_id: int) -> dict[str, Any]:

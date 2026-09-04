@@ -537,19 +537,17 @@ Example:
 
 TCP provides the transport. The newline provides application-level message framing.
 
-**Connection model:** ATP acts as the TCP server. Simulator acts as the TCP client.
+**Connection model:** ATP acts as the TCP server. Simulator acts as the TCP client. Each ATP process serves exactly one cab and accepts one connection at a time, so the cab identity lives in the endpoint configuration (which host:port the simulator dials); there is no in-band introduction.
 
 ```text
 Simulator                         ATP
     │                              │
     │──── TCP CONNECT ────────────>│
-    │                              │
-    │<──── HELLO_ACK ─────────────│
-    │                              │
+    │────── (channel is READY)     │
     │──── TRAIN_STATE ───────────>│
+    │──── BTM_RX ────────────────>│
+    │<──── TRAIN_COMMAND ─────────│
 ```
-
-Each ATP process has exactly one connection to the simulator.
 
 **Connection sequence:**
 
@@ -557,36 +555,16 @@ Each ATP process has exactly one connection to the simulator.
 1. Simulator starts
 2. External ATP process is running
 3. Simulator connects to ATP TCP server
-4. Simulator sends HELLO
-5. ATP sends HELLO_ACK
-6. Simulation begins
+4. The channel is live the moment TCP opens; content flows immediately
 ```
 
-Example:
-
-```json
-{
-  "type": "hello",
-  "train_id": "TRAIN001",
-  "cab_id": 1
-}
-```
-
-ATP responds:
-
-```json
-{
-  "type": "hello_ack",
-  "accepted": true
-}
-```
+A refused or dropped connection reconnects with exponential backoff
+(Phase 3.1 channel semantics). A peer that speaks no valid NDJSON is
+answered with `ERROR` (§4.8) or, on framing loss, reconnects.
 
 ## 4.3 Message Types
 
 ```text
-HELLO
-HELLO_ACK
-
 TRAIN_STATE
 TRAIN_COMMAND
 

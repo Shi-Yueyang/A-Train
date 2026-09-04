@@ -24,6 +24,9 @@ dev = [
     "asgi-lifespan>=2.1",
     "ruff>=0.4",
 ]
+build = [
+    "pyinstaller>=6.6",
+]
 
 [project.scripts]
 a-train = "a_train.__main__:main"

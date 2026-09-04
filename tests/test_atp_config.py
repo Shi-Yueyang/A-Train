@@ -3,7 +3,8 @@
 Endpoints reach the production server through the ``run`` command: CLI specs
 and a JSON config file are resolved into ``A_TRAIN_ATP_ENDPOINTS`` and decoded
 by the uvicorn factory ``create_app()``. Tests drive the same wiring: the CLI
-resolution directly, and the connection through the env-var path.
+resolution directly, and the connection through the env-var path (channels go
+READY on TCP connect; there is no handshake).
 """
 
 from __future__ import annotations
@@ -149,16 +150,13 @@ def test_run_command_reports_invalid_spec_without_starting(monkeypatch, capsys) 
 # -- The factory path: create_app() with no explicit endpoints ------------------
 
 
-async def test_env_configured_endpoints_handshake_through_run_wiring(monkeypatch) -> None:
+async def test_env_configured_endpoints_connect_through_run_wiring(monkeypatch) -> None:
     server = TestAtpServer()
     port = await server.start()
     endpoint = {**EP1, "port": port}
     monkeypatch.setenv(ATP_ENDPOINTS_ENV, encode_env([endpoint]))
     try:
         async with running_app([T1]) as c:
-            hello = await server.wait_for_message()
-            assert hello["type"] == "hello" and hello["cab_id"] == 1
-            await server.send({"type": "hello_ack", "accepted": True})
 
             async def _poll_ready() -> dict:
                 while True:
@@ -177,6 +175,9 @@ async def test_env_configured_endpoints_handshake_through_run_wiring(monkeypatch
                 "state": "READY",
                 "ready": True,
             }
+            # The channel carries content with no handshake exchange.
+            first = await server.wait_for_message()
+            assert first["type"] != "hello"
     finally:
         await server.stop()
 

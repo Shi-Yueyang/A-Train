@@ -1,7 +1,8 @@
 """Creates clients and bridges snapshots and ATP commands (§4, §2.6).
 
 The manager holds one ``AtpClient`` per configured train cab (§4.2: each ATP
-process has exactly one connection). ``start()`` launches every client's
+process serves exactly one cab and accepts one connection at a time, so no
+in-band handshake identifies the stream). ``start()`` launches every client's
 connection loop, subscribes one bounded snapshot queue per cab, and runs a
 publisher task per client that turns core snapshots into ``TRAIN_STATE`` and
 ``BTM_RX`` lines (§4.4, §4.5). Inbound ATP content is validated and converted
@@ -57,14 +58,12 @@ class AtpManager:
         *,
         retry_delay: float = 1.0,
         max_retry_delay: float = 30.0,
-        handshake_timeout: float = 10.0,
         heartbeat_interval: float | None = None,
     ) -> None:
         self._core = core
         self._endpoints = tuple(endpoints)
         self._retry_delay = retry_delay
         self._max_retry_delay = max_retry_delay
-        self._handshake_timeout = handshake_timeout
         self._heartbeat_interval = heartbeat_interval
         self._clients: list[AtpClient] = []
         self._publisher_tasks: dict[AtpClient, asyncio.Task[None]] = {}
@@ -76,7 +75,7 @@ class AtpManager:
 
     @property
     def ready_endpoints(self) -> frozenset[tuple[str, int]]:
-        """(train_id, cab_id) pairs whose channel has completed the handshake."""
+        """(train_id, cab_id) pairs whose channel is currently open (READY)."""
 
         return frozenset((c.train_id, c.cab_id) for c in self._clients if c.ready)
 
@@ -97,7 +96,6 @@ class AtpManager:
                 endpoint.port,
                 retry_delay=self._retry_delay,
                 max_retry_delay=self._max_retry_delay,
-                handshake_timeout=self._handshake_timeout,
                 heartbeat_interval=self._heartbeat_interval,
             )
             client.set_inbound_handler(partial(self._handle_inbound, client))

@@ -3,23 +3,23 @@
 The simulator acts as the TCP client; ATP acts as the TCP server. Each client
 owns exactly one cab's connection and runs a connection loop:
 
-    CONNECTING --TCP open--> HANDSHAKING --HELLO_ACK accepted--> READY
-        ^                         |                                |
-        |                         +---- peer closed / error -------+
-        +--- backoff wait (state DISCONNECTED) <--+---------------+
+    CONNECTING --TCP open--> READY
+        ^                       |
+        +--- backoff wait (state DISCONNECTED) <--+
+              peer closed / stream error / heartbeat ack overdue
 
-Every attempt sends ``HELLO``, waits for an accepted ``HELLO_ACK``, and — once
-READY — keeps reading so peer closure and protocol failures are detected. Any
-failure (connection refused, timeout, rejected or malformed handshake, stream
-error, unexpected close, heartbeat ack overdue) returns to ``CONNECTING`` after
-an exponential backoff capped at ``max_retry_delay``; a session that reached
-READY resets the backoff so recovery from a dropped link is fast (§4.2).
+There is no application-level handshake: the channel is READY the moment TCP
+opens, and snapshot publishing starts immediately. The cab identity lives in
+the endpoint configuration (one ATP server per cab), not in a ``HELLO``
+message. Any failure (connection refused, stream error, unexpected close,
+heartbeat ack overdue) returns to ``CONNECTING`` after an exponential backoff
+capped at ``max_retry_delay``; a session that reached READY resets the backoff
+so recovery from a dropped link is fast (§4.2).
 
-Phase 3.2 adds the content over the established channel: ``publish`` converts
-core snapshots into cyclic ``TRAIN_STATE`` and event-driven ``BTM_RX`` lines;
-a configurable ``HEARTBEAT`` keepalive probes the link; inbound content is
-validated, answered with ``ERROR`` on malformed lines (§4.3), and dispatched
-to the manager for ATP-command handling.
+``publish`` converts core snapshots into cyclic ``TRAIN_STATE`` and
+event-driven ``BTM_RX`` lines; a configurable ``HEARTBEAT`` keepalive probes
+the link; inbound content is validated, answered with ``ERROR`` on malformed
+lines (§4.3), and dispatched to the manager for ATP-command handling.
 """
 
 from __future__ import annotations
@@ -39,9 +39,7 @@ from .protocol import (
     make_error,
     make_heartbeat,
     make_heartbeat_ack,
-    make_hello,
     make_train_state,
-    read_message,
 )
 
 logger = logging.getLogger("a_train.adapters.atp")
@@ -54,7 +52,6 @@ class ClientState(Enum):
 
     IDLE = "IDLE"
     CONNECTING = "CONNECTING"
-    HANDSHAKING = "HANDSHAKING"
     READY = "READY"
     DISCONNECTED = "DISCONNECTED"
     STOPPED = "STOPPED"
@@ -72,7 +69,6 @@ class AtpClient:
         *,
         retry_delay: float = 1.0,
         max_retry_delay: float = 30.0,
-        handshake_timeout: float = 10.0,
         heartbeat_interval: float | None = None,
         on_message: InboundHandler | None = None,
     ) -> None:
@@ -82,7 +78,6 @@ class AtpClient:
         self._port = port
         self._retry_delay = retry_delay
         self._max_retry_delay = max_retry_delay
-        self._handshake_timeout = handshake_timeout
         self._heartbeat_interval = heartbeat_interval
         self._on_message = on_message
 
@@ -167,8 +162,8 @@ class AtpClient:
 
         Writes ``TRAIN_STATE`` for every
         READY snapshot and ``BTM_RX`` only when this cab's BTM delivery count
-        increased. Snapshots arriving before READY are remembered and
-        re-published on handshake completion.
+        increased. Snapshots arriving while the channel is down are
+        remembered and re-published as soon as it reconnects.
         """
 
         self._last_snapshot = snapshot
@@ -210,21 +205,13 @@ class AtpClient:
             delay = self._retry_delay if reached_ready else min(delay * 2, self._max_retry_delay)
 
     async def _session(self) -> bool:
-        """Run one connect/handshake/hold session; True if it reached READY."""
+        """Run one connect/hold session; True if the channel reached READY."""
 
         reader, writer = await asyncio.open_connection(self._host, self._port)
         try:
-            self._state = ClientState.HANDSHAKING
-            hello = make_hello(self._train_id, self._cab_id)
-            writer.write(encode_message(hello))
-            await writer.drain()
-            ack = await asyncio.wait_for(read_message(reader), self._handshake_timeout)
-            if ack is None or ack.get("type") != "hello_ack" or not ack.get("accepted", False):
-                logger.warning("%s: handshake rejected or timed out (%r)", self.ident, ack)
-                return False
             self._writer = writer
             self._state = ClientState.READY
-            logger.info("%s: handshake complete", self.ident)
+            logger.info("%s: channel established", self.ident)
             if self._last_snapshot is not None:
                 self._publish_now(self._last_snapshot)
             try:

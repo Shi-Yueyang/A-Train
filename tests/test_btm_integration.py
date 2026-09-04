@@ -70,10 +70,8 @@ async def _no_more(server, mtype: str, within: float = 0.3) -> None:
         assert message.get("type") != mtype, f"unexpected {mtype}: {message}"
 
 
-async def _handshake(server, c, ready_count: int = 1) -> None:
-    for _ in range(ready_count):
-        await _next(server, "hello")
-    await server.send({"type": "hello_ack", "accepted": True})
+async def _await_ready(server, c, ready_count: int = 1) -> None:
+    # No handshake: the channel is READY as soon as TCP opens.
     await _wait_until(lambda: len(_manager(c).ready_endpoints) == ready_count)
 
 
@@ -82,7 +80,7 @@ async def test_btm_delivery_publishes_btm_rx_to_the_target_cab() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _cabs(port)) as c:
-            await _handshake(server, c, ready_count=2)
+            await _await_ready(server, c, ready_count=2)
 
             data = base64.b64encode(PAYLOAD).decode("ascii")
             r = await c.post("/api/trains/TRAIN001/equipment/btm", json={"cab_id": 1, "data": data})
@@ -112,7 +110,7 @@ async def test_reset_resyncs_without_replaying_old_payload() -> None:
     port = await server.start()
     try:
         async with running_app([T1], [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]) as c:
-            await _handshake(server, c)
+            await _await_ready(server, c)
 
             data = base64.b64encode(b"\x42").decode("ascii")
             await c.post("/api/trains/TRAIN001/equipment/btm", json={"cab_id": 1, "data": data})

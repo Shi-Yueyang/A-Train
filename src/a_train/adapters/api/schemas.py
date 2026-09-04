@@ -85,10 +85,8 @@ class AtpConnectionResponse(BaseModel):
     cab_id: int
     host: str
     port: int
-    state: str = Field(
-        description="IDLE / CONNECTING / HANDSHAKING / READY / DISCONNECTED / STOPPED."
-    )
-    ready: bool
+    state: str = Field(description="IDLE / CONNECTING / READY / DISCONNECTED / STOPPED.")
+    ready: bool = Field(description="True while the TCP channel is open.")
 
 
 class AtpStatusResponse(BaseModel):

@@ -1,11 +1,12 @@
 """Phase 3.2 acceptance tests — ATP protocol and content publishing.
 
-Manual steps publish ``TRAIN_STATE`` per cab; inbound ``TRAIN_COMMAND``
-messages drive the train through the core; malformed and unexpected input is
-answered with ``ERROR`` without stopping the simulation or another cab's
-connection; ``HEARTBEAT`` keepalive runs in both directions. All observed
-through the real application and the production-protocol test TCP server
-(§6.1); no production module is mocked.
+Channels are READY the moment TCP opens -- no handshake. Manual steps
+publish ``TRAIN_STATE`` per cab; inbound ``TRAIN_COMMAND`` messages drive the
+train through the core; malformed and unexpected input is answered with
+``ERROR`` without stopping the simulation or another cab's connection;
+``HEARTBEAT`` keepalive runs in both directions. All observed through the
+real application and the production-protocol test TCP server (§6.1); no
+production module is mocked.
 """
 
 from __future__ import annotations
@@ -61,10 +62,8 @@ async def _next(server, mtype: str, timeout: float = 10.0, **match) -> dict:
     return await asyncio.wait_for(_poll(), timeout)
 
 
-async def _handshake(server, c, ready_count: int = 1) -> None:
-    for _ in range(ready_count):
-        await _next(server, "hello")
-    await server.send({"type": "hello_ack", "accepted": True})
+async def _await_ready(server, c, ready_count: int = 1) -> None:
+    # No handshake: the channel is READY as soon as TCP opens.
     await _wait_until(lambda: len(_manager(c).ready_endpoints) == ready_count)
 
 
@@ -76,7 +75,7 @@ async def test_manual_step_publishes_train_state_for_each_cab() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _cabs(port)) as c:
-            await _handshake(server, c, ready_count=2)
+            await _await_ready(server, c, ready_count=2)
 
             await c.post("/api/simulation/time-mode", json={"mode": "MANUAL"})
             await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 1.0})
@@ -107,7 +106,7 @@ async def test_atp_train_command_is_applied_by_the_core() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _one_cab(port)) as c:
-            await _handshake(server, c)
+            await _await_ready(server, c)
 
             await c.post("/api/simulation/time-mode", json={"mode": "MANUAL"})
             await server.send({"type": "train_command", "cab_id": 1, "drive_demand": 0.5})
@@ -140,7 +139,7 @@ async def test_invalid_train_command_answers_error() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _one_cab(port)) as c:
-            await _handshake(server, c)
+            await _await_ready(server, c)
 
             # Out-of-range demand.
             await server.send({"type": "train_command", "cab_id": 1, "drive_demand": 5.0})
@@ -173,7 +172,7 @@ async def test_malformed_line_reported_without_stopping_anything() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _cabs(port)) as c:
-            await _handshake(server, c, ready_count=2)
+            await _await_ready(server, c, ready_count=2)
 
             await server.send_raw("this is not json\n")
             errors = [await _next(server, "error"), await _next(server, "error")]
@@ -194,7 +193,7 @@ async def test_unknown_message_type_answered_with_error() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _one_cab(port)) as c:
-            await _handshake(server, c)
+            await _await_ready(server, c)
 
             await server.send({"type": "totally_unknown", "cab_id": 1})
             await _next(server, "error", code="unknown_message_type")
@@ -211,7 +210,7 @@ async def test_heartbeat_keepalive_both_directions() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _one_cab(port), atp_heartbeat_interval=0.1) as c:
-            await _handshake(server, c)
+            await _await_ready(server, c)
 
             beat = await _next(server, "heartbeat")
             assert beat["train_id"] == "TRAIN001" and beat["cab_id"] == 1
@@ -230,9 +229,16 @@ async def test_heartbeat_without_ack_reconnects() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _one_cab(port), atp_heartbeat_interval=0.05) as c:
-            await _handshake(server, c)
-            # The overdue ack drops the session; a fresh handshake follows.
-            await _next(server, "hello")
+            await _await_ready(server, c)
+
+            # The overdue ack drops the session, then the link comes back up.
+            manager = _manager(c)
+
+            async def _wait_dropped_then_ready() -> None:
+                await _wait_until(lambda: manager.ready_endpoints == frozenset())
+                await _wait_until(lambda: manager.ready_endpoints == frozenset({("TRAIN001", 1)}))
+
+            await asyncio.wait_for(_wait_dropped_then_ready(), 5.0)
             assert (await c.get("/api/status")).status_code == 200
     finally:
         await server.stop()

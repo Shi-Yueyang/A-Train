@@ -54,7 +54,6 @@ async def lifespan(
     atp_endpoints: Sequence[AtpEndpoint] | None = None,
     *,
     atp_retry_delay: float = 1.0,
-    atp_handshake_timeout: float = 10.0,
     atp_heartbeat_interval: float | None = None,
 ):
     # Startup: assemble production components and start background tasks.
@@ -77,7 +76,6 @@ async def lifespan(
         core,
         endpoints=endpoints,
         retry_delay=atp_retry_delay,
-        handshake_timeout=atp_handshake_timeout,
         heartbeat_interval=heartbeat,
     )
     await atp_manager.start()
@@ -121,7 +119,6 @@ def create_app(
     atp_endpoints: Sequence[AtpEndpoint] | None = None,
     *,
     atp_retry_delay: float = 1.0,
-    atp_handshake_timeout: float = 10.0,
     atp_heartbeat_interval: float | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with the production lifespan wired in.
@@ -145,7 +142,6 @@ def create_app(
             train_configs=train_configs_capture,
             atp_endpoints=endpoints_capture,
             atp_retry_delay=atp_retry_delay,
-            atp_handshake_timeout=atp_handshake_timeout,
             atp_heartbeat_interval=atp_heartbeat_interval,
         ):
             yield

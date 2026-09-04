@@ -24,11 +24,11 @@ ruff format .
 ## Configuring ATP endpoints (Phases 3.1-3.2)
 
 By default the server runs with no ATP connections. Configure one endpoint per
-cab on the `run` command; each becomes a persistent reconnecting TCP client
-that completes the `HELLO` / `HELLO_ACK` handshake (§4.2). Phase 3.2 content
-flows over those channels: `TRAIN_STATE` after every snapshot, `BTM_RX` per
-BTM delivery, `HEARTBEAT` keepalive when configured, inbound `TRAIN_COMMAND`
-driving the train, and `ERROR` reporting.
+cab on the `run` command; each becomes a persistent reconnecting TCP client.
+There is no handshake: the channel is live the moment TCP opens and content
+flows immediately — `TRAIN_STATE` after every snapshot, `BTM_RX` per BTM
+delivery, `HEARTBEAT` keepalive when configured, inbound `TRAIN_COMMAND`
+driving the train, and `ERROR` reporting (§4.2–§4.8).
 
 ```bash
 python -m a_train run \
