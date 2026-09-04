@@ -94,7 +94,7 @@ There are three categories of processes.
 repository structure in §7.2):
 
 * **Domain model** — train aggregates (physics and controls), train-local
-  equipment (doors, cabs, BTM, §3.5), and the world model
+  equipment (doors, cabs, BTM, ATP protection, §3.5), and the world model
   (linear track and signals).
 * **Simulation core** — simulation state machine and fixed-step clock,
   serialized command processing, and read-only state snapshots.
@@ -381,7 +381,7 @@ is zero.
 
 ## 3.5 Train-Facing Equipment Boundary
 
-Doors, cabs, and BTM equipment are train-local equipment. Their
+Doors, cabs, BTM, and ATP protection state are train-local equipment. Their
 state may be included in a train snapshot, but their transport and protocol
 handling remain outside the train model.
 
@@ -393,7 +393,7 @@ adapter delivers the payload over the protocol.
 
 Implement the train model in `domain/train.py` as the aggregate that owns one
 train's mutable state. Keep calculations that do not require aggregate state
-in `domain/physics.py`, and keep cab, door, and BTM behavior in
+in `domain/physics.py`, and keep cab, door, BTM, and ATP-brake behavior in
 `domain/equipment.py`. The simulation core calls only a
 small aggregate API:
 
@@ -719,7 +719,7 @@ train-simulator/
 │   │   ├── __init__.py             # Public domain types.
 │   │   ├── train.py                # Train aggregate and stable per-step update entry point.
 │   │   ├── physics.py              # Drive force, acceleration, speed, and position calculations.
-│   │   ├── equipment.py            # Doors, cabs, and BTM equipment behavior.
+│   │   ├── equipment.py            # Doors, cabs, BTM, and ATP-brake equipment behavior.
 │   │   └── signals.py              # Linear-track signal state and signal-aspect rules.
 │   │
 │   ├── adapters/                   # I/O boundaries that translate external data into core commands.

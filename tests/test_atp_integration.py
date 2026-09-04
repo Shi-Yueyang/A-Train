@@ -201,10 +201,24 @@ async def test_unknown_message_type_answered_with_error() -> None:
         await server.stop()
 
 
-# -- Work item: atp_signal protection bits, skeleton (atp-api.md §4.2) -----------
+# -- Work item: atp_signal drives the core stcs_atp (atp-api.md §4.2) --------
 
 
-async def test_atp_signal_accepted_and_inert_while_registry_is_empty() -> None:
+async def _wait_stcs_atp(c, **expected: object) -> dict:
+    """Poll REST until the train's ATP protection flags match ``expected``."""
+
+    async def _poll() -> dict:
+        while True:
+            equipment = (await c.get("/api/trains/TRAIN001")).json()["equipment"]
+            state = equipment["stcs_atp"]
+            if all(state.get(key) == value for key, value in expected.items()):
+                return state
+            await asyncio.sleep(0.02)
+
+    return await asyncio.wait_for(_poll(), timeout=5.0)
+
+
+async def test_atp_signal_asserts_state_and_shows_in_train_state() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
@@ -212,21 +226,33 @@ async def test_atp_signal_accepted_and_inert_while_registry_is_empty() -> None:
             await _await_ready(server, c)
             await _next(server, "train_state")  # drain the catch-up publish
 
-            await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "0001000"})
-            # No handler bound: nothing is answered and nothing is published.
-            with pytest.raises(asyncio.TimeoutError):
-                await server.wait_for_message(timeout=0.3)
+            # bits 1-3 asserted, bit 0 reserved: traction + both brakes active.
+            await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "0111"})
+            await _wait_stcs_atp(c, traction_cutoff=True, service=True, emergency=True)
 
-            # The session is healthy: a later command still applies.
-            await server.send({"type": "atp_command", "cab_id": 1, "drive_demand": 0.5})
-            applied = False
-            for _ in range(250):
-                train = (await c.get("/api/trains/TRAIN001")).json()
-                if train["drive_demand"] == pytest.approx(0.5):
-                    applied = True
-                    break
-                await asyncio.sleep(0.02)
-            assert applied
+            # The protection line rides every subsequent TRAIN_STATE.
+            await _next(
+                server,
+                "train_state",
+                stcs_atp={
+                    "traction_cutoff": True,
+                    "service": True,
+                    "emergency": True,
+                },
+            )
+
+            # Shorter string: idx1 '1', idx2 '0' released; idx3 beyond length keeps
+            # its emergency -- derived from the previous ATP_COMMAND.
+            await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "010"})
+            state = await _wait_stcs_atp(c, service=False, emergency=True)
+            assert state["traction_cutoff"] is True
+
+            # Core-state combination: stepping while at speed 0.0 fires the
+            # release-at-rest rule; the traction cut-off persists.
+            r = await c.post("/api/simulation/step", json={"delta": 0.1})
+            assert r.status_code == 200
+            state = await _wait_stcs_atp(c, service=False, emergency=False, traction_cutoff=True)
+            assert state["traction_cutoff"] is True
     finally:
         await server.stop()
 

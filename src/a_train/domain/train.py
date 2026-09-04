@@ -28,6 +28,7 @@ from .equipment import (
     Door,
     Equipment,
     EquipmentContext,
+    StcsAtp,
 )
 from .physics import (
     integrate_forward,
@@ -78,6 +79,9 @@ class EquipmentSet:
     - ``cab``: ``cab_id`` plus ``command`` ``"activate"`` or ``"deactivate"``;
       sets that cab's local flag only, with no control-side effect.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
+    - ``stcs_atp``: ``command`` is ``"traction_cut"``, ``"traction_release"``,
+      ``"brake_service"``, ``"brake_service_off"``, ``"brake_emergency"`` or
+      ``"brake_emergency_off"`` (atp-api.md §4.2).
     """
 
     key: str
@@ -143,7 +147,7 @@ class TrainConfig:
         if self.initial_door_state not in ("open", "closed"):
             raise ValueError("initial_door_state must be 'open' or 'closed'")
         if not self.equipment_configs:
-            # Standard fit: one Cab + one Btm per cab, one Door.
+            # Standard fit: one Cab + one Btm per cab, one Door, one StcsAtp.
             object.__setattr__(
                 self,
                 "equipment_configs",
@@ -151,6 +155,7 @@ class TrainConfig:
                     [EquipmentConfig("cab", cab_id) for cab_id in self.cab_ids]
                     + [EquipmentConfig("door")]
                     + [EquipmentConfig("btm", cab_id) for cab_id in self.cab_ids]
+                    + [EquipmentConfig("stcs_atp")]
                 ),
             )
         for eq_cfg in self.equipment_configs:
@@ -265,6 +270,21 @@ class Train:
             equipment.accept(command.data)
             return ControlResult()
 
+        if command.key == "stcs_atp":
+            equipment = self._one("stcs_atp")
+            if not isinstance(equipment, StcsAtp):
+                return ControlResult(
+                    ok=False,
+                    error=f"no 'stcs_atp' equipment on {self._config.train_id}",
+                )
+            if command.command is None:
+                return ControlResult(ok=False, error="stcs_atp requires a command")
+            try:
+                equipment.apply_control(command.command)
+            except ValueError as exc:
+                return ControlResult(ok=False, error=str(exc))
+            return ControlResult()
+
         return ControlResult(
             ok=False,
             error=f"equipment '{command.key}' does not expose settable state",
@@ -274,6 +294,8 @@ class Train:
         """Integrate forward-only motion over one fixed step (§3.4).
 
         No equipment affects the dynamics; the drive demand is the only input.
+        Components exposing an optional ``step(dt, speed)`` hook observe the
+        post-integration physical state (e.g. the ATP brake release rule).
         """
 
         accel = resolve_acceleration(self._drive_demand, self._config)
@@ -283,6 +305,10 @@ class Train:
             acceleration=accel,
             dt=dt,
         )
+        for equipment in self._equipment:
+            on_step = getattr(equipment, "step", None)
+            if on_step is not None:
+                on_step(dt, self._speed)
 
     def _equipment_snapshot(self) -> dict[str, Any]:
         """Group per-instance snapshots by type key for the train snapshot.

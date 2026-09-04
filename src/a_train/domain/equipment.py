@@ -8,13 +8,16 @@ imports adapters, accesses the simulation clock, or modifies train physical
 state directly. Adapters translate protocol data into equipment calls and
 publish snapshot data.
 
-Addon equipment (Cab, Door, BTM, and future equipment) implements the
-``Equipment`` protocol: a ``key`` naming the type plus a ``slot`` naming the
-instance (empty for train-level singletons, the cab id for per-cab equipment).
-``EQUIPMENT_FACTORIES`` maps type key to a factory and may be invoked any
-number of times; a factory receives ``(slot, EquipmentContext, **params)`` —
-instance identity, train-scope configuration, and per-instance overrides. The
-train holds one flat list of instances and iterates it generically.
+Addon equipment (Cab, Door, BTM, StcsAtp, and future equipment) implements
+the ``Equipment`` protocol: a ``key`` naming the type plus a ``slot`` naming
+the instance (empty for train-level singletons, the cab id for per-cab
+equipment). ``EQUIPMENT_FACTORIES`` maps type key to a factory and may be
+invoked any number of times; a factory receives ``(slot, EquipmentContext,
+**params)`` — instance identity, train-scope configuration, and per-instance
+overrides. The train holds one flat list of instances and iterates it
+generically. Components that need to observe core physics state may also
+implement an optional ``step(dt, speed)`` hook, called generically by the
+train after integration.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from .snapshots import BtmSnapshot, CabSnapshot, DoorSnapshot
+from .snapshots import BtmSnapshot, CabSnapshot, DoorSnapshot, StcsAtpSnapshot
 
 # -- Equipment protocol -------------------------------------------------------
 
@@ -170,6 +173,77 @@ class Btm:
         self._received_count = 0
 
 
+# -- ATP protection state -------------------------------------------------------
+
+
+class StcsAtp:
+    """Train-level ATP protection state asserted by ``atp_signal`` bits.
+
+    Skeleton semantics (atp-api.md §4.2): bit handlers translate into named
+    commands that assert or release one flag each; the train dispatcher calls
+    ``apply_control`` through the core command queue, so history is ordered
+    and replayable. The ``step`` hook combines the stored ATP state with the
+    core's physical state: a full stop releases both brake bits (placeholder
+    release rule; the traction cut-off persists). Nothing feeds back into
+    dynamics yet -- like all equipment in this version.
+    """
+
+    key = "stcs_atp"
+
+    _COMMANDS = (
+        "traction_cut",
+        "traction_release",
+        "brake_service",
+        "brake_service_off",
+        "brake_emergency",
+        "brake_emergency_off",
+    )
+
+    def __init__(self, slot: str = "") -> None:
+        self._slot = slot
+        self._traction_cutoff = False
+        self._service = False
+        self._emergency = False
+
+    @property
+    def slot(self) -> str:
+        return self._slot
+
+    def apply_control(self, command: str) -> None:
+        """Assert or release one protection flag."""
+        if command not in self._COMMANDS:
+            raise ValueError(f"invalid stcs_atp command: {command!r}")
+        if command == "traction_cut":
+            self._traction_cutoff = True
+        elif command == "traction_release":
+            self._traction_cutoff = False
+        elif command == "brake_service":
+            self._service = True
+        elif command == "brake_service_off":
+            self._service = False
+        elif command == "brake_emergency":
+            self._emergency = True
+        elif command == "brake_emergency_off":
+            self._emergency = False
+
+    def step(self, _dt: float, speed: float) -> None:
+        if speed == 0.0:
+            self._service = False
+            self._emergency = False
+
+    def read_state(self) -> StcsAtpSnapshot:
+        return StcsAtpSnapshot(
+            traction_cutoff=self._traction_cutoff,
+            service=self._service,
+            emergency=self._emergency,
+        )
+
+    def reset(self) -> None:
+        self._traction_cutoff = False
+        self._service = False
+        self._emergency = False
+
+
 # -- Equipment factory registration -------------------------------------------
 
 
@@ -208,6 +282,11 @@ def _create_btm(slot: str | int, _ctx: EquipmentContext) -> Btm:
     return Btm(int(slot))
 
 
+def _create_stcs_atp(slot: str | int, _ctx: EquipmentContext) -> StcsAtp:
+    return StcsAtp(str(slot))
+
+
 EQUIPMENT_FACTORIES["cab"] = _create_cab
 EQUIPMENT_FACTORIES["door"] = _create_door
 EQUIPMENT_FACTORIES["btm"] = _create_btm
+EQUIPMENT_FACTORIES["stcs_atp"] = _create_stcs_atp

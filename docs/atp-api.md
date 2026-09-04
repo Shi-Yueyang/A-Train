@@ -125,7 +125,8 @@ while the channel is READY.
   "speed": 22.31,
   "acceleration": -0.15,
   "position": 15320.4,
-  "direction": "forward"
+  "direction": "forward",
+  "stcs_atp": { "traction_cutoff": false, "service": false, "emergency": true }
 }
 ```
 
@@ -137,6 +138,7 @@ while the channel is READY.
 | `acceleration` | number | m/s² of the last integrated step.                                                                    |
 | `position`     | number | m along the linear track from the fixed origin.                                                       |
 | `direction`    | string | `"forward"` in the current model; reserved for future multi-direction movement.                     |
+| `stcs_atp`    | object | ATP protection state from the core (`stcs_atp` component): the three independently asserted flags `traction_cutoff`, `service`, `emergency` (§4.2). Present while the equipment is configured, which the standard consist does; values come from the snapshot, exactly as REST and WebSocket report them. |
 
 TRAIN_STATE is a read-only observation: ATP derives its protection decisions
 from it and acts back on the train only through `ATP_COMMAND` (§4.1;
@@ -223,39 +225,47 @@ Semantics of the two controls:
 All cabs carry equal authority: the same request from cab 1 or cab 2 has the
 same effect; cabs are identity (§3.3 architectural).
 
-### 4.2 atp_signal — binary protection signals (skeleton)
+### 4.2 atp_signal — binary protection signals
 
 `atp_signal` is an ordered string of bits, e.g. `"0001000"`. The **leftmost
 character is bit index 0**. Each bit position carries a meaning agreed
 between ATP and the simulator; `"1"` means the meaning is active, `"0"`
-inactive. Bits are a *state assertion* per message, not an event: only the
-bits set in the received string are decoded, and nothing latches between
-messages.
+inactive.
 
-| Bit value | Meaning       |
-| --------- | ------------- |
-| `"1"`     | Active.       |
-| `"0"`     | Inactive.     |
+Bits are a *state assertion*: every position the received string defines is
+applied (both `"1"` and `"0"`), and positions **beyond the string length keep
+their previous value**. ATP state therefore evolves across messages -- the
+current flags are derived from the most recent assertion of each position.
 
-Decoding is registry-driven in `src/a_train/adapters/atp/signal.py`: each
-bit index may be bound to a handler that returns transport-neutral core
-commands, which the manager then submits through the ordinary command queue.
-The bit-to-action binding is a work in progress (the indices below are
-placeholders agreed for the skeleton):
+Decoding is a pure translation in `src/a_train/adapters/atp/signal.py`: each
+bound bit index yields transport-neutral core commands (one per defined
+position, ascending index order) which the manager submits through the
+ordinary command queue. **The protection state machine lives in the core**, in
+the train-level `stcs_atp` component (`domain/equipment.py`), so the flags
+are deterministic world state: ordered by the queue, visible to REST and
+WebSocket, restored by `reset`, and re-sent on reconnect by the
+latest-snapshot catch-up publish (§1.4).
 
-| Bit index | Planned meaning    | Status   | Transfer on the train                          |
-| --------- | ------------------ | -------- | ---------------------------------------------- |
-| 0         | reserved           | n/a      | --                                             |
-| 1         | traction cut-off   | planned  | Force drive demand to the braking side.        |
-| 2         | service brake      | planned  | `drive_demand = -1.0` until the next demand.   |
-| 3         | emergency brake    | planned  | As service brake, plus (TBD) harder constraint. |
+| Bit index | Meaning         | `"1"` asserts            | `"0"` asserts          | Stored flag                        |
+| --------- | --------------- | ------------------------ | ---------------------- | ---------------------------------- |
+| 0         | reserved        | ignored                  | ignored                | --                                 |
+| 1         | traction cut-off | `traction_cut`          | `traction_release`     | `traction_cutoff` (persists)       |
+| 2         | service brake   | `brake_service`          | `brake_service_off`    | `service`                          |
+| 3         | emergency brake | `brake_emergency`        | `brake_emergency_off`  | `emergency`                        |
 
-**Current status: no bit is bound yet** -- a valid `atp_signal` is accepted,
-answered nothing, and changes no state (the registry in `signal.py` is
-empty). Active bits with no registered handler are silently ignored, so ATP
-can send the field today and the simulator stays forward-compatible. When
-meanings are implemented they are bound in `signal.HANDLERS` and documented
-here; the wire format above is stable.
+The three flags are stored and reported independently, exactly as asserted:
+sending `"0010"` asserts service (index 2 `'1'`) while releasing emergency
+(index 3 `'0'`), leaving `service: true, emergency: false`.
+
+Combination with core physics state (implemented rule, placeholder-grade,
+subject to future protection logic): during every fixed step, if the train's
+speed is `0.0`, both brake flags are released automatically; the traction
+cut-off persists until explicitly released. The flags feed into dynamics
+(braking force, cut-off enforcement) in a future phase -- as with all
+equipment in this version, movement is unaffected for now.
+
+Unbound bit positions (index ≥ 4) are silently ignored, so ATP can send
+longer strings today without breaking older or newer peers.
 
 ### 4.3 error (inbound)
 
@@ -353,6 +363,7 @@ simulator ──> {"type":"btm_rx","data":"ASOk/wCBcg=="}        (balise passed)
 ATP     ──> {"type":"atp_command","door":"open","drive_demand":0.5}
               (two commands: control, then equipment)
 ATP     ──> {"type":"atp_command","atp_signal":"0001000"}
-              (protection bits, §4.2; accepted, applied once handlers exist)
+              (emergency brake asserted on bit 3; state lands in the core)
+simulator ──> {"type":"train_state",...,"stcs_atp":{"traction_cutoff":false,"service":false,"emergency":true}}
 simulator ──> {"type":"error","code":"invalid_atp_command",...}  (on a bad request)
 ```

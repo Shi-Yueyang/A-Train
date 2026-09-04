@@ -40,7 +40,7 @@ def encode_message(message: Mapping[str, Any]) -> bytes:
 def make_train_state(train_id: str, cab_id: int, train: Any) -> dict[str, Any]:
     """One ``TRAIN_STATE`` line from a train snapshot (atp-api.md §3.1)."""
 
-    return {
+    message: dict[str, Any] = {
         "type": "train_state",
         "train_id": train_id,
         "cab_id": cab_id,
@@ -49,6 +49,14 @@ def make_train_state(train_id: str, cab_id: int, train: Any) -> dict[str, Any]:
         "position": train.position,
         "direction": train.direction,
     }
+    stcs_atp = train.equipment.get("stcs_atp")
+    if stcs_atp is not None:
+        message["stcs_atp"] = {
+            "traction_cutoff": stcs_atp.traction_cutoff,
+            "service": stcs_atp.service,
+            "emergency": stcs_atp.emergency,
+        }
+    return message
 
 
 def make_btm_rx(payload_b64: str) -> dict[str, Any]:
