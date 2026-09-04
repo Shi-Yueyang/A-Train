@@ -2,7 +2,7 @@
 
 The adapter owns one reconnecting TCP client per configured train cab, frames
 and validates the NDJSON protocol, publishes ``TRAIN_STATE`` / ``BTM_RX``
-content from core snapshots, and converts inbound ``TRAIN_COMMAND`` messages
+content from core snapshots, and converts inbound ``ATP_COMMAND`` messages
 into core commands.
 """
 

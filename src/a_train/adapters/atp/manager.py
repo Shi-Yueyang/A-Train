@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 from ...domain.train import EquipmentSet, TrainControl
 from ...simulation.commands import EquipmentCommand, TrainControlCommand
 from .client import AtpClient
-from .protocol import make_error, parse_train_command
+from .protocol import make_error, parse_atp_command
 from .signal import decode_atp_signal
 
 if TYPE_CHECKING:
@@ -129,8 +129,8 @@ class AtpManager:
 
     async def _handle_inbound(self, client: AtpClient, message: dict[str, Any]) -> None:
         mtype = message.get("type")
-        if mtype == "train_command":
-            await self._handle_train_command(client, message)
+        if mtype == "atp_command":
+            await self._handle_atp_command(client, message)
         elif mtype == "error":
             logger.warning("%s: ATP reported error: %r", client.ident, message)
         else:
@@ -143,15 +143,15 @@ class AtpManager:
                 )
             )
 
-    async def _handle_train_command(self, client: AtpClient, message: dict[str, Any]) -> None:
+    async def _handle_atp_command(self, client: AtpClient, message: dict[str, Any]) -> None:
         try:
-            drive_demand, door, atp_signal = parse_train_command(
+            drive_demand, door, atp_signal = parse_atp_command(
                 message, client.train_id, client.cab_id
             )
         except ValueError as exc:
             client.send_message(
                 make_error(
-                    "invalid_train_command",
+                    "invalid_atp_command",
                     str(exc),
                     train_id=client.train_id,
                     cab_id=client.cab_id,
@@ -176,7 +176,7 @@ class AtpManager:
             )
         if atp_signal is not None:
             commands.extend(decode_atp_signal(atp_signal, client.train_id, client.cab_id))
-            
+
         for command in commands:
             result = await self._core.submit_command(command)
             if not result.ok:

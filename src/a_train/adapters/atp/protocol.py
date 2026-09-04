@@ -4,7 +4,7 @@ The protocol uses TCP + NDJSON (one JSON object per line). TCP provides the
 transport; the newline provides application-level message framing. There is
 no handshake message: the channel is live the moment TCP opens. Builders and
 validators cover cyclic ``TRAIN_STATE`` (atp-api.md §3.1), ``BTM_RX`` (opaque
-base64 payload, §3.2), ``TRAIN_COMMAND`` (inbound ATP action request, §4.1),
+base64 payload, §3.2), ``ATP_COMMAND`` (inbound ATP action request, §4.1),
 and ``ERROR`` reporting (§5).
 """
 
@@ -75,12 +75,12 @@ def make_error(
 # -- Inbound validation ---------------------------------------------------------
 
 
-def parse_train_command(
+def parse_atp_command(
     message: Mapping[str, Any],
     train_id: str,
     cab_id: int,
 ) -> tuple[float | None, str | None, str | None]:
-    """Validate a ``TRAIN_COMMAND`` on a channel bound to (train_id, cab_id).
+    """Validate a ``ATP_COMMAND`` on a channel bound to (train_id, cab_id).
 
     Returns ``(drive_demand, door, atp_signal)``; at least one is always set.
     Raises ValueError (reported as ``ERROR`` by the caller, atp-api.md §5) on
@@ -116,5 +116,5 @@ def parse_train_command(
             )
 
     if drive_demand is None and door is None and atp_signal is None:
-        raise ValueError("train_command requires drive_demand, door or atp_signal")
+        raise ValueError("atp_command requires drive_demand, door or atp_signal")
     return drive_demand, door, atp_signal

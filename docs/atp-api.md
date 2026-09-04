@@ -5,7 +5,7 @@ ATP (Automatic Train Protection) processes, as **implemented** by
 `src/a_train/adapters/atp/` (`protocol.py` framing and builders, `client.py`
 transport, `manager.py` dispatch). The architectural boundary it enforces --
 "ATP requests, physics decides" -- is in `architectural.md` §4.1. The
-browser-facing HTTP/WebSocket API is a separate contract (`api-spec.md`).
+browser-facing HTTP/WebSocket API is a separate contract (`web-api.md`).
 
 ---
 
@@ -83,7 +83,7 @@ Unrecognized `type` values on either side are answered with `ERROR`
 Outbound simulator messages always carry the channel's own `train_id` /
 `cab_id` where the message type defines them. Inbound ATP messages may carry
 `train_id` / `cab_id`; if present they **must match the channel**, otherwise
-the whole message is rejected (`invalid_train_command`, §5.1).
+the whole message is rejected (`invalid_atp_command`, §5.1).
 
 ### 2.3 Units
 
@@ -100,7 +100,7 @@ drive_demand    dimensionless, [-1.0, 1.0]
 | ------------- | ------------------- | ---------------- | ------------------------------------------------------- | ----- |
 | TRAIN_STATE   | `"train_state"`   | simulator → ATP | Cyclic: every published core snapshot.                  | §3.1 |
 | BTM_RX        | `"btm_rx"`        | simulator → ATP | Event: when a BTM delivery for this cab lands.          | §3.2 |
-| TRAIN_COMMAND   | `"train_command"` | ATP → simulator | Whenever ATP wants to move the train, work the doors, or assert protection signals. | §4.1 |
+| ATP_COMMAND   | `"atp_command"` | ATP → simulator | Whenever ATP wants to move the train, work the doors, or assert protection signals. | §4.1 |
 | ERROR (in)      | `"error"`         | ATP → simulator | ATP reports its own problem; logged only.     | §4.3 |
 | ERROR (out)   | `"error"`         | simulator → ATP | Reply to any rejected or malformed input.               | §5   |
 
@@ -139,7 +139,7 @@ while the channel is READY.
 | `direction`    | string | `"forward"` in the current model; reserved for future multi-direction movement.                     |
 
 TRAIN_STATE is a read-only observation: ATP derives its protection decisions
-from it and acts back on the train only through `TRAIN_COMMAND` (§4.1;
+from it and acts back on the train only through `ATP_COMMAND` (§4.1;
 architectural boundary §4.1 of architectural.md).
 
 ### 3.2 BTM_RX — opaque balise transmission
@@ -162,7 +162,7 @@ opaque", architectural.md §7.3); interpretation belongs entirely to ATP.
 Trigger: exactly one `btm_rx` per accepted BTM delivery for **this cab** --
 deliveries are filtered per cab, and each channel carries only its own. A BTM
 delivery is made through the simulator's REST equipment endpoint
-(`api-spec.md`, `POST /api/trains/{id}/equipment/btm`). After a reconnect,
+(`web-api.md`, `POST /api/trains/{id}/equipment/btm`). After a reconnect,
 only fresh deliveries are published: each message corresponds to an increase
 of the cab's delivery counter.
 
@@ -170,14 +170,14 @@ of the cab's delivery counter.
 
 ## 4. ATP → Simulator Messages
 
-### 4.1 TRAIN_COMMAND — the only inbound action
+### 4.1 ATP_COMMAND — the only inbound action
 
 ATP requests a normalized train action on its own cab's channel. ATP asks;
 the physics decides the result.
 
 ```json
 {
-  "type": "train_command",
+  "type": "atp_command",
   "train_id": "TRAIN001",
   "cab_id": 1,
   "drive_demand": -1.0,
@@ -196,7 +196,7 @@ the physics decides the result.
 
 Processing pipeline (manager → core):
 
-1. Validate framing and fields (fail → `ERROR invalid_train_command`, nothing
+1. Validate framing and fields (fail → `ERROR invalid_atp_command`, nothing
    applied).
 2. Map to the transport-neutral commands the REST API uses:
    - `drive_demand` → `TrainControlCommand(train_id, TrainControl(cab_id, drive_demand))`
@@ -277,7 +277,7 @@ without stopping the simulation or any other cab's connection.
 ```json
 {
   "type": "error",
-  "code": "invalid_train_command",
+  "code": "invalid_atp_command",
   "detail": "drive_demand must be a finite value in [-1.0, 1.0]",
   "train_id": "TRAIN001",
   "cab_id": 1
@@ -296,7 +296,7 @@ without stopping the simulation or any other cab's connection.
 | ------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------- |
 | `malformed_message`     | Line is not valid JSON / not an object / has no`type`.          | Session continues.                                   |
 | `unknown_message_type`  | `type` is not in the catalog (§2.4).                           | Session continues.                                   |
-| `invalid_train_command` | Identity mismatch or field validation failure (§4.1 step 1).     | Nothing applied; session continues.                  |
+| `invalid_atp_command` | Identity mismatch or field validation failure (§4.1 step 1).     | Nothing applied; session continues.                  |
 | `command_rejected`      | The simulation core refused the resulting command (§4.1 step 4). | The other command of the same message still applies. |
 
 ---
@@ -325,7 +325,7 @@ python -m a_train run --atp-config atp.json
 
 `GET /api/atp/status` reports every configured endpoint with its current
 lifecycle state (IDLE / CONNECTING / READY / DISCONNECTED / STOPPED) and a
-`ready` boolean; see `api-spec.md`.
+`ready` boolean; see `web-api.md`.
 
 ---
 
@@ -347,12 +347,12 @@ lifecycle state (IDLE / CONNECTING / READY / DISCONNECTED / STOPPED) and a
 ATP process starts (TCP server)          simulator connects, channel READY
 simulator ──> {"type":"train_state",...}          (every published snapshot)
 simulator ──> {"type":"train_state",...}
-ATP     ──> {"type":"train_command","drive_demand":-1.0}
+ATP     ──> {"type":"atp_command","drive_demand":-1.0}
 simulator ──> {"type":"train_state","acceleration":-2.0,...}  (deceleration applied)
 simulator ──> {"type":"btm_rx","data":"ASOk/wCBcg=="}        (balise passed)
-ATP     ──> {"type":"train_command","door":"open","drive_demand":0.5}
+ATP     ──> {"type":"atp_command","door":"open","drive_demand":0.5}
               (two commands: control, then equipment)
-ATP     ──> {"type":"train_command","atp_signal":"0001000"}
+ATP     ──> {"type":"atp_command","atp_signal":"0001000"}
               (protection bits, §4.2; accepted, applied once handlers exist)
-simulator ──> {"type":"error","code":"invalid_train_command",...}  (on a bad request)
+simulator ──> {"type":"error","code":"invalid_atp_command",...}  (on a bad request)
 ```

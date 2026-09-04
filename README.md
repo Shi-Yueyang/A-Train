@@ -27,7 +27,7 @@ By default the server runs with no ATP connections. Configure one endpoint per
 cab on the `run` command; each becomes a persistent reconnecting TCP client.
 There is no handshake: the channel is live the moment TCP opens and content
 flows immediately — `TRAIN_STATE` after every snapshot, `BTM_RX` per BTM
-delivery, inbound `TRAIN_COMMAND` driving the train, and `ERROR` reporting
+delivery, inbound `ATP_COMMAND` driving the train, and `ERROR` reporting
 (see [docs/atp-api.md](docs/atp-api.md)).
 
 ```bash

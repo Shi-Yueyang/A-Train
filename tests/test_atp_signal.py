@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from a_train.adapters.atp.protocol import parse_train_command
+from a_train.adapters.atp.protocol import parse_atp_command
 from a_train.adapters.atp.signal import decode_atp_signal
 
 TID, CAB = "TRAIN001", 1
@@ -14,29 +14,29 @@ TID, CAB = "TRAIN001", 1
 
 
 def test_atp_signal_parses_as_bit_string() -> None:
-    drive, door, bits = parse_train_command({"atp_signal": "0001000"}, TID, CAB)
+    drive, door, bits = parse_atp_command({"atp_signal": "0001000"}, TID, CAB)
     assert (drive, door, bits) == (None, None, "0001000")
 
 
 def test_atp_signal_alone_satisfies_the_payload_requirement() -> None:
     # No drive_demand and no door: a bare atp_signal is a valid command.
-    assert parse_train_command({"atp_signal": "0"}, TID, CAB)[2] == "0"
+    assert parse_atp_command({"atp_signal": "0"}, TID, CAB)[2] == "0"
 
 
 @pytest.mark.parametrize("value", ["01x", "1 1", "true", 1, 0.1, ["01"]])
 def test_invalid_atp_signal_rejected(value: object) -> None:
     with pytest.raises(ValueError, match="atp_signal"):
-        parse_train_command({"atp_signal": value}, TID, CAB)
+        parse_atp_command({"atp_signal": value}, TID, CAB)
 
 
 def test_empty_atp_signal_rejected() -> None:
     with pytest.raises(ValueError, match="atp_signal"):
-        parse_train_command({"atp_signal": ""}, TID, CAB)
+        parse_atp_command({"atp_signal": ""}, TID, CAB)
 
 
 def test_missing_payload_still_rejected() -> None:
     with pytest.raises(ValueError, match="atp_signal"):
-        parse_train_command({"cab_id": CAB}, TID, CAB)
+        parse_atp_command({"cab_id": CAB}, TID, CAB)
 
 
 # -- Decode registry ---------------------------------------------------------------

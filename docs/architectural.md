@@ -527,7 +527,7 @@ This maintains a clean separation between control and physical simulation.
 
 The wire protocol itself -- transport and framing, connection lifecycle and
 reconnection, the full message catalog with field-level definitions
-(`TRAIN_STATE`, `BTM_RX`, `TRAIN_COMMAND`, `ERROR`), validation and error
+(`TRAIN_STATE`, `BTM_RX`, `ATP_COMMAND`, `ERROR`), validation and error
 codes, configuration and observability -- is specified in
 **[`atp-api.md`](atp-api.md)**, which mirrors the implementation in
 `src/a_train/adapters/atp/`.
@@ -535,7 +535,7 @@ codes, configuration and observability -- is specified in
 In one paragraph: each ATP process is a TCP server serving exactly one cab;
 the simulator dials every configured endpoint, streams `train_state`
 observations and opaque `btm_rx` telegrams toward ATP, and accepts
-`train_command` action requests from ATP, mapping them onto the same
+`atp_command` action requests from ATP, mapping them onto the same
 transport-neutral core commands the Web API submits. Invalid input is
 answered with `ERROR` without affecting the simulation. The interface
 boundary that makes this safe is §4.1: ATP requests, physics decides.
@@ -583,7 +583,7 @@ POST   /api/trains/{id}/equipment/{key}
 
 `POST /api/trains/{id}/equipment/{key}` is the generic equipment boundary:
 the JSON body is mapped to a transport-neutral equipment command and applied
-immediately by the core. See `api-spec.md` for the per-equipment fields.
+immediately by the core. See `web-api.md` for the per-equipment fields.
 
 `POST /api/simulation/start` invokes the core's idempotent `run()` command.
 `POST /api/simulation/time-mode` accepts a mode and, for `SCALED` mode, a
@@ -755,7 +755,7 @@ train-simulator/
 ├── docs/
 │   ├── architectural.md            # System architecture and module contracts.
 │   ├── atp-api.md                  # ATP TCP/NDJSON wire protocol contract.
-│   ├── api-spec.md                 # Implemented HTTP/WebSocket API contract.
+│   ├── web-api.md                  # Implemented HTTP/WebSocket API contract.
 │   └── TODO.md                     # Deferred implementation work.
 │
 ├── pyproject.toml                  # Build metadata, dependencies, tooling, and test configuration.

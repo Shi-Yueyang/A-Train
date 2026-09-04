@@ -1,4 +1,4 @@
-"""Decode ``TRAIN_COMMAND.atp_signal`` bit strings into core commands (skeleton).
+"""Decode ``ATP_COMMAND.atp_signal`` bit strings into core commands (skeleton).
 
 ``atp_signal`` is a string of ``'0'``/``'1'`` characters, e.g. ``"0001000"``;
 the leftmost character is bit index 0. Each bit position carries a meaning
@@ -42,7 +42,7 @@ def decode_atp_signal(bits: str, train_id: str, cab_id: int) -> list[Any]:
     """Translate a validated ``atp_signal`` string into core commands.
 
     Order is deterministic: bit indices ascending, left to right. Assumes the
-    caller already validated framing (protocol.parse_train_command).
+    caller already validated framing (protocol.parse_atp_command).
     """
 
     commands: list[Any] = []

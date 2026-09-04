@@ -1,7 +1,7 @@
 """Phase 3.2 acceptance tests — ATP protocol and content publishing.
 
 Channels are READY the moment TCP opens -- no handshake. Manual steps
-publish ``TRAIN_STATE`` per cab; inbound ``TRAIN_COMMAND`` messages drive the
+publish ``TRAIN_STATE`` per cab; inbound ``ATP_COMMAND`` messages drive the
 train through the core; malformed and unexpected input is answered with
 ``ERROR`` without stopping the simulation or another cab's connection. All
 observed through the real application and the production-protocol test TCP
@@ -97,10 +97,10 @@ async def test_manual_step_publishes_train_state_for_each_cab() -> None:
         await server.stop()
 
 
-# -- Criterion: inbound TRAIN_COMMAND drives the train through the core (atp-api.md §4.1) --
+# -- Criterion: inbound ATP_COMMAND drives the train through the core (atp-api.md §4.1) --
 
 
-async def test_atp_train_command_is_applied_by_the_core() -> None:
+async def test_atp_atp_command_is_applied_by_the_core() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
@@ -108,7 +108,7 @@ async def test_atp_train_command_is_applied_by_the_core() -> None:
             await _await_ready(server, c)
 
             await c.post("/api/simulation/time-mode", json={"mode": "MANUAL"})
-            await server.send({"type": "train_command", "cab_id": 1, "drive_demand": 0.5})
+            await server.send({"type": "atp_command", "cab_id": 1, "drive_demand": 0.5})
 
             # The demand must reach the train through the core, not REST.
             async def _demand_applied() -> bool:
@@ -133,7 +133,7 @@ async def test_atp_train_command_is_applied_by_the_core() -> None:
 # -- Criterion: invalid inbound commands are answered with ERROR ----------------
 
 
-async def test_invalid_train_command_answers_error() -> None:
+async def test_invalid_atp_command_answers_error() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
@@ -141,18 +141,18 @@ async def test_invalid_train_command_answers_error() -> None:
             await _await_ready(server, c)
 
             # Out-of-range demand.
-            await server.send({"type": "train_command", "cab_id": 1, "drive_demand": 5.0})
-            err = await _next(server, "error", code="invalid_train_command")
+            await server.send({"type": "atp_command", "cab_id": 1, "drive_demand": 5.0})
+            err = await _next(server, "error", code="invalid_atp_command")
             assert "[-1.0, 1.0]" in err["detail"]
 
             # Identity mismatch: cab 2 on the cab 1 channel.
-            await server.send({"type": "train_command", "cab_id": 2, "drive_demand": 0.5})
-            err = await _next(server, "error", code="invalid_train_command")
+            await server.send({"type": "atp_command", "cab_id": 2, "drive_demand": 0.5})
+            err = await _next(server, "error", code="invalid_atp_command")
             assert "cab_id" in err["detail"]
 
             # Empty command.
-            await server.send({"type": "train_command"})
-            await _next(server, "error", code="invalid_train_command")
+            await server.send({"type": "atp_command"})
+            await _next(server, "error", code="invalid_atp_command")
 
             # Nothing was applied and the simulation still runs.
             train = (await c.get("/api/trains/TRAIN001")).json()
@@ -212,13 +212,13 @@ async def test_atp_signal_accepted_and_inert_while_registry_is_empty() -> None:
             await _await_ready(server, c)
             await _next(server, "train_state")  # drain the catch-up publish
 
-            await server.send({"type": "train_command", "cab_id": 1, "atp_signal": "0001000"})
+            await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "0001000"})
             # No handler bound: nothing is answered and nothing is published.
             with pytest.raises(asyncio.TimeoutError):
                 await server.wait_for_message(timeout=0.3)
 
             # The session is healthy: a later command still applies.
-            await server.send({"type": "train_command", "cab_id": 1, "drive_demand": 0.5})
+            await server.send({"type": "atp_command", "cab_id": 1, "drive_demand": 0.5})
             applied = False
             for _ in range(250):
                 train = (await c.get("/api/trains/TRAIN001")).json()
@@ -238,12 +238,12 @@ async def test_invalid_atp_signal_answers_error() -> None:
         async with running_app([T1], _one_cab(port)) as c:
             await _await_ready(server, c)
 
-            await server.send({"type": "train_command", "cab_id": 1, "atp_signal": "00120"})
-            err = await _next(server, "error", code="invalid_train_command")
+            await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "00120"})
+            err = await _next(server, "error", code="invalid_atp_command")
             assert "atp_signal" in err["detail"]
 
-            await server.send({"type": "train_command", "cab_id": 1, "atp_signal": ""})
-            err = await _next(server, "error", code="invalid_train_command")
+            await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": ""})
+            err = await _next(server, "error", code="invalid_atp_command")
             assert "atp_signal" in err["detail"]
 
             assert _manager(c).ready_endpoints == frozenset({("TRAIN001", 1)})
