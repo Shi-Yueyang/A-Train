@@ -1,13 +1,14 @@
-"""Creates clients and bridges snapshots and ATP commands (§4, §2.6).
+"""Creates clients and bridges snapshots and ATP commands (atp-api.md, §2.6).
 
-The manager holds one ``AtpClient`` per configured train cab (§4.2: each ATP
-process serves exactly one cab and accepts one connection at a time, so no
-in-band handshake identifies the stream). ``start()`` launches every client's
-connection loop, subscribes one bounded snapshot queue per cab, and runs a
-publisher task per client that turns core snapshots into ``TRAIN_STATE`` and
-``BTM_RX`` lines (§4.4, §4.5). Inbound ATP content is validated and converted
-into commands submitted to the core (§4.1); rejected input is answered with an
-``ERROR`` message (§4.3).
+The manager holds one ``AtpClient`` per configured train cab (atp-api.md §1.1:
+each ATP process serves exactly one cab and accepts one connection at a time,
+so no in-band handshake identifies the stream). ``start()`` launches every
+client's connection loop, subscribes one bounded snapshot queue per cab, and
+runs a publisher task per client that turns core snapshots into
+``TRAIN_STATE`` and ``BTM_RX`` lines (atp-api.md §3.1, §3.2). Inbound ATP
+content is validated and converted into commands submitted to the core
+(architectural.md §4.1); rejected input is answered with an ``ERROR`` message
+(atp-api.md §5).
 
 Publisher and inbound tasks perform all protocol I/O outside ``run_loop()``,
 so a slow or chatty ATP peer cannot delay physics (§2.6).
@@ -31,6 +32,7 @@ from ...domain.train import EquipmentSet, TrainControl
 from ...simulation.commands import EquipmentCommand, TrainControlCommand
 from .client import AtpClient
 from .protocol import make_error, parse_train_command
+from .signal import decode_atp_signal
 
 if TYPE_CHECKING:
     from ...simulation.core import SimulationCore
@@ -40,7 +42,7 @@ logger = logging.getLogger("a_train.adapters.atp")
 
 @dataclass(frozen=True)
 class AtpEndpoint:
-    """Where to reach the external ATP process serving one train cab (§4.2)."""
+    """Where to reach the external ATP process serving one train cab (atp-api.md §1.1)."""
 
     train_id: str
     cab_id: int
@@ -58,13 +60,11 @@ class AtpManager:
         *,
         retry_delay: float = 1.0,
         max_retry_delay: float = 30.0,
-        heartbeat_interval: float | None = None,
     ) -> None:
         self._core = core
         self._endpoints = tuple(endpoints)
         self._retry_delay = retry_delay
         self._max_retry_delay = max_retry_delay
-        self._heartbeat_interval = heartbeat_interval
         self._clients: list[AtpClient] = []
         self._publisher_tasks: dict[AtpClient, asyncio.Task[None]] = {}
         self._queues: dict[AtpClient, asyncio.Queue[Any]] = {}
@@ -96,7 +96,6 @@ class AtpManager:
                 endpoint.port,
                 retry_delay=self._retry_delay,
                 max_retry_delay=self._max_retry_delay,
-                heartbeat_interval=self._heartbeat_interval,
             )
             client.set_inbound_handler(partial(self._handle_inbound, client))
             queue = self._core.subscribe()
@@ -126,7 +125,7 @@ class AtpManager:
             snapshot = await queue.get()
             client.publish(snapshot)
 
-    # -- Inbound ATP content (§4.1, §4.3) --------------------------------------
+    # -- Inbound ATP content (atp-api.md §4, §5) ---------------------------------
 
     async def _handle_inbound(self, client: AtpClient, message: dict[str, Any]) -> None:
         mtype = message.get("type")
@@ -146,7 +145,9 @@ class AtpManager:
 
     async def _handle_train_command(self, client: AtpClient, message: dict[str, Any]) -> None:
         try:
-            drive_demand, door = parse_train_command(message, client.train_id, client.cab_id)
+            drive_demand, door, atp_signal = parse_train_command(
+                message, client.train_id, client.cab_id
+            )
         except ValueError as exc:
             client.send_message(
                 make_error(
@@ -173,6 +174,9 @@ class AtpManager:
                     payload=EquipmentSet(key="door", command=door),
                 )
             )
+        if atp_signal is not None:
+            commands.extend(decode_atp_signal(atp_signal, client.train_id, client.cab_id))
+            
         for command in commands:
             result = await self._core.submit_command(command)
             if not result.ok:

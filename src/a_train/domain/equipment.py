@@ -1,4 +1,4 @@
-"""Doors, cabs, and BTM equipment behaviour (§3.5, §3.6, §4.5).
+"""Doors, cabs, and BTM equipment behaviour (§3.5, §3.6, atp-api.md §3.2).
 
 Every train-facing equipment capability is a narrow component behind the train
 aggregate. A component keeps private mutable state, accepts plain-value

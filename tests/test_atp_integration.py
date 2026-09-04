@@ -3,10 +3,9 @@
 Channels are READY the moment TCP opens -- no handshake. Manual steps
 publish ``TRAIN_STATE`` per cab; inbound ``TRAIN_COMMAND`` messages drive the
 train through the core; malformed and unexpected input is answered with
-``ERROR`` without stopping the simulation or another cab's connection;
-``HEARTBEAT`` keepalive runs in both directions. All observed through the
-real application and the production-protocol test TCP server (§6.1); no
-production module is mocked.
+``ERROR`` without stopping the simulation or another cab's connection. All
+observed through the real application and the production-protocol test TCP
+server (§6.1); no production module is mocked.
 """
 
 from __future__ import annotations
@@ -98,7 +97,7 @@ async def test_manual_step_publishes_train_state_for_each_cab() -> None:
         await server.stop()
 
 
-# -- Criterion: inbound TRAIN_COMMAND drives the train through the core (§4.1) ---
+# -- Criterion: inbound TRAIN_COMMAND drives the train through the core (atp-api.md §4.1) --
 
 
 async def test_atp_train_command_is_applied_by_the_core() -> None:
@@ -202,43 +201,51 @@ async def test_unknown_message_type_answered_with_error() -> None:
         await server.stop()
 
 
-# -- Work item: HEARTBEAT / HEARTBEAT_ACK keepalive ------------------------------
+# -- Work item: atp_signal protection bits, skeleton (atp-api.md §4.2) -----------
 
 
-async def test_heartbeat_keepalive_both_directions() -> None:
-    server = TestAtpServer(ack_heartbeats=True)
+async def test_atp_signal_accepted_and_inert_while_registry_is_empty() -> None:
+    server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], _one_cab(port), atp_heartbeat_interval=0.1) as c:
+        async with running_app([T1], _one_cab(port)) as c:
             await _await_ready(server, c)
+            await _next(server, "train_state")  # drain the catch-up publish
 
-            beat = await _next(server, "heartbeat")
-            assert beat["train_id"] == "TRAIN001" and beat["cab_id"] == 1
+            await server.send({"type": "train_command", "cab_id": 1, "atp_signal": "0001000"})
+            # No handler bound: nothing is answered and nothing is published.
+            with pytest.raises(asyncio.TimeoutError):
+                await server.wait_for_message(timeout=0.3)
 
-            await asyncio.sleep(0.5)  # several keepalive beats, all acked
-            assert _manager(c).ready_endpoints == frozenset({("TRAIN001", 1)})
-
-            await server.send({"type": "heartbeat", "train_id": "TRAIN001", "cab_id": 1})
-            await _next(server, "heartbeat_ack")
+            # The session is healthy: a later command still applies.
+            await server.send({"type": "train_command", "cab_id": 1, "drive_demand": 0.5})
+            applied = False
+            for _ in range(250):
+                train = (await c.get("/api/trains/TRAIN001")).json()
+                if train["drive_demand"] == pytest.approx(0.5):
+                    applied = True
+                    break
+                await asyncio.sleep(0.02)
+            assert applied
     finally:
         await server.stop()
 
 
-async def test_heartbeat_without_ack_reconnects() -> None:
-    server = TestAtpServer()  # never acks heartbeats
+async def test_invalid_atp_signal_answers_error() -> None:
+    server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], _one_cab(port), atp_heartbeat_interval=0.05) as c:
+        async with running_app([T1], _one_cab(port)) as c:
             await _await_ready(server, c)
 
-            # The overdue ack drops the session, then the link comes back up.
-            manager = _manager(c)
+            await server.send({"type": "train_command", "cab_id": 1, "atp_signal": "00120"})
+            err = await _next(server, "error", code="invalid_train_command")
+            assert "atp_signal" in err["detail"]
 
-            async def _wait_dropped_then_ready() -> None:
-                await _wait_until(lambda: manager.ready_endpoints == frozenset())
-                await _wait_until(lambda: manager.ready_endpoints == frozenset({("TRAIN001", 1)}))
+            await server.send({"type": "train_command", "cab_id": 1, "atp_signal": ""})
+            err = await _next(server, "error", code="invalid_train_command")
+            assert "atp_signal" in err["detail"]
 
-            await asyncio.wait_for(_wait_dropped_then_ready(), 5.0)
-            assert (await c.get("/api/status")).status_code == 200
+            assert _manager(c).ready_endpoints == frozenset({("TRAIN001", 1)})
     finally:
         await server.stop()

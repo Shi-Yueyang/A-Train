@@ -1,11 +1,11 @@
-"""NDJSON framing and protocol message validation (§4.2, §4.3).
+"""NDJSON framing and protocol message validation (atp-api.md §1.2, §5).
 
 The protocol uses TCP + NDJSON (one JSON object per line). TCP provides the
 transport; the newline provides application-level message framing. There is
 no handshake message: the channel is live the moment TCP opens. Builders and
-validators cover cyclic ``TRAIN_STATE``, ``BTM_RX`` (opaque base64 payload,
-§4.5), ``HEARTBEAT`` / ``HEARTBEAT_ACK`` keepalive, ``TRAIN_COMMAND`` (inbound
-ATP action request, §4.1), and ``ERROR`` reporting.
+validators cover cyclic ``TRAIN_STATE`` (atp-api.md §3.1), ``BTM_RX`` (opaque
+base64 payload, §3.2), ``TRAIN_COMMAND`` (inbound ATP action request, §4.1),
+and ``ERROR`` reporting (§5).
 """
 
 from __future__ import annotations
@@ -34,19 +34,11 @@ def encode_message(message: Mapping[str, Any]) -> bytes:
     return (json.dumps(dict(message)) + "\n").encode("utf-8")
 
 
-# -- Outbound message builders (§4.3-§4.5) -------------------------------------
-
-
-def make_heartbeat(train_id: str, cab_id: int) -> dict[str, Any]:
-    return {"type": "heartbeat", "train_id": train_id, "cab_id": cab_id}
-
-
-def make_heartbeat_ack(train_id: str, cab_id: int) -> dict[str, Any]:
-    return {"type": "heartbeat_ack", "train_id": train_id, "cab_id": cab_id}
+# -- Outbound message builders (atp-api.md §3, §5) -------------------------------
 
 
 def make_train_state(train_id: str, cab_id: int, train: Any) -> dict[str, Any]:
-    """One ``TRAIN_STATE`` line from a train snapshot (§4.4)."""
+    """One ``TRAIN_STATE`` line from a train snapshot (atp-api.md §3.1)."""
 
     return {
         "type": "train_state",
@@ -60,7 +52,7 @@ def make_train_state(train_id: str, cab_id: int, train: Any) -> dict[str, Any]:
 
 
 def make_btm_rx(payload_b64: str) -> dict[str, Any]:
-    """One ``BTM_RX`` line carrying an opaque base64 payload (§4.5)."""
+    """One ``BTM_RX`` line carrying an opaque base64 payload (atp-api.md §3.2)."""
 
     return {"type": "btm_rx", "data": payload_b64}
 
@@ -87,12 +79,12 @@ def parse_train_command(
     message: Mapping[str, Any],
     train_id: str,
     cab_id: int,
-) -> tuple[float | None, str | None]:
+) -> tuple[float | None, str | None, str | None]:
     """Validate a ``TRAIN_COMMAND`` on a channel bound to (train_id, cab_id).
 
-    Returns ``(drive_demand, door)`` with at most one set. Raises ValueError
-    (reported as ``ERROR`` by the caller, §4.3) on identity mismatch or an
-    invalid or missing payload.
+    Returns ``(drive_demand, door, atp_signal)``; at least one is always set.
+    Raises ValueError (reported as ``ERROR`` by the caller, atp-api.md §5) on
+    identity mismatch or an invalid or missing payload.
     """
 
     msg_train = message.get("train_id")
@@ -114,6 +106,15 @@ def parse_train_command(
     if door is not None and door not in ("open", "close"):
         raise ValueError(f"door must be 'open' or 'close', got {door!r}")
 
-    if drive_demand is None and door is None:
-        raise ValueError("train_command requires drive_demand or door")
-    return drive_demand, door
+    atp_signal = message.get("atp_signal")
+    if atp_signal is not None:
+        if not isinstance(atp_signal, str) or not atp_signal:
+            raise ValueError(f"atp_signal must be a non-empty string, got {atp_signal!r}")
+        if not all(c in "01" for c in atp_signal):
+            raise ValueError(
+                f"atp_signal must consist of '0' and '1' characters, got {atp_signal!r}"
+            )
+
+    if drive_demand is None and door is None and atp_signal is None:
+        raise ValueError("train_command requires drive_demand, door or atp_signal")
+    return drive_demand, door, atp_signal

@@ -48,9 +48,9 @@ async def test_atp_server_speaks_ndjson(atp_server) -> None:
         received = await atp_server.wait_for_message()
         assert received == sent
 
-        await atp_server.send({"type": "heartbeat_ack"})
+        await atp_server.send({"type": "echo_probe", "n": 1})
         line = await reader.readline()
-        assert json.loads(line.decode("utf-8"))["type"] == "heartbeat_ack"
+        assert json.loads(line.decode("utf-8"))["type"] == "echo_probe"
     finally:
         writer.close()
         await writer.wait_closed()

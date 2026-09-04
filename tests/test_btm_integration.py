@@ -1,4 +1,4 @@
-"""Phase 3.2 acceptance tests — end-to-end BTM delivery to an ATP peer (§4.5).
+"""Phase 3.2 acceptance tests — end-to-end BTM delivery to an ATP peer (atp-api.md §3.2).
 
 A BTM payload injected through the equipment endpoint appears on the target
 cab's connection as a ``BTM_RX`` line whose decoded data equals the delivered

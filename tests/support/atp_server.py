@@ -23,12 +23,11 @@ class TestAtpServer:
 
     __test__ = False  # support helper; not a pytest test class
 
-    def __init__(self, ack_heartbeats: bool = False) -> None:
+    def __init__(self) -> None:
         self._server: asyncio.Server | None = None
         self._port: int = 0
         self._received: deque[dict[str, Any]] = deque()
         self._clients: list[asyncio.StreamWriter] = []
-        self._ack_heartbeats = ack_heartbeats
 
     async def start(self, host: str = "127.0.0.1", port: int = 0) -> int:
         self._server = await asyncio.start_server(self._handle_connection, host, port)
@@ -63,10 +62,6 @@ class TestAtpServer:
                 except json.JSONDecodeError:
                     continue
                 self._received.append(message)
-                is_heartbeat = isinstance(message, dict) and message.get("type") == "heartbeat"
-                if self._ack_heartbeats and is_heartbeat:
-                    writer.write((json.dumps({"type": "heartbeat_ack"}) + "\n").encode("utf-8"))
-                    await writer.drain()
         except (asyncio.IncompleteReadError, ConnectionError):
             pass
         finally:

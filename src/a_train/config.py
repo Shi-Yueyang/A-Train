@@ -1,4 +1,4 @@
-"""ATP endpoint configuration for the ``run`` command (Phase 3.1, §4.2).
+"""ATP endpoint configuration for the ``run`` command (Phase 3.1, atp-api.md §1.1, §6).
 
 The ``run`` command accepts ATP endpoints as ``--atp TRAIN_ID:CAB_ID=HOST:PORT``
 specifications and/or a JSON ``--atp-config`` file::
@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Any
 
 ATP_ENDPOINTS_ENV = "A_TRAIN_ATP_ENDPOINTS"
-ATP_HEARTBEAT_ENV = "A_TRAIN_ATP_HEARTBEAT"
 
 _MAX_PORT = 65535
 

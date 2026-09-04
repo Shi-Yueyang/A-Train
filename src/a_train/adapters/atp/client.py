@@ -1,4 +1,4 @@
-"""One reconnecting TCP client for one external ATP process (§4.2).
+"""One reconnecting TCP client for one external ATP process (atp-api.md §1).
 
 The simulator acts as the TCP client; ATP acts as the TCP server. Each client
 owns exactly one cab's connection and runs a connection loop:
@@ -6,20 +6,20 @@ owns exactly one cab's connection and runs a connection loop:
     CONNECTING --TCP open--> READY
         ^                       |
         +--- backoff wait (state DISCONNECTED) <--+
-              peer closed / stream error / heartbeat ack overdue
+              peer closed / stream error
 
 There is no application-level handshake: the channel is READY the moment TCP
 opens, and snapshot publishing starts immediately. The cab identity lives in
 the endpoint configuration (one ATP server per cab), not in a ``HELLO``
-message. Any failure (connection refused, stream error, unexpected close,
-heartbeat ack overdue) returns to ``CONNECTING`` after an exponential backoff
-capped at ``max_retry_delay``; a session that reached READY resets the backoff
-so recovery from a dropped link is fast (§4.2).
+message. Any failure (connection refused, stream error, unexpected close)
+returns to ``CONNECTING`` after an exponential backoff capped at
+``max_retry_delay``; a session that reached READY resets the backoff so
+recovery from a dropped link is fast (atp-api.md §1.4).
 
 ``publish`` converts core snapshots into cyclic ``TRAIN_STATE`` and
-event-driven ``BTM_RX`` lines; a configurable ``HEARTBEAT`` keepalive probes
-the link; inbound content is validated, answered with ``ERROR`` on malformed
-lines (§4.3), and dispatched to the manager for ATP-command handling.
+event-driven ``BTM_RX`` lines; inbound content is validated, answered with
+``ERROR`` on malformed lines (atp-api.md §5), and dispatched to the manager
+for ATP-command handling.
 """
 
 from __future__ import annotations
@@ -37,8 +37,6 @@ from .protocol import (
     encode_message,
     make_btm_rx,
     make_error,
-    make_heartbeat,
-    make_heartbeat_ack,
     make_train_state,
 )
 
@@ -48,7 +46,7 @@ InboundHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class ClientState(Enum):
-    """Connection-loop state of one ATP client (§4.2)."""
+    """Connection-loop state of one ATP client (atp-api.md §1.3)."""
 
     IDLE = "IDLE"
     CONNECTING = "CONNECTING"
@@ -69,7 +67,6 @@ class AtpClient:
         *,
         retry_delay: float = 1.0,
         max_retry_delay: float = 30.0,
-        heartbeat_interval: float | None = None,
         on_message: InboundHandler | None = None,
     ) -> None:
         self._train_id = train_id
@@ -78,7 +75,6 @@ class AtpClient:
         self._port = port
         self._retry_delay = retry_delay
         self._max_retry_delay = max_retry_delay
-        self._heartbeat_interval = heartbeat_interval
         self._on_message = on_message
 
         self._state = ClientState.IDLE
@@ -116,7 +112,7 @@ class AtpClient:
         return f"ATP {self._train_id} cab {self._cab_id} ({self._host}:{self._port})"
 
     def set_inbound_handler(self, handler: InboundHandler) -> None:
-        """Attach the manager callback for inbound non-keepalive messages (§4.1)."""
+        """Attach the manager callback for inbound action messages (atp-api.md §4)."""
 
         self._on_message = handler
 
@@ -138,10 +134,10 @@ class AtpClient:
                 await self._task
             self._task = None
 
-    # -- Outbound transport (§4.4, §4.5) --------------------------------------
+    # -- Outbound transport (atp-api.md §3) -------------------------------------
 
     def send_message(self, message: Mapping[str, Any]) -> bool:
-        """Write one framed NDJSON message on the READY connection (§4.2).
+        """Write one framed NDJSON message on the READY connection (atp-api.md §1.2).
 
         Returns True if the bytes were queued for the peer, False if the
         channel is not READY or the write failed (the connection loop then
@@ -158,7 +154,7 @@ class AtpClient:
         return True
 
     def publish(self, snapshot: SimulationSnapshot) -> None:
-        """Publish one core snapshot as this cab's protocol content (§4.4, §4.5).
+        """Publish one core snapshot as this cab's protocol content (atp-api.md §3.1, §3.2).
 
         Writes ``TRAIN_STATE`` for every
         READY snapshot and ``BTM_RX`` only when this cab's BTM delivery count
@@ -225,37 +221,17 @@ class AtpClient:
                 await writer.wait_closed()
 
     async def _hold(self, reader: asyncio.StreamReader) -> None:
-        """Consume inbound messages while READY until the peer closes, or keep
-        the link warm with heartbeats when an interval is configured (§4.3)."""
+        """Consume inbound messages while READY until the peer closes."""
 
-        loop = asyncio.get_running_loop()
-        awaiting_ack = False
-        next_beat = loop.time() + self._heartbeat_interval if self._heartbeat_interval else None
         while True:
-            if next_beat is None:
-                line = await reader.readline()
-            else:
-                now = loop.time()
-                if now >= next_beat:
-                    if awaiting_ack:
-                        logger.warning("%s: heartbeat ack overdue; reconnecting", self.ident)
-                        return
-                    self.send_message(make_heartbeat(self._train_id, self._cab_id))
-                    awaiting_ack = True
-                    next_beat = now + self._heartbeat_interval
-                try:
-                    line = await asyncio.wait_for(
-                        reader.readline(), max(next_beat - loop.time(), 0.001)
-                    )
-                except asyncio.TimeoutError:
-                    continue
+            line = await reader.readline()
             if not line:
                 logger.info("%s: closed by peer", self.ident)
                 return
             try:
                 message = decode_line(line)
             except ValueError as exc:
-                # A framing-valid but invalid line is reported, not fatal (§4.3).
+                # A framing-valid but invalid line is reported, not fatal (atp-api.md §5.1).
                 logger.warning("%s: %s", self.ident, exc)
                 self.send_message(
                     make_error(
@@ -266,10 +242,5 @@ class AtpClient:
                     )
                 )
                 continue
-            mtype = message.get("type")
-            if mtype == "heartbeat":
-                self.send_message(make_heartbeat_ack(self._train_id, self._cab_id))
-            elif mtype == "heartbeat_ack":
-                awaiting_ack = False
-            elif self._on_message is not None:
+            if self._on_message is not None:
                 await self._on_message(message)

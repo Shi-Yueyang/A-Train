@@ -60,7 +60,9 @@ class EquipmentSetRequest(BaseModel):
         description="Named command: 'open'/'close' (door), 'activate'/'deactivate' (cab).",
     )
     cab_id: int | None = Field(default=None, description="Target cab (cab, btm).")
-    data: str | None = Field(default=None, description="Base64-encoded opaque payload (btm, §4.5).")
+    data: str | None = Field(
+        default=None, description="Base64-encoded opaque payload (btm, atp-api.md §3.2)."
+    )
 
 
 class TrainResponse(BaseModel):
@@ -79,7 +81,7 @@ class TrainsResponse(BaseModel):
 
 
 class AtpConnectionResponse(BaseModel):
-    """One cab's ATP channel state (Phase 3.1 observability, §4.2)."""
+    """One cab's ATP channel state (Phase 3.1 observability, atp-api.md §6.2)."""
 
     train_id: str
     cab_id: int

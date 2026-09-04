@@ -68,7 +68,7 @@ Runs the core. Idempotent while already running. Body: none.
 
 ### GET /api/atp/status
 
-Read-only view of each configured cab's ATP channel (Phase 3.1, §4.2).
+Read-only view of each configured cab's ATP channel (Phase 3.1, atp-api.md §6.2).
 `connections` is empty when no ATP endpoints are configured.
 
 **Response 200**:
@@ -90,7 +90,7 @@ Read-only view of each configured cab's ATP channel (Phase 3.1, §4.2).
 
 | Field   | Type   | Notes                                                                     |
 | ------- | ------ | ------------------------------------------------------------------------- |
-| `state` | string | `IDLE` / `CONNECTING` / `HANDSHAKING` / `READY` / `DISCONNECTED` / `STOPPED`. |
+| `state` | string | `IDLE` / `CONNECTING` / `READY` / `DISCONNECTED` / `STOPPED`. |
 | `ready` | bool   | True while the TCP channel is open (`READY`). |
 
 ### POST /api/simulation/pause
@@ -204,7 +204,7 @@ with the component's error message on invalid input.
 | ------------- | ------------------ | ----------------- | ------------------------------------------------------------ |
 | `command`   | string             | `door`, `cab` | `"open"` / `"close"`; `"activate"` / `"deactivate"`. |
 | `cab_id`    | integer            | `cab`, `btm`  | Target cab.                                                  |
-| `data`      | string             | `btm`           | Base64 opaque payload (§4.5); invalid base64 → 400.        |
+| `data`      | string             | `btm`           | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400.        |
 
 **Semantics per equipment key**:
 
@@ -284,7 +284,7 @@ by equipment type (§3.5).
 | -------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | `cab`  | array of`{ cab_id: int, active: bool }`                    | One entry per configured cab; `active` is a local flag with no control-side effect (§3.3).                 |
 | `door` | `{ state: "open" \| "closed" }`                             | Train-level door state.                                                                     |
-| `btm`  | array of`{ cab_id, pending, payload_b64, received_count }` | Payload bytes are opaque to the simulator and base64-encoded (§4.5).                       |
+| `btm`  | array of`{ cab_id, pending, payload_b64, received_count }` | Payload bytes are opaque to the simulator and base64-encoded (atp-api.md §3.2).                       |
 
 Future addons add optional keys without changing existing fields; a train
 without an equipment type simply omits its key.
@@ -334,4 +334,4 @@ Planned in `docs/architectural.md` §5.2 but absent from the current routes:
 - `POST /api/signals/{id}` (linear-track signals, Phase 3+).
 - The earlier `POST /api/btm/inject` proposal is superseded by the generic
   `POST /api/trains/{train_id}/equipment/btm`.
-- The ATP-side TCP/NDJSON protocol (§4) is separate from this HTTP API.
+- The ATP-side TCP/NDJSON protocol (`atp-api.md`) is separate from this HTTP API.

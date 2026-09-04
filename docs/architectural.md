@@ -523,193 +523,22 @@ ATP
 
 This maintains a clean separation between control and physical simulation.
 
-## 4.2 Protocol Overview
+## 4.2 Protocol Specification
 
-The protocol uses **TCP + NDJSON** (one JSON object per line).
+The wire protocol itself -- transport and framing, connection lifecycle and
+reconnection, the full message catalog with field-level definitions
+(`TRAIN_STATE`, `BTM_RX`, `TRAIN_COMMAND`, `ERROR`), validation and error
+codes, configuration and observability -- is specified in
+**[`atp-api.md`](atp-api.md)**, which mirrors the implementation in
+`src/a_train/adapters/atp/`.
 
-Example:
-
-```text
-{"type":"train_state","train_id":"TRAIN001",...}\n
-{"type":"train_state","train_id":"TRAIN001",...}\n
-{"type":"btm_rx","data":"ASOk/wCBcg==",...}\n
-```
-
-TCP provides the transport. The newline provides application-level message framing.
-
-**Connection model:** ATP acts as the TCP server. Simulator acts as the TCP client. Each ATP process serves exactly one cab and accepts one connection at a time, so the cab identity lives in the endpoint configuration (which host:port the simulator dials); there is no in-band introduction.
-
-```text
-Simulator                         ATP
-    │                              │
-    │──── TCP CONNECT ────────────>│
-    │────── (channel is READY)     │
-    │──── TRAIN_STATE ───────────>│
-    │──── BTM_RX ────────────────>│
-    │<──── TRAIN_COMMAND ─────────│
-```
-
-**Connection sequence:**
-
-```text
-1. Simulator starts
-2. External ATP process is running
-3. Simulator connects to ATP TCP server
-4. The channel is live the moment TCP opens; content flows immediately
-```
-
-A refused or dropped connection reconnects with exponential backoff
-(Phase 3.1 channel semantics). A peer that speaks no valid NDJSON is
-answered with `ERROR` (§4.8) or, on framing loss, reconnects.
-
-## 4.3 Message Types
-
-```text
-TRAIN_STATE
-TRAIN_COMMAND
-
-BTM_RX
-
-HEARTBEAT
-HEARTBEAT_ACK
-
-ERROR
-```
-
-Every message should contain:
-
-```json
-{
-  "type": "..."
-}
-```
-
-| Field    | Purpose      |
-| -------- | ------------ |
-| `type` | Message type |
-
-For messages involving train/cab identification:
-
-```json
-{
-  "train_id": "TRAIN001",
-  "cab_id": 1
-}
-```
-
-## 4.4 TRAIN_STATE
-
-This is the primary cyclic message (Train → ATP).
-
-Example:
-
-```json
-{
-  "type": "train_state",
-
-  "train_id": "TRAIN001",
-  "cab_id": 1,
-
-  "speed": 22.31,
-  "acceleration": -0.15,
-  "position": 15320.4,
-  "direction": "forward"
-}
-```
-
-Units:
-
-```text
-speed          m/s
-acceleration   m/s²
-position       m
-```
-
-Position is the distance along the single linear track from a fixed origin (see non-goals).
-
-## 4.5 BTM Protocol
-
-BTM data flows in one direction only: Train → ATP.
-
-```text
-TRAIN ────── BTM_RX ──────> ATP
-```
-
-The simulator is responsible for simulating the BTM equipment and sending BTM data to ATP. ATP is responsible for interpreting BTM data.
-
-BTM data is treated as an **opaque byte array** by the simulator. The simulator should not interpret the BTM payload.
-
-Example binary data:
-
-```text
-01 23 A4 FF 00 81 72
-```
-
-is encoded as Base64:
-
-```text
-ASOk/wCBcg==
-```
-
-The message becomes:
-
-```json
-{
-  "type": "btm_rx",
-  "data": "ASOk/wCBcg=="
-}
-```
-
-## 4.6 TRAIN_COMMAND (ATP → Train)
-
-An ATP process requests a normalized train action through its own cab's
-channel (see §4.1: ATP requests, physics decides). The message must carry the
-connection's `cab_id` (and `train_id` if present); any identity mismatch is
-answered with `ERROR` and nothing is applied.
-
-```json
-{
-  "type": "train_command",
-  "train_id": "TRAIN001",
-  "cab_id": 1,
-  "drive_demand": -1.0,
-  "door": "close"
-}
-```
-
-`drive_demand` (finite, `[-1.0, 1.0]`) and `door` (`"open"`/`"close"`) are
-optional individually but at least one is required. The adapter converts the
-message into the same transport-neutral commands the REST API submits
-(`TrainControlCommand`, `EquipmentCommand`); core rejection is reported back
-as `ERROR` with code `command_rejected`.
-
-## 4.7 HEARTBEAT keepalive
-
-The simulator sends `HEARTBEAT` (with train/cab identity) on a configured
-interval while READY, and answers any inbound `HEARTBEAT` with
-`HEARTBEAT_ACK`. A peer that fails to acknowledge one full interval is
-treated as a dead link: the session is dropped and reconnects per §4.2.
-Interval `0`/unset disables keepalive.
-
-## 4.8 ERROR
-
-Every malformed or unexpected inbound message is answered (where the framing
-survives) and reported, without stopping the simulation or other cab's
-connection:
-
-```json
-{
-  "type": "error",
-  "code": "malformed_message",
-  "detail": "malformed NDJSON line: b'...'",
-  "train_id": "TRAIN001",
-  "cab_id": 1
-}
-```
-
-Codes: `malformed_message` (unframed line), `unknown_message_type`,
-`invalid_train_command` (identity or payload validation), and
-`command_rejected` (core refused the resulting command).
+In one paragraph: each ATP process is a TCP server serving exactly one cab;
+the simulator dials every configured endpoint, streams `train_state`
+observations and opaque `btm_rx` telegrams toward ATP, and accepts
+`train_command` action requests from ATP, mapping them onto the same
+transport-neutral core commands the Web API submits. Invalid input is
+answered with `ERROR` without affecting the simulation. The interface
+boundary that makes this safe is §4.1: ATP requests, physics decides.
 
 ---
 
@@ -876,7 +705,7 @@ train-simulator/
 ├── src/a_train/
 │   ├── __init__.py                 # Public package version and exports only.
 │   ├── __main__.py                 # `python -m a_train` command-line entry point.
-│   ├── config.py                   # ATP endpoint configuration for `run` (§4.2, Phase 3.1).
+│   ├── config.py                   # ATP endpoint configuration for `run` (atp-api.md §6, Phase 3.1).
 │   ├── bootstrap.py                # Creates the core and adapters; owns process startup and shutdown.
 │   │
 │   ├── simulation/                 # Simulation-time orchestration; no HTTP or TCP handling.
@@ -925,6 +754,7 @@ train-simulator/
 │
 ├── docs/
 │   ├── architectural.md            # System architecture and module contracts.
+│   ├── atp-api.md                  # ATP TCP/NDJSON wire protocol contract.
 │   ├── api-spec.md                 # Implemented HTTP/WebSocket API contract.
 │   └── TODO.md                     # Deferred implementation work.
 │

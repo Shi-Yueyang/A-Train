@@ -158,7 +158,7 @@ async def test_ready_connection_survives_unknown_inbound_messages() -> None:
         async with running_app([T1], _cabs(port)) as c:
             await _wait_until(lambda: len(_manager(c).ready_endpoints) == 2)
 
-            await server.send({"type": "heartbeat"})
+            await server.send({"type": "hello", "payload": {"n": 42}})
             await server.send({"type": "future_phase_3_message", "payload": [1, 2, 3]})
             await _next_message(server, "error")
             await asyncio.sleep(0.1)

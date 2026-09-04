@@ -65,7 +65,7 @@ async def get_status(core: SimulationCore = Depends(get_core)) -> StatusResponse
 
 @router.get("/atp/status", response_model=AtpStatusResponse)
 async def get_atp_status(request: Request) -> AtpStatusResponse:
-    """Report each configured cab's ATP channel state (§4.2, Phase 3.1)."""
+    """Report each configured cab's ATP channel state (atp-api.md §6.2, Phase 3.1)."""
 
     manager = request.app.state.atp_manager
     return AtpStatusResponse(

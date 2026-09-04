@@ -152,7 +152,7 @@ message semantics, content publishing, and keepalive remain in Phase 3.2.
   real ATP processes; no endpoints configured means the simulator runs ATP
   with zero connections.
 * Implement the client connection-state machine: connect, retry, and reconnect
-  per §4.2.
+  per docs/atp-api.md §1.
 * Implement one reconnecting TCP client per configured train cab.
 * Hold each established connection open indefinitely: the reader consumes
   incoming framed lines without content-level interpretation, and the writer
@@ -186,7 +186,6 @@ content.
 
 * Implement protocol message validation and NDJSON framing.
 * Reject or report malformed or unexpected messages with `ERROR` semantics.
-* Implement `HEARTBEAT` / `HEARTBEAT_ACK` keepalive.
 * Publish `TRAIN_STATE` for each cab from the core's snapshots after each
   nominal fixed step and control-state transition.
 * Deliver BTM payload data as `BTM_RX` messages when the train model accepts

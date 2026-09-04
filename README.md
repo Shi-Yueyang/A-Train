@@ -27,13 +27,12 @@ By default the server runs with no ATP connections. Configure one endpoint per
 cab on the `run` command; each becomes a persistent reconnecting TCP client.
 There is no handshake: the channel is live the moment TCP opens and content
 flows immediately — `TRAIN_STATE` after every snapshot, `BTM_RX` per BTM
-delivery, `HEARTBEAT` keepalive when configured, inbound `TRAIN_COMMAND`
-driving the train, and `ERROR` reporting (§4.2–§4.8).
+delivery, inbound `TRAIN_COMMAND` driving the train, and `ERROR` reporting
+(see [docs/atp-api.md](docs/atp-api.md)).
 
 ```bash
 python -m a_train run \
-  --atp TRAIN001:1=127.0.0.1:9101 --atp TRAIN001:2=127.0.0.1:9102 \
-  --atp-heartbeat 10
+  --atp TRAIN001:1=127.0.0.1:9101 --atp TRAIN001:2=127.0.0.1:9102
 
 # or a JSON file: {"atp_endpoints": [{"train_id": "TRAIN001", "cab_id": 1,
 #                                     "host": "127.0.0.1", "port": 9101}]}

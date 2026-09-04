@@ -1,4 +1,4 @@
-"""ATP adapter public exports (§4).
+"""ATP adapter public exports (docs/atp-api.md).
 
 The adapter owns one reconnecting TCP client per configured train cab, frames
 and validates the NDJSON protocol, publishes ``TRAIN_STATE`` / ``BTM_RX``
