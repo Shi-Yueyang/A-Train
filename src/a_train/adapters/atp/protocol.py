@@ -3,13 +3,13 @@
 The protocol uses TCP + NDJSON (one JSON object per line). TCP provides the
 transport; the newline provides application-level message framing. There is
 no handshake message: the channel is live the moment TCP opens. Builders and
-validators cover cyclic ``TRAIN_STATE`` (atp-api.md §3.1), ``BTM_RX`` (opaque
-base64 payload, §3.2), ``ATP_COMMAND`` (inbound ATP action request, §4.1),
-and ``ERROR`` reporting (§5).
+validators cover cyclic ``TRAIN_STATE`` (atp-api.md §3.1), inbound
+``ATP_COMMAND`` (atp-api.md §4.1), and ``ERROR`` reporting (§5).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from collections.abc import Mapping
@@ -37,6 +37,18 @@ def encode_message(message: Mapping[str, Any]) -> bytes:
 # -- Outbound message builders (atp-api.md §3, §5) -------------------------------
 
 
+def _serialize_equipment_state(value: object) -> object:
+    """Convert frozen equipment snapshot values to JSON-safe Python objects."""
+
+    if dataclasses.is_dataclass(value):
+        return {field.name: _serialize_equipment_state(getattr(value, field.name)) for field in dataclasses.fields(value)}
+    if isinstance(value, tuple):
+        return [_serialize_equipment_state(item) for item in value]
+    if isinstance(value, list):
+        return [_serialize_equipment_state(item) for item in value]
+    return value
+
+
 def make_train_state(train_id: str, cab_id: int, train: Any) -> dict[str, Any]:
     """One ``TRAIN_STATE`` line from a train snapshot (atp-api.md §3.1)."""
 
@@ -49,20 +61,13 @@ def make_train_state(train_id: str, cab_id: int, train: Any) -> dict[str, Any]:
         "position": train.position,
         "direction": train.direction,
     }
-    stcs_atp = train.equipment.get("stcs_atp")
-    if stcs_atp is not None:
-        message["stcs_atp"] = {
-            "traction_cutoff": stcs_atp.traction_cutoff,
-            "service": stcs_atp.service,
-            "emergency": stcs_atp.emergency,
+    equipment = getattr(train, "equipment", {})
+    if equipment:
+        message["equipment"] = {
+            key: _serialize_equipment_state(value)
+            for key, value in equipment.items()
         }
     return message
-
-
-def make_btm_rx(payload_b64: str) -> dict[str, Any]:
-    """One ``BTM_RX`` line carrying an opaque base64 payload (atp-api.md §3.2)."""
-
-    return {"type": "btm_rx", "data": payload_b64}
 
 
 def make_error(
@@ -118,10 +123,14 @@ def parse_atp_command(
     if atp_signal is not None:
         if not isinstance(atp_signal, str) or not atp_signal:
             raise ValueError(f"atp_signal must be a non-empty string, got {atp_signal!r}")
-        if not all(c in "01" for c in atp_signal):
+        normalized = atp_signal.replace("_", "")
+        if not normalized:
+            raise ValueError(f"atp_signal must contain at least one '0' or '1' after removing separators, got {atp_signal!r}")
+        if not all(c in "01" for c in normalized):
             raise ValueError(
                 f"atp_signal must consist of '0' and '1' characters, got {atp_signal!r}"
             )
+        atp_signal = normalized
 
     if drive_demand is None and door is None and atp_signal is None:
         raise ValueError("atp_command requires drive_demand, door or atp_signal")

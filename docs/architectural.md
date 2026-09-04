@@ -527,17 +527,17 @@ This maintains a clean separation between control and physical simulation.
 
 The wire protocol itself -- transport and framing, connection lifecycle and
 reconnection, the full message catalog with field-level definitions
-(`TRAIN_STATE`, `BTM_RX`, `ATP_COMMAND`, `ERROR`), validation and error
-codes, configuration and observability -- is specified in
+(`TRAIN_STATE`, `ATP_COMMAND`, `ERROR`), validation and error codes,
+configuration and observability -- is specified in
 **[`atp-api.md`](atp-api.md)**, which mirrors the implementation in
 `src/a_train/adapters/atp/`.
 
 In one paragraph: each ATP process is a TCP server serving exactly one cab;
 the simulator dials every configured endpoint, streams `train_state`
-observations and opaque `btm_rx` telegrams toward ATP, and accepts
-`atp_command` action requests from ATP, mapping them onto the same
-transport-neutral core commands the Web API submits. Invalid input is
-answered with `ERROR` without affecting the simulation. The interface
+observations with the current per-cab `equipment.btm` payload embedded in the
+snapshot, and accepts `atp_command` action requests from ATP, mapping them
+onto the same transport-neutral core commands the Web API submits. Invalid
+input is answered with `ERROR` without affecting the simulation. The interface
 boundary that makes this safe is §4.1: ATP requests, physics decides.
 
 ---

@@ -30,6 +30,10 @@ def test_atp_signal_alone_satisfies_the_payload_requirement() -> None:
     assert parse_atp_command({"atp_signal": "0"}, TID, CAB)[2] == "0"
 
 
+def test_atp_signal_allows_underscore_separators() -> None:
+    assert parse_atp_command({"atp_signal": "0_1_0"}, TID, CAB)[2] == "010"
+
+
 @pytest.mark.parametrize("value", ["01x", "1 1", "true", 1, 0.1, ["01"]])
 def test_invalid_atp_signal_rejected(value: object) -> None:
     with pytest.raises(ValueError, match="atp_signal"):

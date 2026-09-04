@@ -93,6 +93,9 @@ async def test_manual_step_publishes_train_state_for_each_cab() -> None:
                 assert state["speed"] == pytest.approx(0.75)
                 assert state["acceleration"] == pytest.approx(1.5)
                 assert state["direction"] == "forward"
+                assert "equipment" in state
+                assert "door" not in state
+                assert "stcs_atp" not in state
     finally:
         await server.stop()
 

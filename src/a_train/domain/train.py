@@ -329,6 +329,7 @@ class Train:
         }
 
     def get_snapshot(self) -> TrainSnapshot:
+        equipment = self._equipment_snapshot()
         return TrainSnapshot(
             train_id=self._config.train_id,
             cab_ids=self._config.cab_ids,
@@ -337,7 +338,7 @@ class Train:
             position=self._position,
             direction="forward",
             drive_demand=self._drive_demand,
-            equipment=self._equipment_snapshot(),
+            equipment=equipment,
         )
 
     def reset(self) -> None:

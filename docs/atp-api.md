@@ -96,16 +96,14 @@ drive_demand    dimensionless, [-1.0, 1.0]
 
 ### 2.4 Message catalog
 
-| Type          | Wire value          | Direction        | Trigger                                                 | Spec  |
-| ------------- | ------------------- | ---------------- | ------------------------------------------------------- | ----- |
-| TRAIN_STATE   | `"train_state"`   | simulator → ATP | Cyclic: every published core snapshot.                  | §3.1 |
-| BTM_RX        | `"btm_rx"`        | simulator → ATP | Event: when a BTM delivery for this cab lands.          | §3.2 |
-| ATP_COMMAND   | `"atp_command"` | ATP → simulator | Whenever ATP wants to move the train, work the doors, or assert protection signals. | §4.1 |
-| ERROR (in)      | `"error"`         | ATP → simulator | ATP reports its own problem; logged only.     | §4.3 |
-| ERROR (out)   | `"error"`         | simulator → ATP | Reply to any rejected or malformed input.               | §5   |
+| Type        | Wire value        | Direction        | Trigger                                                                             | Spec  |
+| ----------- | ----------------- | ---------------- | ----------------------------------------------------------------------------------- | ----- |
+| TRAIN_STATE | `"train_state"` | simulator → ATP | Cyclic: every published core snapshot.                                              | §3.1 |
+| ATP_COMMAND | `"atp_command"` | ATP → simulator | Whenever ATP wants to move the train, work the doors, or assert protection signals. | §4.1 |
+| ERROR (in)  | `"error"`       | ATP → simulator | ATP reports its own problem; logged only.                                           | §4.3 |
+| ERROR (out) | `"error"`       | simulator → ATP | Reply to any rejected or malformed input.                                           | §5   |
 
-These four types are the complete protocol; unknown inbound `type` values are
-answered with `ERROR` (§5.1).
+These three inbound/outbound message families are the complete protocol; unknown inbound `type` values are answered with `ERROR` (§5.1).
 
 ---
 
@@ -126,47 +124,40 @@ while the channel is READY.
   "acceleration": -0.15,
   "position": 15320.4,
   "direction": "forward",
-  "stcs_atp": { "traction_cutoff": false, "service": false, "emergency": true }
+  "equipment": {
+    "cab": [
+      { "cab_id": 1, "active": true },
+      { "cab_id": 2, "active": false }
+    ],
+    "door": { "state": "closed" },
+    "btm": [
+      { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 }
+    ],
+    "stcs_atp": { "traction_cutoff": false, "service": false, "emergency": true }
+  }
 }
 ```
 
-| Field            | Type   | Notes                                                                                                 |
-| ---------------- | ------ | ----------------------------------------------------------------------------------------------------- |
-| `train_id`     | string | The channel's train.                                                                                  |
-| `cab_id`       | int    | The channel's cab; both cabs of one train get identical physical values, differing only in`cab_id`. |
-| `speed`        | number | m/s, never negative (forward-only model).                                                             |
-| `acceleration` | number | m/s² of the last integrated step.                                                                    |
-| `position`     | number | m along the linear track from the fixed origin.                                                       |
-| `direction`    | string | `"forward"` in the current model; reserved for future multi-direction movement.                     |
-| `stcs_atp`    | object | ATP protection state from the core (`stcs_atp` component): the three independently asserted flags `traction_cutoff`, `service`, `emergency` (§4.2). Present while the equipment is configured, which the standard consist does; values come from the snapshot, exactly as REST and WebSocket report them. |
+| Field            | Type   | Notes                                                                                                                                                  |
+| ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `train_id`     | string | The channel's train.                                                                                                                                   |
+| `cab_id`       | int    | The channel's cab; both cabs of one train get identical physical values, differing only in`cab_id`.                                                  |
+| `speed`        | number | m/s, never negative (forward-only model).                                                                                                              |
+| `acceleration` | number | m/s² of the last integrated step.                                                                                                                     |
+| `position`     | number | m along the linear track from the fixed origin.                                                                                                        |
+| `direction`    | string | `"forward"` in the current model; reserved for future multi-direction movement.                                                                      |
+| `equipment`    | object | Full equipment snapshot for the train, keyed by equipment type. This is the canonical ATP payload; each nested entry mirrors the train snapshot state. |
 
-TRAIN_STATE is a read-only observation: ATP derives its protection decisions
-from it and acts back on the train only through `ATP_COMMAND` (§4.1;
-architectural boundary §4.1 of architectural.md).
+`TRAIN_STATE` remains a read-only observation: ATP derives its protection decisions from it and acts back on the train only through `ATP_COMMAND` (§4.1; architectural boundary §4.1 of architectural.md). The simulator publishes the full equipment state because ATP peers may need more than the ATP protection flags alone.
 
-### 3.2 BTM_RX — opaque balise transmission
-
-One-directional Train → ATP. The simulator models the BTM antenna, delivers
-the bytes, and treats the payload as opaque (design principle "BTM is
+BTM payloads are carried as part of the train snapshot itself under the
+`equipment.btm` entry of `TRAIN_STATE`. The simulator models the BTM antenna,
+delivers the bytes, and treats the payload as opaque (design principle "BTM is
 opaque", architectural.md §7.3); interpretation belongs entirely to ATP.
 
-```json
-{
-  "type": "btm_rx",
-  "data": "ASOk/wCBcg=="
-}
-```
-
-| Field    | Type   | Notes                                                                  |
-| -------- | ------ | ---------------------------------------------------------------------- |
-| `data` | string | Raw balise telegram, base64-encoded. Semantics belong entirely to ATP. |
-
-Trigger: exactly one `btm_rx` per accepted BTM delivery for **this cab** --
-deliveries are filtered per cab, and each channel carries only its own. A BTM
-delivery is made through the simulator's REST equipment endpoint
-(`web-api.md`, `POST /api/trains/{id}/equipment/btm`). After a reconnect,
-only fresh deliveries are published: each message corresponds to an increase
-of the cab's delivery counter.
+A BTM delivery is made through the simulator's REST equipment endpoint
+(`web-api.md`, `POST /api/trains/{id}/equipment/btm`), and the latest BTM
+state appears in the next published `TRAIN_STATE` for that cab.
 
 ---
 
@@ -188,13 +179,13 @@ the physics decides the result.
 }
 ```
 
-| Field          | Type   | Required | Validation                                             |
-| -------------- | ------ | -------- | ------------------------------------------------------ |
-| `train_id`     | string | no       | If present, must equal the channel's train.            |
-| `cab_id`       | int    | no       | If present, must equal the channel's cab.              |
-| `drive_demand` | number | at least one of `drive_demand` / `door` / `atp_signal` is required | Finite, `-1.0 ≤ v ≤ 1.0`, JSON number (not bool/string). |
-| `door`         | string | see above | Exactly `"open"` or `"close"`.                        |
-| `atp_signal`   | string | see above | Non-empty, every character `"0"` or `"1"` (§4.2).     |
+| Field            | Type   | Required                                                                | Validation                                                  |
+| ---------------- | ------ | ----------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `train_id`     | string | no                                                                      | If present, must equal the channel's train.                 |
+| `cab_id`       | int    | no                                                                      | If present, must equal the channel's cab.                   |
+| `drive_demand` | number | at least one of`drive_demand` / `door` / `atp_signal` is required | Finite,`-1.0 ≤ v ≤ 1.0`, JSON number (not bool/string). |
+| `door`         | string | see above                                                               | Exactly`"open"` or `"close"`.                           |
+| `atp_signal`   | string | see above                                                               | Non-empty, every character`"0"` or `"1"` (§4.2).       |
 
 Processing pipeline (manager → core):
 
@@ -204,8 +195,8 @@ Processing pipeline (manager → core):
    - `drive_demand` → `TrainControlCommand(train_id, TrainControl(cab_id, drive_demand))`
    - `door` → `EquipmentCommand(train_id, EquipmentSet(key="door", command=door))`
    - `atp_signal` → decoded bit-by-bit into core commands (§4.2)
-   A message may carry several fields; each contributes its commands in the
-   order listed above.
+     A message may carry several fields; each contributes its commands in the
+     order listed above.
 3. Submit to `SimulationCore`'s command queue. Only `run_loop()` consumes the
    queue; ATP commands interleave with browser commands in arrival order and
    are applied at the same point in the update cycle (immediately, then on
@@ -246,12 +237,12 @@ are deterministic world state: ordered by the queue, visible to REST and
 WebSocket, restored by `reset`, and re-sent on reconnect by the
 latest-snapshot catch-up publish (§1.4).
 
-| Bit index | Meaning         | `"1"` asserts            | `"0"` asserts          | Stored flag                        |
-| --------- | --------------- | ------------------------ | ---------------------- | ---------------------------------- |
-| 0         | reserved        | ignored                  | ignored                | --                                 |
-| 1         | traction cut-off | `traction_cut`          | `traction_release`     | `traction_cutoff` (persists)       |
-| 2         | service brake   | `brake_service`          | `brake_service_off`    | `service`                          |
-| 3         | emergency brake | `brake_emergency`        | `brake_emergency_off`  | `emergency`                        |
+| Bit index | Meaning          | `"1"` asserts     | `"0"` asserts         | Stored flag                    |
+| --------- | ---------------- | ------------------- | ----------------------- | ------------------------------ |
+| 0         | reserved         | ignored             | ignored                 | --                             |
+| 1         | traction cut-off | `traction_cut`    | `traction_release`    | `traction_cutoff` (persists) |
+| 2         | service brake    | `brake_service`   | `brake_service_off`   | `service`                    |
+| 3         | emergency brake  | `brake_emergency` | `brake_emergency_off` | `emergency`                  |
 
 The three flags are stored and reported independently, exactly as asserted:
 sending `"0010"` asserts service (index 2 `'1'`) while releasing emergency
@@ -302,12 +293,12 @@ without stopping the simulation or any other cab's connection.
 
 ### 5.1 Code table
 
-| Code                      | Raised when                                                       | Effect on session                                    |
-| ------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------- |
-| `malformed_message`     | Line is not valid JSON / not an object / has no`type`.          | Session continues.                                   |
-| `unknown_message_type`  | `type` is not in the catalog (§2.4).                           | Session continues.                                   |
-| `invalid_atp_command` | Identity mismatch or field validation failure (§4.1 step 1).     | Nothing applied; session continues.                  |
-| `command_rejected`      | The simulation core refused the resulting command (§4.1 step 4). | The other command of the same message still applies. |
+| Code                     | Raised when                                                       | Effect on session                                    |
+| ------------------------ | ----------------------------------------------------------------- | ---------------------------------------------------- |
+| `malformed_message`    | Line is not valid JSON / not an object / has no`type`.          | Session continues.                                   |
+| `unknown_message_type` | `type` is not in the catalog (§2.4).                           | Session continues.                                   |
+| `invalid_atp_command`  | Identity mismatch or field validation failure (§4.1 step 1).     | Nothing applied; session continues.                  |
+| `command_rejected`     | The simulation core refused the resulting command (§4.1 step 4). | The other command of the same message still applies. |
 
 ---
 
@@ -359,7 +350,7 @@ simulator ──> {"type":"train_state",...}          (every published snapshot)
 simulator ──> {"type":"train_state",...}
 ATP     ──> {"type":"atp_command","drive_demand":-1.0}
 simulator ──> {"type":"train_state","acceleration":-2.0,...}  (deceleration applied)
-simulator ──> {"type":"btm_rx","data":"ASOk/wCBcg=="}        (balise passed)
+simulator ──> {"type":"train_state",...,"equipment":{"btm":[{"cab_id":1,"pending":true,"payload_b64":"ASOk/wCBcg==","received_count":1}]}}
 ATP     ──> {"type":"atp_command","door":"open","drive_demand":0.5}
               (two commands: control, then equipment)
 ATP     ──> {"type":"atp_command","atp_signal":"0001000"}

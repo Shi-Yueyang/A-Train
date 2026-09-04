@@ -5,11 +5,9 @@ each ATP process serves exactly one cab and accepts one connection at a time,
 so no in-band handshake identifies the stream). ``start()`` launches every
 client's connection loop, subscribes one bounded snapshot queue per cab, and
 runs a publisher task per client that turns core snapshots into
-``TRAIN_STATE`` and ``BTM_RX`` lines (atp-api.md §3.1, §3.2). Inbound ATP
-content is validated and converted into commands submitted to the core
-(architectural.md §4.1); rejected input is answered with an ``ERROR`` message
-(atp-api.md §5).
-
+``TRAIN_STATE`` lines (atp-api.md §3.1). Inbound ATP content is validated and
+converted into commands submitted to the core (architectural.md §4.1);
+rejected input is answered with an ``ERROR`` message (atp-api.md §5).
 Publisher and inbound tasks perform all protocol I/O outside ``run_loop()``,
 so a slow or chatty ATP peer cannot delay physics (§2.6).
 

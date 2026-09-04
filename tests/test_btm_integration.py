@@ -1,8 +1,7 @@
-"""Phase 3.2 acceptance tests — end-to-end BTM delivery to an ATP peer (atp-api.md §3.2).
+"""Phase 3.2 acceptance tests — end-to-end BTM delivery to an ATP peer (atp-api.md §3.1).
 
-A BTM payload injected through the equipment endpoint appears on the target
-cab's connection as a ``BTM_RX`` line whose decoded data equals the delivered
-bytes; other cabs receive nothing, and the payload stays opaque to the
+A BTM payload injected through the equipment endpoint appears in the target
+cab's ``TRAIN_STATE`` equipment snapshot; the payload stays opaque to the
 simulator.
 """
 
@@ -75,7 +74,27 @@ async def _await_ready(server, c, ready_count: int = 1) -> None:
     await _wait_until(lambda: len(_manager(c).ready_endpoints) == ready_count)
 
 
-async def test_btm_delivery_publishes_btm_rx_to_the_target_cab() -> None:
+async def _next_train_state_with_btm(server, cab_id: int, payload_b64: str, timeout: float = 10.0) -> dict:
+    async def _poll() -> dict:
+        while True:
+            message = await server.wait_for_message(timeout=timeout)
+            if message.get("type") != "train_state":
+                continue
+            btm = next(
+                (
+                    item
+                    for item in message.get("equipment", {}).get("btm", [])
+                    if item.get("cab_id") == cab_id
+                ),
+                None,
+            )
+            if btm is not None and btm.get("payload_b64") == payload_b64:
+                return message
+
+    return await asyncio.wait_for(_poll(), timeout)
+
+
+async def test_btm_delivery_is_embedded_in_train_state() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
@@ -86,21 +105,23 @@ async def test_btm_delivery_publishes_btm_rx_to_the_target_cab() -> None:
             r = await c.post("/api/trains/TRAIN001/equipment/btm", json={"cab_id": 1, "data": data})
             assert r.status_code == 200
 
-            message = await _next(server, "btm_rx")
-            assert message["data"] == data
-            assert base64.b64decode(message["data"], validate=True) == PAYLOAD
+            message = await _next(server, "train_state")
+            btm = next(item for item in message["equipment"]["btm"] if item["cab_id"] == 1)
+            assert btm["payload_b64"] == data
+            assert btm["received_count"] == 1
+            assert base64.b64decode(btm["payload_b64"], validate=True) == PAYLOAD
 
-            # No second BTM was delivered: no further btm_rx lines appear.
             await _no_more(server, "btm_rx")
 
-            # A delivery to cab 2 reaches the other connection.
             other = base64.b64encode(b"\xde\xad\xbe\xef").decode("ascii")
             r = await c.post(
                 "/api/trains/TRAIN001/equipment/btm", json={"cab_id": 2, "data": other}
             )
             assert r.status_code == 200
-            message = await _next(server, "btm_rx")
-            assert base64.b64decode(message["data"]) == b"\xde\xad\xbe\xef"
+            message = await _next(server, "train_state")
+            btm = next(item for item in message["equipment"]["btm"] if item["cab_id"] == 2)
+            assert btm["payload_b64"] == other
+            assert base64.b64decode(btm["payload_b64"]) == b"\xde\xad\xbe\xef"
     finally:
         await server.stop()
 
@@ -114,14 +135,14 @@ async def test_reset_resyncs_without_replaying_old_payload() -> None:
 
             data = base64.b64encode(b"\x42").decode("ascii")
             await c.post("/api/trains/TRAIN001/equipment/btm", json={"cab_id": 1, "data": data})
-            await _next(server, "btm_rx")
+            await _next(server, "train_state")
 
-            # Reset clears the delivery count; the resync must not re-send.
             await c.post("/api/simulation/reset")
             r = await c.post("/api/trains/TRAIN001/equipment/btm", json={"cab_id": 1, "data": data})
             assert r.status_code == 200
-            message = await _next(server, "btm_rx")  # exactly one new delivery
-            assert message["data"] == data
+            message = await _next_train_state_with_btm(server, 1, data)
+            btm = next(item for item in message["equipment"]["btm"] if item["cab_id"] == 1)
+            assert btm["payload_b64"] == data
             await _no_more(server, "btm_rx")
     finally:
         await server.stop()

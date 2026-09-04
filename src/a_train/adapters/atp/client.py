@@ -16,10 +16,9 @@ returns to ``CONNECTING`` after an exponential backoff capped at
 ``max_retry_delay``; a session that reached READY resets the backoff so
 recovery from a dropped link is fast (atp-api.md §1.4).
 
-``publish`` converts core snapshots into cyclic ``TRAIN_STATE`` and
-event-driven ``BTM_RX`` lines; inbound content is validated, answered with
-``ERROR`` on malformed lines (atp-api.md §5), and dispatched to the manager
-for ATP-command handling.
+``publish`` converts core snapshots into cyclic ``TRAIN_STATE`` lines;
+inbound content is validated, answered with ``ERROR`` on malformed lines
+(atp-api.md §5), and dispatched to the manager for ATP-command handling.
 """
 
 from __future__ import annotations
@@ -35,7 +34,6 @@ from ...simulation.snapshots import SimulationSnapshot
 from .protocol import (
     decode_line,
     encode_message,
-    make_btm_rx,
     make_error,
     make_train_state,
 )
@@ -80,8 +78,6 @@ class AtpClient:
         self._state = ClientState.IDLE
         self._task: asyncio.Task[None] | None = None
         self._writer: asyncio.StreamWriter | None = None
-        self._last_snapshot: SimulationSnapshot | None = None
-        self._last_btm_count: int | None = None
 
     @property
     def train_id(self) -> str:
@@ -154,15 +150,12 @@ class AtpClient:
         return True
 
     def publish(self, snapshot: SimulationSnapshot) -> None:
-        """Publish one core snapshot as this cab's protocol content (atp-api.md §3.1, §3.2).
+        """Publish one core snapshot as this cab's protocol content (atp-api.md §3.1).
 
-        Writes ``TRAIN_STATE`` for every
-        READY snapshot and ``BTM_RX`` only when this cab's BTM delivery count
-        increased. Snapshots arriving while the channel is down are
-        remembered and re-published as soon as it reconnects.
+        Writes ``TRAIN_STATE`` for every READY snapshot; the current BTM payload is
+        included in the snapshot's nested equipment state.
         """
 
-        self._last_snapshot = snapshot
         if self._state is ClientState.READY:
             self._publish_now(snapshot)
 
@@ -171,17 +164,6 @@ class AtpClient:
         if train is None:
             return
         self.send_message(make_train_state(self._train_id, self._cab_id, train))
-        self._publish_btm(train.equipment.get("btm"))
-
-    def _publish_btm(self, entries: Any) -> None:
-        entry = next((e for e in entries or () if e.cab_id == self._cab_id), None)
-        if entry is None:
-            return
-        count = entry.received_count
-        if self._last_btm_count is not None and count > self._last_btm_count:
-            if entry.payload_b64 is not None:
-                self.send_message(make_btm_rx(entry.payload_b64))
-        self._last_btm_count = count
 
     # -- Connection loop -------------------------------------------------------
 
@@ -208,8 +190,6 @@ class AtpClient:
             self._writer = writer
             self._state = ClientState.READY
             logger.info("%s: channel established", self.ident)
-            if self._last_snapshot is not None:
-                self._publish_now(self._last_snapshot)
             try:
                 await self._hold(reader)
             finally:
