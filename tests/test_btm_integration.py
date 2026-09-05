@@ -82,9 +82,9 @@ async def _next_train_state_with_btm(server, cab_id: int, payload_b64: str, time
                 continue
             btm = next(
                 (
-                    item
-                    for item in message.get("equipment", {}).get("btm", [])
-                    if item.get("cab_id") == cab_id
+                    item["state"]
+                    for item in message.get("equipment", [])
+                    if item.get("key") == f"btm_{cab_id}"
                 ),
                 None,
             )
@@ -102,11 +102,11 @@ async def test_btm_delivery_is_embedded_in_train_state() -> None:
             await _await_ready(server, c, ready_count=2)
 
             data = base64.b64encode(PAYLOAD).decode("ascii")
-            r = await c.post("/api/trains/TRAIN001/equipment/btm", json={"cab_id": 1, "data": data})
+            r = await c.post("/api/trains/TRAIN001/equipment/btm_1", json={"data": data})
             assert r.status_code == 200
 
-            message = await _next(server, "train_state")
-            btm = next(item for item in message["equipment"]["btm"] if item["cab_id"] == 1)
+            message = await _next_train_state_with_btm(server, 1, data)
+            btm = next(item["state"] for item in message["equipment"] if item["key"] == "btm_1")
             assert btm["payload_b64"] == data
             assert btm["received_count"] == 1
             assert base64.b64decode(btm["payload_b64"], validate=True) == PAYLOAD
@@ -115,11 +115,11 @@ async def test_btm_delivery_is_embedded_in_train_state() -> None:
 
             other = base64.b64encode(b"\xde\xad\xbe\xef").decode("ascii")
             r = await c.post(
-                "/api/trains/TRAIN001/equipment/btm", json={"cab_id": 2, "data": other}
+                "/api/trains/TRAIN001/equipment/btm_2", json={"data": other}
             )
             assert r.status_code == 200
-            message = await _next(server, "train_state")
-            btm = next(item for item in message["equipment"]["btm"] if item["cab_id"] == 2)
+            message = await _next_train_state_with_btm(server, 2, other)
+            btm = next(item["state"] for item in message["equipment"] if item["key"] == "btm_2")
             assert btm["payload_b64"] == other
             assert base64.b64decode(btm["payload_b64"]) == b"\xde\xad\xbe\xef"
     finally:
@@ -134,14 +134,14 @@ async def test_reset_resyncs_without_replaying_old_payload() -> None:
             await _await_ready(server, c)
 
             data = base64.b64encode(b"\x42").decode("ascii")
-            await c.post("/api/trains/TRAIN001/equipment/btm", json={"cab_id": 1, "data": data})
-            await _next(server, "train_state")
+            await c.post("/api/trains/TRAIN001/equipment/btm_1", json={"data": data})
+            await _next_train_state_with_btm(server, 1, data)
 
             await c.post("/api/simulation/reset")
-            r = await c.post("/api/trains/TRAIN001/equipment/btm", json={"cab_id": 1, "data": data})
+            r = await c.post("/api/trains/TRAIN001/equipment/btm_1", json={"data": data})
             assert r.status_code == 200
             message = await _next_train_state_with_btm(server, 1, data)
-            btm = next(item for item in message["equipment"]["btm"] if item["cab_id"] == 1)
+            btm = next(item["state"] for item in message["equipment"] if item["key"] == "btm_1")
             assert btm["payload_b64"] == data
             await _no_more(server, "btm_rx")
     finally:

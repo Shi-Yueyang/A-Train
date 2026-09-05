@@ -184,8 +184,10 @@ function renderTrainState() {
     equipmentEl.replaceChildren();
     return;
   }
-  const equipment = sel.equipment || {};
-  const cabs = (sel.equipment && sel.equipment.cab) || [];
+    const equipment = sel.equipment || [];
+    const cabs = equipment
+      .filter((entry) => entry.type === "cab")
+      .map((entry) => entry.state);
   const cabText = cabs.length
     ? cabs.map((e) => `${e.cab_id}${e.active ? " (on)" : ""}`).join(", ")
     : sel.cab_ids.join(", ");
@@ -200,14 +202,15 @@ function renderTrainState() {
   pre.textContent = lines.join("\n");
 
   renderEquipment(equipmentEl, equipment);
-  const doorState = (equipment.door && equipment.door.state) || "—";
+    const door = equipment.find((entry) => entry.key === "door_main");
+    const doorState = (door && door.state && door.state.state) || "—";
   $("door-state").textContent = doorState;
   syncSlider("drive", sel.drive_demand);
 }
 
 function renderEquipment(container, equipment) {
   container.replaceChildren();
-  const entries = Object.entries(equipment);
+    const entries = equipment;
   if (!entries.length) {
     const empty = document.createElement("p");
     empty.className = "equipment-empty";
@@ -216,16 +219,16 @@ function renderEquipment(container, equipment) {
     return;
   }
 
-  for (const [key, value] of entries) {
+    for (const entry of entries) {
     const card = document.createElement("article");
     card.className = "equipment-card";
 
-    const heading = document.createElement("h3");
-    heading.textContent = key.replaceAll("_", " ");
+      const heading = document.createElement("h3");
+      heading.textContent = `${entry.type} / ${entry.key}`;
     card.appendChild(heading);
 
-    const details = document.createElement("pre");
-    details.textContent = JSON.stringify(value, null, 2);
+      const details = document.createElement("pre");
+      details.textContent = JSON.stringify(entry.state, null, 2);
     card.appendChild(details);
     container.appendChild(card);
   }
@@ -384,8 +387,7 @@ async function sendBtmPayload() {
     renderMessage();
     return;
   }
-  await postCommand(`/trains/${state.selectedTrainId}/equipment/btm`, {
-    cab_id: state.selectedCab,
+    await postCommand(`/trains/${state.selectedTrainId}/equipment/btm_${state.selectedCab}`, {
     data,
   });
 }

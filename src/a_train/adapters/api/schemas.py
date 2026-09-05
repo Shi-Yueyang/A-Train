@@ -50,16 +50,15 @@ class TrainControlRequest(BaseModel):
 class EquipmentSetRequest(BaseModel):
     """Body for the generic equipment-set endpoint (§3.5).
 
-    Each equipment type uses a subset of the fields; the train dispatcher
-    validates what is required: door -> command, cab -> cab_id + command,
-    btm -> cab_id + data (base64).
+    The URL identifies one equipment instance by key. The train dispatcher
+    validates what that instance requires.
     """
 
     command: str | None = Field(
         default=None,
         description="Named command: 'open'/'close' (door), 'activate'/'deactivate' (cab).",
     )
-    cab_id: int | None = Field(default=None, description="Target cab (cab, btm).")
+    cab_id: int | None = Field(default=None, description="Optional cab identity check.")
     data: str | None = Field(
         default=None, description="Base64-encoded opaque payload (btm, atp-api.md §3.2)."
     )
@@ -73,7 +72,7 @@ class TrainResponse(BaseModel):
     position: float
     direction: str
     drive_demand: float
-    equipment: dict[str, object] = {}
+    equipment: list[object] = Field(default_factory=list)
 
 
 class TrainsResponse(BaseModel):
@@ -95,7 +94,7 @@ class AtpStatusResponse(BaseModel):
     connections: list[AtpConnectionResponse]
 
 
-def _serialize_equipment(equipment: dict[str, object]) -> dict[str, object]:
+def _serialize_equipment(equipment: tuple[object, ...]) -> list[object]:
     """Serialize frozen equipment snapshots to JSON-safe dicts."""
 
     def _serialize(value: object) -> object:
@@ -107,7 +106,7 @@ def _serialize_equipment(equipment: dict[str, object]) -> dict[str, object]:
             return [_serialize(item) for item in value]
         return value
 
-    return {key: _serialize(snapshot) for key, snapshot in equipment.items()}
+    return [_serialize(snapshot) for snapshot in equipment]
 
 
 def train_snapshot_to_response(snap: TrainSnapshot) -> TrainResponse:

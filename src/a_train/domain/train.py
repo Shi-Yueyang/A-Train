@@ -37,7 +37,7 @@ from .physics import (
     is_positive_finite,
     resolve_acceleration,
 )
-from .snapshots import TrainSnapshot
+from .snapshots import EquipmentSnapshot, TrainSnapshot
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -92,15 +92,14 @@ class EquipmentSet:
 class EquipmentConfig:
     """Configuration for a single pluggable addon equipment instance.
 
-    ``key`` selects the factory in ``EQUIPMENT_FACTORIES``; ``slot`` gives the
-    instance identity within the type (the cab id for per-cab equipment, empty
-    for train-level singletons). One type may be configured any number of
-    times with distinct slots. ``params`` are forwarded as keyword arguments to
-    the factory, so unknown names are rejected at construction.
+    ``type`` selects the factory in ``EQUIPMENT_FACTORIES``; ``key`` gives the
+    unique instance identity within the train. ``params`` are forwarded as
+    keyword arguments to the factory, so unknown names are rejected at
+    construction.
     """
 
+    type: str
     key: str
-    slot: str | int = ""
     params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -150,15 +149,18 @@ class TrainConfig:
                 self,
                 "equipment_configs",
                 tuple(
-                    [EquipmentConfig("cab", cab_id) for cab_id in self.cab_ids]
-                    + [EquipmentConfig("door")]
-                    + [EquipmentConfig("btm", cab_id) for cab_id in self.cab_ids]
-                    + [EquipmentConfig("stcs_atp")]
+                    [EquipmentConfig("cab", f"cab_{cab_id}") for cab_id in self.cab_ids]
+                    + [EquipmentConfig("door", "door_main")]
+                    + [EquipmentConfig("btm", f"btm_{cab_id}") for cab_id in self.cab_ids]
+                    + [EquipmentConfig("stcs_atp", "stcs_atp")]
                 ),
             )
+        keys = [eq_cfg.key for eq_cfg in self.equipment_configs]
+        if len(set(keys)) != len(keys):
+            raise ValueError("equipment keys must be unique")
         for eq_cfg in self.equipment_configs:
-            if eq_cfg.key not in EQUIPMENT_FACTORIES:
-                raise ValueError(f"unknown equipment key: {eq_cfg.key!r}")
+            if eq_cfg.type not in EQUIPMENT_FACTORIES:
+                raise ValueError(f"unknown equipment type: {eq_cfg.type!r}")
 
 
 class Train:
@@ -174,23 +176,16 @@ class Train:
             initial_door_state=config.initial_door_state,
             initial_active_cab=config.initial_active_cab,
         )
-        self._equipment: list[Equipment] = [
-            EQUIPMENT_FACTORIES[eq_cfg.key](eq_cfg.slot, ctx, **eq_cfg.params)
+        self._equipment: dict[str, Equipment] = {
+            eq_cfg.key: EQUIPMENT_FACTORIES[eq_cfg.type](eq_cfg.key, ctx, **eq_cfg.params)
             for eq_cfg in config.equipment_configs
-        ]
+        }
 
         self._position = config.initial_position
         self._speed = config.initial_speed
         self._acceleration = 0.0
 
         self._drive_demand = 0.0
-
-    def _one(self, key: str, slot: str | int | None = None) -> Equipment | None:
-        """Find one addon equipment instance by type key and optional slot."""
-        for eq in self._equipment:
-            if eq.key == key and (slot is None or eq.slot == slot):
-                return eq
-        return None
 
     @property
     def train_id(self) -> str:
@@ -224,57 +219,35 @@ class Train:
         at the aggregate boundary.
         """
 
-        if self._one(command.key) is None:
-            return ControlResult(
-                ok=False,
-                error=f"no '{command.key}' equipment on {self._config.train_id}",
-            )
+        equipment = self._equipment.get(command.key)
+        if equipment is None:
+            return ControlResult(ok=False, error=f"no '{command.key}' equipment on {self._config.train_id}")
 
-        if command.key == "door":
-            equipment = self._one("door")
-            if not isinstance(equipment, Door):
-                return ControlResult(
-                    ok=False,
-                    error=f"no 'door' equipment on {self._config.train_id}",
-                )
+        if isinstance(equipment, Door):
             if command.command not in ("open", "close"):
                 return ControlResult(ok=False, error="door command must be 'open' or 'close'")
             equipment.apply_control(command.command)
             return ControlResult()
 
-        if command.key == "cab":
+        if isinstance(equipment, Cab):
             if command.command not in ("activate", "deactivate"):
                 return ControlResult(
                     ok=False, error="cab command must be 'activate' or 'deactivate'"
                 )
-            cab = self._one("cab", command.cab_id)
-            if not isinstance(cab, Cab):
-                return ControlResult(
-                    ok=False,
-                    error=f"cab {command.cab_id} is not configured on {self._config.train_id}",
-                )
-            cab.apply_control(command.command)
+            if command.cab_id is not None and command.cab_id != equipment.cab_id:
+                return ControlResult(ok=False, error="cab_id does not match equipment key")
+            equipment.apply_control(command.command)
             return ControlResult()
 
-        if command.key == "btm":
-            if command.cab_id is None or command.data is None:
-                return ControlResult(ok=False, error="btm requires cab_id and data")
-            equipment = self._one("btm", command.cab_id)
-            if not isinstance(equipment, Btm):
-                return ControlResult(
-                    ok=False,
-                    error=f"BTM delivery for cab {command.cab_id}: no equipment",
-                )
+        if isinstance(equipment, Btm):
+            if command.data is None:
+                return ControlResult(ok=False, error="btm requires data")
+            if command.cab_id is not None and command.cab_id != equipment.cab_id:
+                return ControlResult(ok=False, error="cab_id does not match equipment key")
             equipment.accept(command.data)
             return ControlResult()
 
-        if command.key == "stcs_atp":
-            equipment = self._one("stcs_atp")
-            if not isinstance(equipment, StcsAtp):
-                return ControlResult(
-                    ok=False,
-                    error=f"no 'stcs_atp' equipment on {self._config.train_id}",
-                )
+        if isinstance(equipment, StcsAtp):
             if command.command is None:
                 return ControlResult(ok=False, error="stcs_atp requires a command")
             equipment.apply_control(command.command)
@@ -298,12 +271,12 @@ class Train:
             acceleration=accel,
             dt=dt,
         )
-        for equipment in self._equipment:
+        for equipment in self._equipment.values():
             on_step = getattr(equipment, "step", None)
             if on_step is not None:
                 on_step(dt, self._speed)
 
-    def _equipment_snapshot(self) -> dict[str, Any]:
+    def _equipment_snapshot(self) -> tuple[EquipmentSnapshot, ...]:
         """Group per-instance snapshots by type key for the train snapshot.
 
         Train-level singletons (empty slot, one instance) expose a single
@@ -311,15 +284,10 @@ class Train:
         exposes a tuple with one entry per instance, §3.5.
         """
 
-        grouped: dict[str, list[Any]] = {}
-        unslotted: dict[str, bool] = {}
-        for eq in self._equipment:
-            grouped.setdefault(eq.key, []).append(eq.read_state())
-            unslotted[eq.key] = unslotted.get(eq.key, True) and eq.slot == ""
-        return {
-            key: (vals[0] if unslotted[key] and len(vals) == 1 else tuple(vals))
-            for key, vals in grouped.items()
-        }
+        return tuple(
+            EquipmentSnapshot(type=equipment.type, key=key, state=equipment.read_state())
+            for key, equipment in self._equipment.items()
+        )
 
     def get_snapshot(self) -> TrainSnapshot:
         equipment = self._equipment_snapshot()
@@ -341,5 +309,5 @@ class Train:
         self._speed = self._config.initial_speed
         self._acceleration = 0.0
         self._drive_demand = 0.0
-        for eq in self._equipment:
+        for eq in self._equipment.values():
             eq.reset()

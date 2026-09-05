@@ -3,8 +3,8 @@
 Snapshots are read-only views produced by the train aggregate. They contain
 only scalar values, immutable tuples, and frozen nested dataclasses; they never
 expose a mutable internal object. Equipment state (cabs, doors, BTM) is
-in the ``equipment`` dict keyed by equipment type, so new equipment can be
-added without changing TrainSnapshot.
+represented as individually addressed entries, so new equipment can be added
+without changing TrainSnapshot.
 """
 
 from __future__ import annotations
@@ -50,11 +50,20 @@ class StcsAtpSnapshot:
 
 
 @dataclass(frozen=True)
+class EquipmentSnapshot:
+    """Read-only state for one uniquely addressed equipment instance."""
+
+    type: str
+    key: str
+    state: Any
+
+
+@dataclass(frozen=True)
 class TrainSnapshot:
     """Read-only view of a single train at a point in simulation time.
 
     Physical fields keep their names and meanings across versions. Equipment
-    state is in the ``equipment`` dict keyed by equipment type.
+    state is a stable tuple of individually addressed entries.
     """
 
     train_id: str
@@ -64,4 +73,4 @@ class TrainSnapshot:
     position: float = 0.0
     direction: str = "forward"
     drive_demand: float = 0.0
-    equipment: dict[str, Any] = field(default_factory=dict)
+    equipment: tuple[EquipmentSnapshot, ...] = field(default_factory=tuple)

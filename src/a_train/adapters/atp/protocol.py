@@ -61,12 +61,9 @@ def make_train_state(train_id: str, cab_id: int, train: Any) -> dict[str, Any]:
         "position": train.position,
         "direction": train.direction,
     }
-    equipment = getattr(train, "equipment", {})
+    equipment = getattr(train, "equipment", ())
     if equipment:
-        message["equipment"] = {
-            key: _serialize_equipment_state(value)
-            for key, value in equipment.items()
-        }
+        message["equipment"] = [_serialize_equipment_state(value) for value in equipment]
     return message
 
 

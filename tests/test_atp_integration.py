@@ -213,12 +213,29 @@ async def _wait_stcs_atp(c, **expected: object) -> dict:
     async def _poll() -> dict:
         while True:
             equipment = (await c.get("/api/trains/TRAIN001")).json()["equipment"]
-            state = equipment["stcs_atp"]
+            state = next(item["state"] for item in equipment if item["key"] == "stcs_atp")
             if all(state.get(key) == value for key, value in expected.items()):
                 return state
             await asyncio.sleep(0.02)
 
     return await asyncio.wait_for(_poll(), timeout=5.0)
+
+
+async def _next_train_state_with_stcs(server, expected: dict[str, object]) -> dict:
+    async def _poll() -> dict:
+        while True:
+            message = await server.wait_for_message(timeout=10.0)
+            if message.get("type") != "train_state":
+                continue
+            state = next(
+                item["state"]
+                for item in message.get("equipment", [])
+                if item.get("key") == "stcs_atp"
+            )
+            if all(state.get(key) == value for key, value in expected.items()):
+                return message
+
+    return await asyncio.wait_for(_poll(), timeout=10.0)
 
 
 async def test_atp_signal_asserts_state_and_shows_in_train_state() -> None:
@@ -234,18 +251,15 @@ async def test_atp_signal_asserts_state_and_shows_in_train_state() -> None:
             await _wait_stcs_atp(c, last_command="0111")
 
             # The protection line rides every subsequent TRAIN_STATE.
-            await _next(
-                server,
-                "train_state",
-                stcs_atp={"last_command": "0111"},
-            )
+            await _next_train_state_with_stcs(server, {"last_command": "0111"})
 
             # A shorter signal replaces the previous raw signal.
             await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "010"})
             state = await _wait_stcs_atp(c, last_command="010")
             r = await c.post("/api/simulation/step", json={"delta": 0.1})
             assert r.status_code == 200
-            assert (await c.get("/api/trains/TRAIN001")).json()["equipment"]["stcs_atp"] == state
+            equipment = (await c.get("/api/trains/TRAIN001")).json()["equipment"]
+            assert next(item["state"] for item in equipment if item["key"] == "stcs_atp") == state
     finally:
         await server.stop()
 

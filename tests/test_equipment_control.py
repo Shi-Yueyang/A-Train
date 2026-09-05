@@ -49,9 +49,10 @@ async def test_door_state_applies_immediately_without_affecting_drive() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
 
-        status, snap = await _equipment(c, "door", command="open")
+        status, snap = await _equipment(c, "door_main", command="open")
         assert status == 200
-        assert snap["equipment"]["door"]["state"] == "open"  # no step required
+        door = next(e for e in snap["equipment"] if e["key"] == "door_main")
+        assert door["state"]["state"] == "open"  # no step required
 
         await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 1.0})
         await _step(c, 0.50)
@@ -66,15 +67,16 @@ async def test_invalid_equipment_commands_are_rejected_without_state_change() ->
     async with running_app([T1]) as c:
         await _manual_start(c)
 
-        status, body = await _equipment(c, "door", command="explode")
+        status, body = await _equipment(c, "door_main", command="explode")
         assert status == 400
-        assert (await _train(c))["equipment"]["door"]["state"] == "closed"
+        door = next(e for e in (await _train(c))["equipment"] if e["key"] == "door_main")
+        assert door["state"]["state"] == "closed"
 
         status, _ = await _equipment(c, "unknown_device", command="open")
         assert status == 400
-        assert "unknown_device" not in (await _train(c))["equipment"]
+        assert all(e["key"] != "unknown_device" for e in (await _train(c))["equipment"])
 
-        r = await c.post("/api/trains/NOPE/equipment/door", json={"command": "open"})
+        r = await c.post("/api/trains/NOPE/equipment/door_main", json={"command": "open"})
         assert r.status_code == 400
 
 
@@ -87,18 +89,18 @@ async def test_btm_delivery_through_equipment_endpoint() -> None:
         await _manual_start(c)
 
         status, snap = await _equipment(
-            c, "btm", cab_id=1, data=base64.b64encode(payload).decode("ascii")
+            c, "btm_1", data=base64.b64encode(payload).decode("ascii")
         )
         assert status == 200
-        cab1 = next(b for b in snap["equipment"]["btm"] if b["cab_id"] == 1)
+        cab1 = next(e["state"] for e in snap["equipment"] if e["key"] == "btm_1")
         assert cab1["pending"] is True
         assert cab1["received_count"] == 1
         assert base64.b64decode(cab1["payload_b64"]) == payload
 
-        status, _ = await _equipment(c, "btm", cab_id=9, data="AA==")
+        status, _ = await _equipment(c, "btm_9", data="AA==")
         assert status == 400  # cab not configured
 
-        r = await c.post("/api/trains/TRAIN001/equipment/btm", json={"cab_id": 1, "data": "!!!"})
+        r = await c.post("/api/trains/TRAIN001/equipment/btm_1", json={"data": "!!!"})
         assert r.status_code == 400  # invalid base64
 
 
@@ -113,9 +115,13 @@ async def test_cab_activate_is_local_flag_with_no_control_effect() -> None:
         r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 0.5})
         assert r.status_code == 200
 
-        status, snap = await _equipment(c, "cab", cab_id=2, command="activate")
+        status, snap = await _equipment(c, "cab_2", command="activate")
         assert status == 200
-        flags = {entry["cab_id"]: entry["active"] for entry in snap["equipment"]["cab"]}
+        flags = {
+            entry["state"]["cab_id"]: entry["state"]["active"]
+            for entry in snap["equipment"]
+            if entry["type"] == "cab"
+        }
         assert flags == {1: True, 2: True}  # flags independent, no transfer
 
         # The former cab is still accepted; cabs carry no authority.
@@ -124,21 +130,25 @@ async def test_cab_activate_is_local_flag_with_no_control_effect() -> None:
 
         # Both cabs can be deactivated in any order.
         for cab_id in (1, 2):
-            status, _ = await _equipment(c, "cab", cab_id=cab_id, command="deactivate")
+            status, _ = await _equipment(c, f"cab_{cab_id}", command="deactivate")
             assert status == 200
         flags = {
-            entry["cab_id"]: entry["active"] for entry in (await _train(c))["equipment"]["cab"]
+            entry["state"]["cab_id"]: entry["state"]["active"]
+            for entry in (await _train(c))["equipment"]
+            if entry["type"] == "cab"
         }
         assert flags == {1: False, 2: False}
 
         # An unconfigured cab is rejected.
-        status, _ = await _equipment(c, "cab", cab_id=9, command="activate")
+        status, _ = await _equipment(c, "cab_9", command="activate")
         assert status == 400
 
         # Reset restores the configured activation flags.
         await c.post("/api/simulation/reset")
         reset_flags = {
-            entry["cab_id"]: entry["active"] for entry in (await _train(c))["equipment"]["cab"]
+            entry["state"]["cab_id"]: entry["state"]["active"]
+            for entry in (await _train(c))["equipment"]
+            if entry["type"] == "cab"
         }
         assert reset_flags == {1: True, 2: False}
 
@@ -164,6 +174,6 @@ async def test_equipment_changes_do_not_advance_time(command: str) -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
         before = (await c.get("/api/status")).json()["simulation_time"]
-        await _equipment(c, "door", command=command)
+        await _equipment(c, "door_main", command=command)
         after = (await c.get("/api/status")).json()["simulation_time"]
         assert after == before

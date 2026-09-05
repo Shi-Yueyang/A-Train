@@ -109,6 +109,12 @@ These three inbound/outbound message families are the complete protocol; unknown
 
 ## 3. Simulator → ATP Messages
 
+`TRAIN_STATE.equipment` is a flat array of independently addressed entries.
+Each entry has `type`, `key`, and `state` fields. For example, the BTM state
+for cab 1 is the entry with `type: "btm"` and `key: "btm_1"`; ATP must not
+look for a type-grouped `equipment.btm` object; select the entry whose key is
+the target BTM instance instead.
+
 ### 3.1 TRAIN_STATE — cyclic world observation
 
 Sent once per channel for every snapshot the core publishes (after each fixed
@@ -124,17 +130,13 @@ while the channel is READY.
   "acceleration": -0.15,
   "position": 15320.4,
   "direction": "forward",
-  "equipment": {
-    "cab": [
-      { "cab_id": 1, "active": true },
-      { "cab_id": 2, "active": false }
-    ],
-    "door": { "state": "closed" },
-    "btm": [
-      { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 }
-    ],
-    "stcs_atp": { "last_command": "brake_emergency" }
-  }
+  "equipment": [
+    { "type": "cab", "key": "cab_1", "state": { "cab_id": 1, "active": true } },
+    { "type": "cab", "key": "cab_2", "state": { "cab_id": 2, "active": false } },
+    { "type": "door", "key": "door_main", "state": { "state": "closed" } },
+    { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "stcs_atp", "key": "stcs_atp", "state": { "last_command": "brake_emergency" } }
+  ]
 }
 ```
 
@@ -146,17 +148,17 @@ while the channel is READY.
 | `acceleration` | number | m/s² of the last integrated step.                                                                                                                     |
 | `position`     | number | m along the linear track from the fixed origin.                                                                                                        |
 | `direction`    | string | `"forward"` in the current model; reserved for future multi-direction movement.                                                                      |
-| `equipment`    | object | Full equipment snapshot for the train, keyed by equipment type. This is the canonical ATP payload; each nested entry mirrors the train snapshot state. |
+| `equipment`    | array | Flat canonical equipment entries, each shaped as `{type, key, state}`. |
 
 `TRAIN_STATE` remains a read-only observation: ATP derives its protection decisions from it and acts back on the train only through `ATP_COMMAND` (§4.1; architectural boundary §4.1 of architectural.md). The simulator publishes the full equipment state because ATP peers may need more than the ATP protection flags alone.
 
 BTM payloads are carried as part of the train snapshot itself under the
-`equipment.btm` entry of `TRAIN_STATE`. The simulator models the BTM antenna,
+entry whose `key` identifies the BTM instance, such as `btm_1`, in `TRAIN_STATE`. The simulator models the BTM antenna,
 delivers the bytes, and treats the payload as opaque (design principle "BTM is
 opaque", architectural.md §7.3); interpretation belongs entirely to ATP.
 
 A BTM delivery is made through the simulator's REST equipment endpoint
-(`web-api.md`, `POST /api/trains/{id}/equipment/btm`), and the latest BTM
+(`web-api.md`, `POST /api/trains/{id}/equipment/btm_1`), and the latest BTM
 state appears in the next published `TRAIN_STATE` for that cab.
 
 ---

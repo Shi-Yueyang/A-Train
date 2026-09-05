@@ -37,13 +37,13 @@ class Equipment(Protocol):
     """Common lifecycle interface for pluggable addon equipment instances."""
 
     @property
-    def key(self) -> str:
+    def type(self) -> str:
         """Equipment type identifier (e.g. 'btm')."""
         ...
 
     @property
-    def slot(self) -> str | int:
-        """Instance identity within the type ('' for train-level singletons)."""
+    def key(self) -> str:
+        """Unique instance identity within one train."""
         ...
 
     def read_state(self) -> Any:
@@ -65,18 +65,18 @@ EQUIPMENT_FACTORIES: dict[str, Callable[..., Equipment]] = {}
 class Door:
     """One train door's state. Door motion is instantaneous on ``apply_control``."""
 
-    key = "door"
+    type = "door"
 
-    def __init__(self, slot: str = "", *, initial_state: str = "closed") -> None:
+    def __init__(self, key: str, *, initial_state: str = "closed") -> None:
         if initial_state not in ("open", "closed"):
             raise ValueError(f"invalid initial door state: {initial_state!r}")
-        self._slot = slot
+        self._key = key
         self._initial = initial_state
         self._state = initial_state
 
     @property
-    def slot(self) -> str:
-        return self._slot
+    def key(self) -> str:
+        return self._key
 
     @property
     def closed(self) -> bool:
@@ -101,9 +101,10 @@ class Door:
 class Cab:
     """One cab's local state: an activation flag with no control-side effect."""
 
-    key = "cab"
+    type = "cab"
 
-    def __init__(self, cab_id: int, *, initial_active: bool = False) -> None:
+    def __init__(self, key: str, cab_id: int, *, initial_active: bool = False) -> None:
+        self._key = key
         self._cab_id = cab_id
         self._initial_active = initial_active
         self._active = initial_active
@@ -113,8 +114,8 @@ class Cab:
         return self._cab_id
 
     @property
-    def slot(self) -> int:
-        return self._cab_id
+    def key(self) -> str:
+        return self._key
 
     @property
     def active(self) -> bool:
@@ -139,9 +140,10 @@ class Cab:
 class Btm:
     """Simulated BTM equipment for one cab. Payloads are opaque bytes."""
 
-    key = "btm"
+    type = "btm"
 
-    def __init__(self, cab_id: int) -> None:
+    def __init__(self, key: str, cab_id: int) -> None:
+        self._key = key
         self._cab_id = cab_id
         self._pending: bytes | None = None
         self._received_count = 0
@@ -151,8 +153,8 @@ class Btm:
         return self._cab_id
 
     @property
-    def slot(self) -> int:
-        return self._cab_id
+    def key(self) -> str:
+        return self._key
 
     def accept(self, data: bytes) -> None:
         self._pending = bytes(data)
@@ -179,15 +181,15 @@ class Btm:
 class StcsAtp:
     """Train-level ATP equipment that records the most recent command."""
 
-    key = "stcs_atp"
+    type = "stcs_atp"
 
-    def __init__(self, slot: str = "") -> None:
-        self._slot = slot
+    def __init__(self, key: str) -> None:
+        self._key = key
         self._last_command: str | None = None
 
     @property
-    def slot(self) -> str:
-        return self._slot
+    def key(self) -> str:
+        return self._key
 
     def apply_control(self, command: str) -> None:
         """Record the command without interpreting it."""
@@ -212,34 +214,34 @@ class EquipmentContext:
 
 
 def _create_cab(
-    slot: str | int,
+    key: str,
     ctx: EquipmentContext,
     *,
     initial_active: bool | None = None,
 ) -> Cab:
-    cab_id = int(slot)
+    cab_id = int(key.removeprefix("cab_"))
     if initial_active is None:
         initial_active = cab_id == ctx.initial_active_cab
-    return Cab(cab_id, initial_active=initial_active)
+    return Cab(key, cab_id, initial_active=initial_active)
 
 
 def _create_door(
-    slot: str | int,
+    key: str,
     ctx: EquipmentContext,
     *,
     initial_state: str | None = None,
 ) -> Door:
     if initial_state is None:
         initial_state = ctx.initial_door_state
-    return Door(str(slot), initial_state=initial_state)
+    return Door(key, initial_state=initial_state)
 
 
-def _create_btm(slot: str | int, _ctx: EquipmentContext) -> Btm:
-    return Btm(int(slot))
+def _create_btm(key: str, _ctx: EquipmentContext) -> Btm:
+    return Btm(key, int(key.removeprefix("btm_")))
 
 
-def _create_stcs_atp(slot: str | int, _ctx: EquipmentContext) -> StcsAtp:
-    return StcsAtp(str(slot))
+def _create_stcs_atp(key: str, _ctx: EquipmentContext) -> StcsAtp:
+    return StcsAtp(key)
 
 
 EQUIPMENT_FACTORIES["cab"] = _create_cab

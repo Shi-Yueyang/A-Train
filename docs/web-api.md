@@ -36,6 +36,28 @@ browser never touches simulator internals.
 | `SCALED`   | `simulation_delta = wall_delta * multiplier`  |
 | `MANUAL`   | Advances only via`POST /api/simulation/step`. |
 
+## Equipment representation
+
+Every train exposes equipment as a flat array of independently addressed
+instances. Each entry has a behavior `type`, a unique instance `key`, and a
+type-specific `state` object:
+
+```json
+{
+  "equipment": [
+    { "type": "cab", "key": "cab_1", "state": { "cab_id": 1, "active": true } },
+    { "type": "cab", "key": "cab_2", "state": { "cab_id": 2, "active": false } },
+    { "type": "door", "key": "door_main", "state": { "state": "closed" } },
+    { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "stcs_atp", "key": "stcs_atp", "state": { "last_command": null } }
+  ]
+}
+```
+
+Equipment commands address the instance directly through
+`POST /api/trains/{train_id}/equipment/{equipment_key}`. There is no implicit
+slot or type grouping.
+
 ## Endpoints
 
 ### GET /api/status
@@ -203,22 +225,22 @@ with the component's error message on invalid input.
 | Field         | Type               | Used by                    | Notes                                                        |
 | ------------- | ------------------ | -------------------------- | ------------------------------------------------------------ |
 | `command`   | string             | `door`, `cab`, `stcs_atp` | `"open"` / `"close"`; `"activate"` / `"deactivate"`; STCS ATP command. |
-| `cab_id`    | integer            | `cab`, `btm`  | Target cab.                                                  |
-| `data`      | string             | `btm`           | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400.        |
+| `cab_id`    | integer            | optional consistency check | Target cab, when applicable. |
+| `data`      | string             | `btm_1`, `btm_2` | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400. |
 
 **Semantics per equipment key**:
 
 | Key      | Behavior                                                                                                                                                                                               |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `door` | `command` `"open"` / `"close"` sets the train door state.                                                                                                                                        |
-| `cab`  | `"activate"` / `"deactivate"` sets `cab_id`'s local activation flag only; cabs carry no authority, flags are independent, and control acceptance is unaffected. `reset` restores the configured flags. |
-| `btm`  | Delivers opaque`data` to `cab_id`'s BTM equipment; delivery count and payload appear in `equipment.btm`.                                                                                         |
-| `stcs_atp` | `command` is recorded as `last_command` without interpretation. The same store is used for commands decoded from `atp_signal`. |
+| `door_main` | `command` `"open"` / `"close"` sets the train door state. |
+| `cab_1`, `cab_2` | `"activate"` / `"deactivate"` sets that cab's local activation flag. |
+| `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
+| `stcs_atp` | `command` is recorded as `last_command` without interpretation. |
 
 **Example**:
 
 ```http
-POST /api/trains/TRAIN001/equipment/door
+POST /api/trains/TRAIN001/equipment/door_main
 Content-Type: application/json
 
 { "command": "open" }
@@ -250,22 +272,13 @@ by equipment type (§3.5).
   "position": 0.0125,
   "direction": "forward",
   "drive_demand": 1.0,
-  "equipment": {
-    "cab": [
-      { "cab_id": 1, "active": true },
-      { "cab_id": 2, "active": false }
-    ],
-    "door": { "state": "closed" },
-    "btm": [
-      {
-        "cab_id": 1,
-        "pending": false,
-        "payload_b64": null,
-        "received_count": 0
-      }
-    ],
-    "stcs_atp": { "last_command": null }
-  }
+  "equipment": [
+    { "type": "cab", "key": "cab_1", "state": { "cab_id": 1, "active": true } },
+    { "type": "cab", "key": "cab_2", "state": { "cab_id": 2, "active": false } },
+    { "type": "door", "key": "door_main", "state": { "state": "closed" } },
+    { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "stcs_atp", "key": "stcs_atp", "state": { "last_command": null } }
+  ]
 }
 ```
 
@@ -278,24 +291,32 @@ by equipment type (§3.5).
 | `position`     | number | m along the linear track, never decreases.                      |
 | `direction`    | string | Always`"forward"` in this version (forward-only model).       |
 | `drive_demand` | number | The held signed lever in`[-1.0, 1.0]`.                        |
-| `equipment`    | object | Nested equipment snapshots, keyed by type; see below.           |
+| `equipment`    | array | One `{type, key, state}` entry per equipment instance. |
 
-**`equipment` members**:
+**`equipment` entries**:
 
-| Key      | Shape                                                        | Notes                                                                                       |
-| -------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `cab`  | array of`{ cab_id: int, active: bool }`                    | One entry per configured cab; `active` is a local flag with no control-side effect (§3.3).                 |
-| `door` | `{ state: "open" \| "closed" }`                             | Train-level door state.                                                                     |
-| `btm`  | array of`{ cab_id, pending, payload_b64, received_count }` | Payload bytes are opaque to the simulator and base64-encoded (atp-api.md §3.2).                       |
-| `stcs_atp` | `{ last_command }`                                | Most recently received ATP command; the equipment records it without interpreting it. |
+| Field | Shape | Notes |
+| ----- | ----- | ----- |
+| `type` | string | Equipment behavior type. |
+| `key` | string | Unique equipment instance key. |
+| `state` | object | Type-specific state. |
 
-Future addons add optional keys without changing existing fields; a train
-without an equipment type simply omits its key.
+Future addons add entries without changing existing physical fields; a train
+without an equipment instance simply omits that entry.
 
 **Immutability**: snapshots are read-only views; writing fields back through a
 command body has no effect (extra fields are ignored).
 
 ## WebSocket /ws
+
+### Equipment contract
+
+The equipment model is flat in every REST and WebSocket response. `equipment`
+is an array of entries shaped as `{ "type": string, "key": string, "state":
+object }`. The key uniquely identifies one instance, for example `cab_1`,
+`door_main`, `btm_1`, or `stcs_atp`. Equipment commands address that instance
+directly through `/api/trains/{train_id}/equipment/{key}`; there is no implicit
+type grouping or slot field.
 
 One-way live state stream (simulator → browser, §5.3). The client receives:
 

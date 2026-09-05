@@ -219,10 +219,15 @@ async def test_train_reset_restores_state_and_clears_equipment() -> None:
         assert reset_state["speed"] == 0.0
         assert reset_state["acceleration"] == 0.0
         assert reset_state["drive_demand"] == 0.0
-        assert reset_state["equipment"]["door"]["state"] == "closed"
-        cab_flags = {e["cab_id"]: e["active"] for e in reset_state["equipment"]["cab"]}
+        door = next(e for e in reset_state["equipment"] if e["key"] == "door_main")
+        assert door["state"]["state"] == "closed"
+        cab_flags = {
+            e["state"]["cab_id"]: e["state"]["active"]
+            for e in reset_state["equipment"]
+            if e["type"] == "cab"
+        }
         assert cab_flags == {1: True, 2: False}  # configured cabs restored
-        btm = reset_state["equipment"]["btm"]
+        btm = [e["state"] for e in reset_state["equipment"] if e["type"] == "btm"]
         assert all(b["pending"] is False and b["received_count"] == 0 for b in btm)
 
 
@@ -241,15 +246,17 @@ async def test_equipment_nested_snapshots_do_not_change_physical_fields() -> Non
             assert field in snap
         assert snap["direction"] == "forward"
 
-        # Equipment is exposed as optional nested snapshots; cabs are equipment.
-        assert isinstance(snap["equipment"]["cab"], list) and len(snap["equipment"]["cab"]) == 2
+        # Equipment is exposed as individually addressed entries.
+        cabs = [e["state"] for e in snap["equipment"] if e["type"] == "cab"]
+        assert len(cabs) == 2
         assert (
-            snap["equipment"]["cab"][0]["cab_id"] == 1
-            and snap["equipment"]["cab"][0]["active"] is True
+            cabs[0]["cab_id"] == 1
+            and cabs[0]["active"] is True
         )
-        assert snap["equipment"]["cab"][1]["active"] is False
-        assert snap["equipment"]["door"]["state"] == "closed"
-        assert isinstance(snap["equipment"]["btm"], list) and snap["equipment"]["btm"]
+        assert cabs[1]["active"] is False
+        door = next(e for e in snap["equipment"] if e["key"] == "door_main")
+        assert door["state"]["state"] == "closed"
+        assert any(e["type"] == "btm" for e in snap["equipment"])
 
 
 # -- Criterion: snapshots cannot be used to mutate subsequent simulator state --

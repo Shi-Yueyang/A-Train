@@ -311,6 +311,13 @@ reproduced exactly.
 
 # 3. Train Model
 
+Equipment is modeled as a flat collection of uniquely keyed instances. Each
+instance has a behavior `type` and an instance `key`; train-scoped equipment
+such as `door_main` and cab-scoped equipment such as `btm_1` use the same
+addressing model. Snapshots preserve this shape as an array of `{type, key,
+state}` entries. Adapters address equipment by key and do not infer identity
+from list position or an implicit slot.
+
 ## 3.1 Responsibility and Boundary
 
 The train model owns mutable train state and converts accepted control commands
@@ -534,7 +541,7 @@ configuration and observability -- is specified in
 
 In one paragraph: each ATP process is a TCP server serving exactly one cab;
 the simulator dials every configured endpoint, streams `train_state`
-observations with the current per-cab `equipment.btm` payload embedded in the
+      observations with the current per-cab BTM entry embedded in the
 snapshot, and accepts `atp_command` action requests from ATP, mapping them
 onto the same transport-neutral core commands the Web API submits. Invalid
 input is answered with `ERROR` without affecting the simulation. The interface

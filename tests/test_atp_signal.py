@@ -83,11 +83,11 @@ def _train() -> Train:
 
 
 def _atp_state(train: Train):
-    return train.get_snapshot().equipment["stcs_atp"]
+    return next(entry.state for entry in train.get_snapshot().equipment if entry.key == "stcs_atp")
 
 
 def test_stcs_atp_records_last_command() -> None:
-    equipment = StcsAtp()
+    equipment = StcsAtp("stcs_atp")
     equipment.apply_control("brake_service")
     state = equipment.read_state()
     assert state.last_command == "brake_service"
@@ -96,7 +96,7 @@ def test_stcs_atp_records_last_command() -> None:
 
 
 def test_stcs_atp_records_arbitrary_command() -> None:
-    equipment = StcsAtp()
+    equipment = StcsAtp("stcs_atp")
     equipment.apply_control("brake_whatever")
     assert equipment.read_state().last_command == "brake_whatever"
 

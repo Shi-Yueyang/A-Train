@@ -78,6 +78,7 @@ class AtpClient:
         self._state = ClientState.IDLE
         self._task: asyncio.Task[None] | None = None
         self._writer: asyncio.StreamWriter | None = None
+        self._latest_snapshot: SimulationSnapshot | None = None
 
     @property
     def train_id(self) -> str:
@@ -156,6 +157,7 @@ class AtpClient:
         included in the snapshot's nested equipment state.
         """
 
+        self._latest_snapshot = snapshot
         if self._state is ClientState.READY:
             self._publish_now(snapshot)
 
@@ -190,6 +192,8 @@ class AtpClient:
             self._writer = writer
             self._state = ClientState.READY
             logger.info("%s: channel established", self.ident)
+            if self._latest_snapshot is not None:
+                self._publish_now(self._latest_snapshot)
             try:
                 await self._hold(reader)
             finally:
