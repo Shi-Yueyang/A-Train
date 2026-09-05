@@ -25,6 +25,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from .controls import (
+    BtmControl,
+    CabControl,
+    Control,
+    DoorControl,
+    EquipmentControl,
+    StcsAtpControl,
+)
 from .snapshots import BtmSnapshot, CabSnapshot, DoorSnapshot, StcsAtpSnapshot
 
 # -- Equipment protocol -------------------------------------------------------
@@ -32,7 +40,7 @@ from .snapshots import BtmSnapshot, CabSnapshot, DoorSnapshot, StcsAtpSnapshot
 
 @dataclass(frozen=True)
 class EquipmentIntent:
-    """A reference-free request for a train-level state change.
+    """A reference-free request carrying a target's control object.
 
     ``target`` is an equipment key or the reserved ``"train"`` target.
     Intent resolution is owned by the train aggregate; equipment only emits
@@ -41,8 +49,7 @@ class EquipmentIntent:
 
     source: str
     target: str
-    action: str
-    value: Any = None
+    control: Control
 
 
 @runtime_checkable
@@ -57,6 +64,10 @@ class Equipment(Protocol):
     @property
     def key(self) -> str:
         """Unique instance identity within one train."""
+        ...
+
+    def apply_control(self, control: EquipmentControl) -> None:
+        """Apply a control owned by this equipment."""
         ...
 
     def read_state(self) -> Any:
@@ -99,11 +110,10 @@ class Door:
     def closed(self) -> bool:
         return self._state == "closed"
 
-    def apply_control(self, command: str) -> None:
-        """Accept ``"open"`` or ``"close"``."""
-        if command not in ("open", "close"):
-            raise ValueError(f"invalid door command: {command!r}")
-        self._state = "open" if command == "open" else "closed"
+    def apply_control(self, control: EquipmentControl) -> None:
+        if not isinstance(control, DoorControl) or control.command not in ("open", "close"):
+            raise ValueError("door control must be 'open' or 'close'")
+        self._state = "open" if control.command == "open" else "closed"
 
     def read_state(self) -> DoorSnapshot:
         return DoorSnapshot(state=self._state)
@@ -141,11 +151,14 @@ class Cab:
     def active(self) -> bool:
         return self._active
 
-    def apply_control(self, command: str) -> None:
-        """Accept ``"activate"`` or ``"deactivate"``."""
-        if command not in ("activate", "deactivate"):
-            raise ValueError(f"invalid cab command: {command!r}")
-        self._active = command == "activate"
+    def apply_control(self, control: EquipmentControl) -> None:
+        if not isinstance(control, CabControl):
+            raise ValueError("cab control is invalid")
+        if control.command not in ("activate", "deactivate"):
+            raise ValueError("cab control must be 'activate' or 'deactivate'")
+        if control.cab_id is not None and control.cab_id != self._cab_id:
+            raise ValueError("cab_id does not match equipment key")
+        self._active = control.command == "activate"
 
     def read_state(self) -> CabSnapshot:
         return CabSnapshot(cab_id=self._cab_id, active=self._active)
@@ -179,8 +192,12 @@ class Btm:
     def key(self) -> str:
         return self._key
 
-    def accept(self, data: bytes) -> None:
-        self._pending = bytes(data)
+    def apply_control(self, control: EquipmentControl) -> None:
+        if not isinstance(control, BtmControl):
+            raise ValueError("btm control is invalid")
+        if control.cab_id is not None and control.cab_id != self._cab_id:
+            raise ValueError("cab_id does not match equipment key")
+        self._pending = bytes(control.data)
         self._received_count += 1
 
     def read_state(self) -> BtmSnapshot:
@@ -283,8 +300,11 @@ class StcsAtp:
     def key(self) -> str:
         return self._key
 
-    def apply_command(self, command: str) -> None:
+    def apply_control(self, control: EquipmentControl) -> None:
         """Apply a binary output command to the corresponding logical states."""
+        if not isinstance(control, StcsAtpControl):
+            raise ValueError("stcs_atp control is invalid")
+        command = control.command
         if not isinstance(command, str) or not command or any(bit not in "01" for bit in command):
             raise ValueError("stcs_atp command must be a non-empty string of '0' and '1'")
 
@@ -294,6 +314,10 @@ class StcsAtp:
             if state_name is not None:
                 self._logical_states[state_name] = bit == "1"
         self._update_train_out_states()
+
+    def apply_command(self, command: str) -> None:
+        """Apply an STCS command through the unified control entry point."""
+        self.apply_control(StcsAtpControl(command))
 
     def _update_train_out_states(self) -> None:
         self._train_out_states["emergency_brake_1_inner_feedback"] = (
@@ -309,10 +333,6 @@ class StcsAtp:
         self._train_out_states["service_brake_7_feedback"] = (
             self._logical_states["maximum_service_brake_7"]
         )
-
-    def apply_control(self, command: str) -> None:
-        """Apply an STCS command through the generic equipment interface."""
-        self.apply_command(command)
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
         return ()

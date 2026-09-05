@@ -21,6 +21,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .controls import (
+    BtmControl,
+    CabControl,
+    Control,
+    DoorControl,
+    EquipmentControl,
+    StcsAtpControl,
+    TrainControl,
+)
 from .equipment import (
     EQUIPMENT_FACTORIES,
     Btm,
@@ -39,22 +48,6 @@ from .physics import (
     resolve_acceleration,
 )
 from .snapshots import EquipmentSnapshot, TrainSnapshot
-
-
-@dataclass(frozen=True, kw_only=True)
-class TrainControl:
-    """A normalized train-control request from any configured cab (§3.3).
-
-    ``cab_id`` identifies the issuing cab for validation only; cabs carry no
-    authority, and the same demand applied from either cab has the same effect.
-
-    ``drive_demand`` is a signed, normalized lever in [-1.0, 1.0]: positive
-    scales the traction limit, negative scales the deceleration limit. The
-    model knows force and speed only; there is no separate brake state.
-    """
-
-    cab_id: int
-    drive_demand: float | None = None
 
 
 @dataclass(frozen=True)
@@ -224,40 +217,31 @@ class Train:
         if equipment is None:
             return ControlResult(ok=False, error=f"no '{command.key}' equipment on {self._config.train_id}")
 
+        try:
+            equipment.apply_control(self._equipment_control(equipment, command))
+        except ValueError as exc:
+            return ControlResult(ok=False, error=str(exc))
+        return ControlResult()
+
+    @staticmethod
+    def _equipment_control(equipment: Equipment, command: EquipmentSet):
         if isinstance(equipment, Door):
-            if command.command not in ("open", "close"):
-                return ControlResult(ok=False, error="door command must be 'open' or 'close'")
-            equipment.apply_control(command.command)
-            return ControlResult()
-
+            if command.command is None:
+                raise ValueError("door requires a command")
+            return DoorControl(command.command)
         if isinstance(equipment, Cab):
-            if command.command not in ("activate", "deactivate"):
-                return ControlResult(
-                    ok=False, error="cab command must be 'activate' or 'deactivate'"
-                )
-            if command.cab_id is not None and command.cab_id != equipment.cab_id:
-                return ControlResult(ok=False, error="cab_id does not match equipment key")
-            equipment.apply_control(command.command)
-            return ControlResult()
-
+            if command.command is None:
+                raise ValueError("cab requires a command")
+            return CabControl(command.command, command.cab_id)
         if isinstance(equipment, Btm):
             if command.data is None:
-                return ControlResult(ok=False, error="btm requires data")
-            if command.cab_id is not None and command.cab_id != equipment.cab_id:
-                return ControlResult(ok=False, error="cab_id does not match equipment key")
-            equipment.accept(command.data)
-            return ControlResult()
-
+                raise ValueError("btm requires data")
+            return BtmControl(command.data, command.cab_id)
         if isinstance(equipment, StcsAtp):
             if command.command is None:
-                return ControlResult(ok=False, error="stcs_atp requires a command")
-            equipment.apply_command(command.command)
-            return ControlResult()
-
-        return ControlResult(
-            ok=False,
-            error=f"equipment '{command.key}' does not expose settable state",
-        )
+                raise ValueError("stcs_atp requires a command")
+            return StcsAtpControl(command.command)
+        raise ValueError(f"equipment '{command.key}' does not expose settable state")
 
     def step(self, dt: float) -> None:
         """Integrate forward-only motion over one fixed step (§3.4).
@@ -291,8 +275,15 @@ class Train:
     def _resolve_equipment_intents(
         self, intents: tuple[EquipmentIntent, ...]
     ) -> None:
-        """Apply intents in one place once train rules are implemented."""
-        del intents
+        """Route intents without embedding equipment-specific action logic."""
+        for intent in intents:
+            if intent.target == "train":
+                if isinstance(intent.control, TrainControl):
+                    self.apply_control(intent.control)
+                continue
+            target = self._equipment.get(intent.target)
+            if target is not None:
+                target.apply_control(intent.control)
 
     def _equipment_snapshot(self) -> tuple[EquipmentSnapshot, ...]:
         """Group per-instance snapshots by type key for the train snapshot.
