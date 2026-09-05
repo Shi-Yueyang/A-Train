@@ -133,7 +133,7 @@ while the channel is READY.
     "btm": [
       { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 }
     ],
-    "stcs_atp": { "traction_cutoff": false, "service": false, "emergency": true }
+    "stcs_atp": { "last_command": "brake_emergency" }
   }
 }
 ```
@@ -194,7 +194,7 @@ Processing pipeline (manager → core):
 2. Map to the transport-neutral commands the REST API uses:
    - `drive_demand` → `TrainControlCommand(train_id, TrainControl(cab_id, drive_demand))`
    - `door` → `EquipmentCommand(train_id, EquipmentSet(key="door", command=door))`
-   - `atp_signal` → decoded bit-by-bit into core commands (§4.2)
+  - `atp_signal` → one STCS ATP command containing the raw signal (§4.2)
      A message may carry several fields; each contributes its commands in the
      order listed above.
 3. Submit to `SimulationCore`'s command queue. Only `run_loop()` consumes the
@@ -233,27 +233,23 @@ bound bit index yields transport-neutral core commands (one per defined
 position, ascending index order) which the manager submits through the
 ordinary command queue. **The protection state machine lives in the core**, in
 the train-level `stcs_atp` component (`domain/equipment.py`), so the flags
-are deterministic world state: ordered by the queue, visible to REST and
+are deterministic command records: ordered by the queue, visible to REST and
 WebSocket, restored by `reset`, and re-sent on reconnect by the
 latest-snapshot catch-up publish (§1.4).
 
-| Bit index | Meaning          | `"1"` asserts     | `"0"` asserts         | Stored flag                    |
-| --------- | ---------------- | ------------------- | ----------------------- | ------------------------------ |
-| 0         | reserved         | ignored             | ignored                 | --                             |
-| 1         | traction cut-off | `traction_cut`    | `traction_release`    | `traction_cutoff` (persists) |
-| 2         | service brake    | `brake_service`   | `brake_service_off`   | `service`                    |
-| 3         | emergency brake  | `brake_emergency` | `brake_emergency_off` | `emergency`                  |
+| Bit index | Meaning          | `"1"` asserts    | `"0"` asserts        |
+| --------- | ---------------- | ------------------ | ---------------------- |
+| 0         | reserved         | ignored            | ignored                |
+| 1         | traction cut-off | `traction_cut`     | `traction_release`     |
+| 2         | service brake    | `brake_service`    | `brake_service_off`    |
+| 3         | emergency brake  | `brake_emergency`  | `brake_emergency_off`  |
 
-The three flags are stored and reported independently, exactly as asserted:
-sending `"0010"` asserts service (index 2 `'1'`) while releasing emergency
-(index 3 `'0'`), leaving `service: true, emergency: false`.
+The raw signal is recorded by the train's `stcs_atp` equipment. Only the most
+recently applied signal is retained in `last_command`; the equipment does not
+interpret commands or maintain protection flags.
 
-Combination with core physics state (implemented rule, placeholder-grade,
-subject to future protection logic): during every fixed step, if the train's
-speed is `0.0`, both brake flags are released automatically; the traction
-cut-off persists until explicitly released. The flags feed into dynamics
-(braking force, cut-off enforcement) in a future phase -- as with all
-equipment in this version, movement is unaffected for now.
+The recorded command does not affect physics. Protection behavior can be added
+later without changing the transport command translation.
 
 Unbound bit positions (index ≥ 4) are silently ignored, so ATP can send
 longer strings today without breaking older or newer peers.
@@ -355,6 +351,6 @@ ATP     ──> {"type":"atp_command","door":"open","drive_demand":0.5}
               (two commands: control, then equipment)
 ATP     ──> {"type":"atp_command","atp_signal":"0001000"}
               (emergency brake asserted on bit 3; state lands in the core)
-simulator ──> {"type":"train_state",...,"stcs_atp":{"traction_cutoff":false,"service":false,"emergency":true}}
+simulator ──> {"type":"train_state",...,"stcs_atp":{"last_command":"0111"}}
 simulator ──> {"type":"error","code":"invalid_atp_command",...}  (on a bad request)
 ```

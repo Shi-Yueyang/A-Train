@@ -103,6 +103,34 @@ function fmt(n, d = 4) {
   return Number.isFinite(n) ? n.toFixed(d) : String(n);
 }
 
+function hexToBase64(value) {
+  const hex = value.replace(/\s+/g, "");
+  if (!hex || hex.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hex)) {
+    throw new Error("BTM payload must contain an even number of hexadecimal digits");
+  }
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function renderBtmEncoding() {
+  const preview = $("btm-base64");
+  const value = $("btm-payload").value;
+  if (!value.trim()) {
+    preview.textContent = "";
+    return;
+  }
+  try {
+    preview.textContent = `base64: ${hexToBase64(value)}`;
+  } catch (error) {
+    preview.textContent = error.message;
+  }
+}
+
 function renderStatus() {
   const s = state.status;
   $("sim-state").textContent = s ? s.simulation_state : "—";
@@ -150,11 +178,13 @@ function renderTrainSelectors() {
 function renderTrainState() {
   const sel = selectedTrain();
   const pre = $("train-state-pre");
+  const equipmentEl = $("train-equipment");
   if (!sel) {
     pre.textContent = "no trains";
+    equipmentEl.replaceChildren();
     return;
   }
-  const doorState = (sel.equipment && sel.equipment.door && sel.equipment.door.state) || "—";
+  const equipment = sel.equipment || {};
   const cabs = (sel.equipment && sel.equipment.cab) || [];
   const cabText = cabs.length
     ? cabs.map((e) => `${e.cab_id}${e.active ? " (on)" : ""}`).join(", ")
@@ -166,20 +196,39 @@ function renderTrainState() {
     `speed           ${fmt(sel.speed)} m/s`,
     `acceleration    ${fmt(sel.acceleration)} m/s^2`,
     `drive_demand    ${fmt(sel.drive_demand)}`,
-    `door_state      ${doorState}`,
   ];
-  const btm = sel.equipment && sel.equipment.btm;
-  if (btm && btm.length) {
-    lines.push(
-      `btm             ${btm
-        .map((b) => `cab${b.cab_id}:${b.received_count}`)
-        .join(" ")}`
-    );
-  }
   pre.textContent = lines.join("\n");
 
+  renderEquipment(equipmentEl, equipment);
+  const doorState = (equipment.door && equipment.door.state) || "—";
   $("door-state").textContent = doorState;
   syncSlider("drive", sel.drive_demand);
+}
+
+function renderEquipment(container, equipment) {
+  container.replaceChildren();
+  const entries = Object.entries(equipment);
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "equipment-empty";
+    empty.textContent = "No equipment reported";
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const [key, value] of entries) {
+    const card = document.createElement("article");
+    card.className = "equipment-card";
+
+    const heading = document.createElement("h3");
+    heading.textContent = key.replaceAll("_", " ");
+    card.appendChild(heading);
+
+    const details = document.createElement("pre");
+    details.textContent = JSON.stringify(value, null, 2);
+    card.appendChild(details);
+    container.appendChild(card);
+  }
 }
 
 // Sync a demand slider from the live snapshot, but never while it holds the
@@ -320,6 +369,25 @@ function bind() {
     postCommand(`/trains/${state.selectedTrainId}/equipment/door`, {
       command: "close",
     });
+  $("btn-send-btm").onclick = () =>
+    sendBtmPayload();
+  $("btm-payload").oninput = renderBtmEncoding;
+}
+
+async function sendBtmPayload() {
+  let data;
+  try {
+    data = hexToBase64($("btm-payload").value);
+  } catch (error) {
+    state.error = error.message;
+    state.notice = null;
+    renderMessage();
+    return;
+  }
+  await postCommand(`/trains/${state.selectedTrainId}/equipment/btm`, {
+    cab_id: state.selectedCab,
+    data,
+  });
 }
 
 bind();

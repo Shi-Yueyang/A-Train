@@ -208,7 +208,7 @@ async def test_unknown_message_type_answered_with_error() -> None:
 
 
 async def _wait_stcs_atp(c, **expected: object) -> dict:
-    """Poll REST until the train's ATP protection flags match ``expected``."""
+    """Poll REST until the train's recorded ATP command matches ``expected``."""
 
     async def _poll() -> dict:
         while True:
@@ -229,33 +229,23 @@ async def test_atp_signal_asserts_state_and_shows_in_train_state() -> None:
             await _await_ready(server, c)
             await _next(server, "train_state")  # drain the catch-up publish
 
-            # bits 1-3 asserted, bit 0 reserved: traction + both brakes active.
+            # The raw signal is recorded unchanged by STCS ATP.
             await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "0111"})
-            await _wait_stcs_atp(c, traction_cutoff=True, service=True, emergency=True)
+            await _wait_stcs_atp(c, last_command="0111")
 
             # The protection line rides every subsequent TRAIN_STATE.
             await _next(
                 server,
                 "train_state",
-                stcs_atp={
-                    "traction_cutoff": True,
-                    "service": True,
-                    "emergency": True,
-                },
+                stcs_atp={"last_command": "0111"},
             )
 
-            # Shorter string: idx1 '1', idx2 '0' released; idx3 beyond length keeps
-            # its emergency -- derived from the previous ATP_COMMAND.
+            # A shorter signal replaces the previous raw signal.
             await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "010"})
-            state = await _wait_stcs_atp(c, service=False, emergency=True)
-            assert state["traction_cutoff"] is True
-
-            # Core-state combination: stepping while at speed 0.0 fires the
-            # release-at-rest rule; the traction cut-off persists.
+            state = await _wait_stcs_atp(c, last_command="010")
             r = await c.post("/api/simulation/step", json={"delta": 0.1})
             assert r.status_code == 200
-            state = await _wait_stcs_atp(c, service=False, emergency=False, traction_cutoff=True)
-            assert state["traction_cutoff"] is True
+            assert (await c.get("/api/trains/TRAIN001")).json()["equipment"]["stcs_atp"] == state
     finally:
         await server.stop()
 

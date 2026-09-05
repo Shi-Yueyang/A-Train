@@ -202,7 +202,7 @@ with the component's error message on invalid input.
 
 | Field         | Type               | Used by                    | Notes                                                        |
 | ------------- | ------------------ | -------------------------- | ------------------------------------------------------------ |
-| `command`   | string             | `door`, `cab`, `stcs_atp` | `"open"` / `"close"`; `"activate"` / `"deactivate"`; ATP flags below. |
+| `command`   | string             | `door`, `cab`, `stcs_atp` | `"open"` / `"close"`; `"activate"` / `"deactivate"`; STCS ATP command. |
 | `cab_id`    | integer            | `cab`, `btm`  | Target cab.                                                  |
 | `data`      | string             | `btm`           | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400.        |
 
@@ -213,7 +213,7 @@ with the component's error message on invalid input.
 | `door` | `command` `"open"` / `"close"` sets the train door state.                                                                                                                                        |
 | `cab`  | `"activate"` / `"deactivate"` sets `cab_id`'s local activation flag only; cabs carry no authority, flags are independent, and control acceptance is unaffected. `reset` restores the configured flags. |
 | `btm`  | Delivers opaque`data` to `cab_id`'s BTM equipment; delivery count and payload appear in `equipment.btm`.                                                                                         |
-| `stcs_atp` | `command` is one of `traction_cut` / `traction_release` / `brake_service` / `brake_service_off` / `brake_emergency` / `brake_emergency_off`; asserts or releases one ATP protection flag (atp-api.md §4.2). Same store ATP drives via `atp_signal`. |
+| `stcs_atp` | `command` is recorded as `last_command` without interpretation. The same store is used for commands decoded from `atp_signal`. |
 
 **Example**:
 
@@ -264,11 +264,7 @@ by equipment type (§3.5).
         "received_count": 0
       }
     ],
-    "stcs_atp": {
-      "traction_cutoff": false,
-      "service": false,
-      "emergency": false
-    }
+    "stcs_atp": { "last_command": null }
   }
 }
 ```
@@ -291,7 +287,7 @@ by equipment type (§3.5).
 | `cab`  | array of`{ cab_id: int, active: bool }`                    | One entry per configured cab; `active` is a local flag with no control-side effect (§3.3).                 |
 | `door` | `{ state: "open" \| "closed" }`                             | Train-level door state.                                                                     |
 | `btm`  | array of`{ cab_id, pending, payload_b64, received_count }` | Payload bytes are opaque to the simulator and base64-encoded (atp-api.md §3.2).                       |
-| `stcs_atp` | `{ traction_cutoff, service, emergency }`          | ATP protection flags, three independently asserted booleans, driven by `atp_signal` bits or the equipment endpoint (atp-api.md §4.2). |
+| `stcs_atp` | `{ last_command }`                                | Most recently received ATP command; the equipment records it without interpreting it. |
 
 Future addons add optional keys without changing existing fields; a train
 without an equipment type simply omits its key.

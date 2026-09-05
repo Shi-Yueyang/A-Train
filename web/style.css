@@ -66,11 +66,66 @@ input[type="range"] {
   width: 12rem;
 }
 
+.btm-payload-label {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+#btm-payload {
+  box-sizing: border-box;
+  font: inherit;
+  min-width: min(24rem, 100%);
+  max-width: 100%;
+  resize: vertical;
+}
+
+.btm-base64 {
+  color: #888;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
 pre#train-state-pre {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.85rem;
   white-space: pre;
+}
+
+.equipment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.equipment-card {
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  padding: 0.65rem 0.75rem;
+  min-width: 0;
+}
+
+.equipment-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.equipment-card pre {
+  margin: 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.equipment-empty {
+  margin: 0;
+  color: #888;
 }
 
 .message {

@@ -64,11 +64,19 @@
             <output id="door-state">closed</output>
           </fieldset>
         </div>
+        <div class="controls btm-controls">
+          <label class="btm-payload-label" for="btm-payload">BTM payload (hex)
+            <textarea id="btm-payload" rows="2" placeholder="01 23 a4 ff 00 81 72"></textarea>
+            <output id="btm-base64" class="btm-base64" aria-live="polite"></output>
+          </label>
+          <button id="btn-send-btm">Send BTM</button>
+        </div>
       </section>
 
       <section id="train-state">
         <h2>Train State</h2>
         <pre id="train-state-pre">—</pre>
+        <div id="train-equipment" class="equipment-grid" aria-live="polite"></div>
       </section>
 
       <p id="message" class="message"></p>

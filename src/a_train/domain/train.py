@@ -79,9 +79,7 @@ class EquipmentSet:
     - ``cab``: ``cab_id`` plus ``command`` ``"activate"`` or ``"deactivate"``;
       sets that cab's local flag only, with no control-side effect.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
-    - ``stcs_atp``: ``command`` is ``"traction_cut"``, ``"traction_release"``,
-      ``"brake_service"``, ``"brake_service_off"``, ``"brake_emergency"`` or
-      ``"brake_emergency_off"`` (atp-api.md §4.2).
+        - ``stcs_atp``: ``command`` is recorded as the last received command.
     """
 
     key: str
@@ -279,10 +277,7 @@ class Train:
                 )
             if command.command is None:
                 return ControlResult(ok=False, error="stcs_atp requires a command")
-            try:
-                equipment.apply_control(command.command)
-            except ValueError as exc:
-                return ControlResult(ok=False, error=str(exc))
+            equipment.apply_control(command.command)
             return ControlResult()
 
         return ControlResult(
@@ -294,8 +289,6 @@ class Train:
         """Integrate forward-only motion over one fixed step (§3.4).
 
         No equipment affects the dynamics; the drive demand is the only input.
-        Components exposing an optional ``step(dt, speed)`` hook observe the
-        post-integration physical state (e.g. the ATP brake release rule).
         """
 
         accel = resolve_acceleration(self._drive_demand, self._config)

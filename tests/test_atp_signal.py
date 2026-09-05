@@ -1,8 +1,7 @@
-"""Unit tests for atp_signal translation and the core-side state machine.
+"""Unit tests for atp_signal translation and STCS ATP command recording.
 
 Covers atp-api.md §4.2: bit validation (protocol), pure bit-to-command
-translation (signal.py), and the ``stcs_atp`` equipment state machine
-(domain), including the placeholder release-at-rest rule.
+translation (signal.py) and the ``stcs_atp`` equipment (domain).
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ import pytest
 from a_train.adapters.atp.protocol import parse_atp_command
 from a_train.adapters.atp.signal import decode_atp_signal
 from a_train.domain.equipment import StcsAtp
-from a_train.domain.train import EquipmentSet, Train, TrainConfig, TrainControl
+from a_train.domain.train import EquipmentSet, Train, TrainConfig
 
 TID, CAB = "TRAIN001", 1
 
@@ -55,22 +54,17 @@ def test_missing_payload_still_rejected() -> None:
 
 def test_asserted_bits_produce_commands_in_ascending_order() -> None:
     commands = decode_atp_signal("0111", TID, CAB)
-    assert [c.payload.command for c in commands] == [
-        "traction_cut",
-        "brake_service",
-        "brake_emergency",
-    ]
+    assert [c.payload.command for c in commands] == ["0111"]
     assert all(c.train_id == TID and c.payload.key == "stcs_atp" for c in commands)
 
 
 def test_explicit_zero_bits_produce_release_commands() -> None:
     commands = decode_atp_signal("010", TID, CAB)  # idx1 '1', idx2 '0'
-    assert [c.payload.command for c in commands] == ["traction_cut", "brake_service_off"]
+    assert [c.payload.command for c in commands] == ["010"]
 
 
-def test_reserved_and_unbound_positions_produce_no_commands() -> None:
-    # Only index 0 (reserved) is defined: nothing is asserted, state keeps.
-    assert decode_atp_signal("0", TID, CAB) == []
+def test_reserved_and_unbound_positions_are_recorded_unchanged() -> None:
+    assert [c.payload.command for c in decode_atp_signal("0", TID, CAB)] == ["0"]
 
 
 # -- Core-side state machine (domain) ---------------------------------------------
@@ -92,46 +86,32 @@ def _atp_state(train: Train):
     return train.get_snapshot().equipment["stcs_atp"]
 
 
-def test_brake_flags_are_independent() -> None:
+def test_stcs_atp_records_last_command() -> None:
     equipment = StcsAtp()
     equipment.apply_control("brake_service")
+    state = equipment.read_state()
+    assert state.last_command == "brake_service"
     equipment.apply_control("brake_emergency")
-    state = equipment.read_state()
-    assert state.service and state.emergency
-    equipment.apply_control("brake_emergency_off")
-    state = equipment.read_state()
-    assert state.service and not state.emergency
+    assert equipment.read_state().last_command == "brake_emergency"
 
 
-def test_invalid_command_raises() -> None:
-    with pytest.raises(ValueError, match="stcs_atp"):
-        StcsAtp().apply_control("brake_whatever")
+def test_stcs_atp_records_arbitrary_command() -> None:
+    equipment = StcsAtp()
+    equipment.apply_control("brake_whatever")
+    assert equipment.read_state().last_command == "brake_whatever"
 
 
-def test_release_at_rest_rule_combines_core_speed() -> None:
+def test_stcs_atp_command_is_not_changed_by_train_step() -> None:
     train = _train()  # standing still: speed 0.0
 
-    for command in ("traction_cut", "brake_emergency"):
-        assert train.set_equipment(EquipmentSet(key="stcs_atp", command=command)).ok
+    assert train.set_equipment(
+        EquipmentSet(key="stcs_atp", command="brake_emergency")
+    ).ok
 
     train.step(0.05)  # no motion demanded, speed stays 0.0
-    state = _atp_state(train)
-    assert not state.service and not state.emergency  # placeholder release rule fired
-    assert state.traction_cutoff  # cut-off persists
-
-    assert train.set_equipment(EquipmentSet(key="stcs_atp", command="traction_release")).ok
-    assert not _atp_state(train).traction_cutoff
-
-
-def test_brake_persists_while_moving() -> None:
-    train = _train()
-    train.apply_control(TrainControl(cab_id=1, drive_demand=1.0))
-    train.step(0.5)  # accelerate: speed > 0
-    assert train.set_equipment(EquipmentSet(key="stcs_atp", command="brake_service")).ok
-    train.step(0.1)
-    assert _atp_state(train).service
+    assert _atp_state(train).last_command == "brake_emergency"
 
 
 def test_standard_consist_includes_stcs_atp() -> None:
     state = _atp_state(_train())
-    assert not (state.traction_cutoff or state.service or state.emergency)
+    assert state.last_command is None

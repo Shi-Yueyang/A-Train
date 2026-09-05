@@ -177,71 +177,27 @@ class Btm:
 
 
 class StcsAtp:
-    """Train-level ATP protection state asserted by ``atp_signal`` bits.
-
-    Skeleton semantics (atp-api.md §4.2): bit handlers translate into named
-    commands that assert or release one flag each; the train dispatcher calls
-    ``apply_control`` through the core command queue, so history is ordered
-    and replayable. The ``step`` hook combines the stored ATP state with the
-    core's physical state: a full stop releases both brake bits (placeholder
-    release rule; the traction cut-off persists). Nothing feeds back into
-    dynamics yet -- like all equipment in this version.
-    """
+    """Train-level ATP equipment that records the most recent command."""
 
     key = "stcs_atp"
 
-    _COMMANDS = (
-        "traction_cut",
-        "traction_release",
-        "brake_service",
-        "brake_service_off",
-        "brake_emergency",
-        "brake_emergency_off",
-    )
-
     def __init__(self, slot: str = "") -> None:
         self._slot = slot
-        self._traction_cutoff = False
-        self._service = False
-        self._emergency = False
+        self._last_command: str | None = None
 
     @property
     def slot(self) -> str:
         return self._slot
 
     def apply_control(self, command: str) -> None:
-        """Assert or release one protection flag."""
-        if command not in self._COMMANDS:
-            raise ValueError(f"invalid stcs_atp command: {command!r}")
-        if command == "traction_cut":
-            self._traction_cutoff = True
-        elif command == "traction_release":
-            self._traction_cutoff = False
-        elif command == "brake_service":
-            self._service = True
-        elif command == "brake_service_off":
-            self._service = False
-        elif command == "brake_emergency":
-            self._emergency = True
-        elif command == "brake_emergency_off":
-            self._emergency = False
-
-    def step(self, _dt: float, speed: float) -> None:
-        if speed == 0.0:
-            self._service = False
-            self._emergency = False
+        """Record the command without interpreting it."""
+        self._last_command = command
 
     def read_state(self) -> StcsAtpSnapshot:
-        return StcsAtpSnapshot(
-            traction_cutoff=self._traction_cutoff,
-            service=self._service,
-            emergency=self._emergency,
-        )
+        return StcsAtpSnapshot(last_command=self._last_command)
 
     def reset(self) -> None:
-        self._traction_cutoff = False
-        self._service = False
-        self._emergency = False
+        self._last_command = None
 
 
 # -- Equipment factory registration -------------------------------------------

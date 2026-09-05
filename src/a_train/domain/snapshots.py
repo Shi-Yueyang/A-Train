@@ -44,16 +44,9 @@ class BtmSnapshot:
 
 @dataclass(frozen=True)
 class StcsAtpSnapshot:
-    """Read-only view of the ATP protection equipment (atp-api.md §4.2).
+    """Read-only view of the last command received by ATP equipment."""
 
-    The three flags are the positions last asserted by ATP_COMMAND
-    ``atp_signal`` (positions beyond the received string keep their value);
-    traction cutoff and the two brake levels are independent flags.
-    """
-
-    traction_cutoff: bool = False
-    service: bool = False
-    emergency: bool = False
+    last_command: str | None = None
 
 
 @dataclass(frozen=True)
