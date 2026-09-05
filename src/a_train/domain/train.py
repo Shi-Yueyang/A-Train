@@ -250,7 +250,7 @@ class Train:
         if isinstance(equipment, StcsAtp):
             if command.command is None:
                 return ControlResult(ok=False, error="stcs_atp requires a command")
-            equipment.apply_control(command.command)
+            equipment.apply_command(command.command)
             return ControlResult()
 
         return ControlResult(

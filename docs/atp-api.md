@@ -230,30 +230,81 @@ applied (both `"1"` and `"0"`), and positions **beyond the string length keep
 their previous value**. ATP state therefore evolves across messages -- the
 current flags are derived from the most recent assertion of each position.
 
-Decoding is a pure translation in `src/a_train/adapters/atp/signal.py`: each
-bound bit index yields transport-neutral core commands (one per defined
-position, ascending index order) which the manager submits through the
-ordinary command queue. **The protection state machine lives in the core**, in
-the train-level `stcs_atp` component (`domain/equipment.py`), so the flags
-are deterministic command records: ordered by the queue, visible to REST and
-WebSocket, restored by `reset`, and re-sent on reconnect by the
-latest-snapshot catch-up publish (§1.4).
+Decoding is a pure transport translation in `src/a_train/adapters/atp/signal.py`.
+The train-level `stcs_atp` component (`domain/equipment.py`) then applies each
+bit to a plain internal boolean state. These logical states are not part of
+`StcsAtpSnapshot` or REST/WebSocket output yet. They are reset to `false` by
+`reset` and a shorter signal leaves unmentioned bit positions unchanged.
 
-| Bit index | Meaning          | `"1"` asserts    | `"0"` asserts        |
-| --------- | ---------------- | ------------------ | ---------------------- |
-| 0         | reserved         | ignored            | ignored                |
-| 1         | traction cut-off | `traction_cut`     | `traction_release`     |
-| 2         | service brake    | `brake_service`    | `brake_service_off`    |
-| 3         | emergency brake  | `brake_emergency`  | `brake_emergency_off`  |
+| Bit index | Internal state |
+| --------- | -------------- |
+| 0 | `emergency_brake_1` |
+| 1 | `emergency_brake_2` |
+| 2 | `maximum_service_brake_7` |
+| 3 | `ato_enable` |
+| 4 | `turnback_activation` |
+| 5 | `powerless_passed_command` |
+| 6 | `cut_off_traction` |
+| 7 | `service_brake_4` |
+| 8 | `service_brake_1` |
+| 9 | `open_left_door_permit_1` |
+| 10 | `open_left_door_permit_2` |
+| 11 | `open_right_door_permit_1` |
+| 12 | `open_right_door_permit_2` |
+| 13 | `powerless_passed_select` |
+| 14 | `c2_authorized` |
+| 15 | `c2_zero_speed` |
+| 16 | `turnback_indicator` |
 
-The raw signal is recorded by the train's `stcs_atp` equipment. Only the most
-recently applied signal is retained in `last_command`; the equipment does not
-interpret commands or maintain protection flags.
+The raw signal is also retained as `last_command` for diagnostics. An empty or
+other non-binary command is invalid.
+
+The STCS ATP component also maintains a plain internal `train_out_states` map
+for the 30 train-side feedback bits. It is initialized with all values set to
+`false` and is not part of `StcsAtpSnapshot` yet. The following feedback states
+are derived from ATP command states: `emergency_brake_1_inner_feedback` mirrors
+`emergency_brake_1`, `emergency_brake_2_inner_feedback` mirrors
+`emergency_brake_2`, `emergency_brake_feedback` is true when either emergency
+brake is active, and `service_brake_7_feedback` mirrors
+`maximum_service_brake_7`:
+
+| Bit | Internal state |
+| ---: | --- |
+| 0 | `emergency_brake_1_inner_feedback` |
+| 1 | `emergency_brake_2_inner_feedback` |
+| 2 | `emergency_brake_feedback` |
+| 3 | `service_brake_7_feedback` |
+| 4 | `cab_activation` |
+| 5 | `direction_handle_forward_1` |
+| 6 | `direction_handle_forward_2` |
+| 7 | `direction_handle_backward` |
+| 8 | `sleep_signal` |
+| 9 | `traction_handle_traction` |
+| 10 | `traction_handle_brake` |
+| 11 | `turnback_button` |
+| 12 | `turnback_activation_feedback` |
+| 13 | `left_door_open_button` |
+| 14 | `right_door_open_button` |
+| 15 | `left_door_close_button` |
+| 16 | `right_door_close_button` |
+| 17 | `key_activation` |
+| 18 | `left_door_open_permit_feedback` |
+| 19 | `right_door_open_permit_feedback` |
+| 20 | `door_state_1` |
+| 21 | `door_state_2` |
+| 22 | `cbtc_authorized_command` |
+| 23 | `c2_control_state_1_1` |
+| 24 | `c2_control_state_2_1` |
+| 25 | `system_switch_c2` |
+| 26 | `system_switch_auto` |
+| 27 | `system_switch_cbtc` |
+| 28 | `c2_control_state_1_2` |
+| 29 | `c2_control_state_2_2` |
 
 The recorded command does not affect physics. Protection behavior can be added
 later without changing the transport command translation.
 
-Unbound bit positions (index ≥ 4) are silently ignored, so ATP can send
+Unbound bit positions (index ≥ 17) are silently ignored, so ATP can send
 longer strings today without breaking older or newer peers.
 
 ### 4.3 error (inbound)

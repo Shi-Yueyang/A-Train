@@ -47,6 +47,7 @@ class StcsAtpSnapshot:
     """Read-only view of the last command received by ATP equipment."""
 
     last_command: str | None = None
+    train_out_signal:str = ""
 
 
 @dataclass(frozen=True)

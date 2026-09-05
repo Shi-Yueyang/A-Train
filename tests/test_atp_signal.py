@@ -86,32 +86,64 @@ def _atp_state(train: Train):
     return next(entry.state for entry in train.get_snapshot().equipment if entry.key == "stcs_atp")
 
 
-def test_stcs_atp_records_last_command() -> None:
+def test_stcs_atp_decodes_binary_command_into_logical_states() -> None:
     equipment = StcsAtp("stcs_atp")
-    equipment.apply_control("brake_service")
+    equipment.apply_command("101100001")
     state = equipment.read_state()
-    assert state.last_command == "brake_service"
-    equipment.apply_control("brake_emergency")
-    assert equipment.read_state().last_command == "brake_emergency"
+    assert state.last_command == "101100001"
+    assert equipment.logical_states["emergency_brake_1"] is True
+    assert equipment.logical_states["emergency_brake_2"] is False
+    assert equipment.logical_states["maximum_service_brake_7"] is True
+    assert equipment.logical_states["ato_enable"] is True
+    assert equipment.logical_states["service_brake_1"] is True
+    assert equipment.train_out_states["emergency_brake_1_inner_feedback"] is True
+    assert equipment.train_out_states["emergency_brake_2_inner_feedback"] is False
+    assert equipment.train_out_states["emergency_brake_feedback"] is True
+    assert equipment.train_out_states["service_brake_7_feedback"] is True
+    assert equipment.read_state().train_out_signal == "101100000000000000000000000000"
 
 
-def test_stcs_atp_records_arbitrary_command() -> None:
+def test_stcs_atp_short_command_preserves_unmentioned_states() -> None:
     equipment = StcsAtp("stcs_atp")
-    equipment.apply_control("brake_whatever")
-    assert equipment.read_state().last_command == "brake_whatever"
+    equipment.apply_command("000000001")
+    equipment.apply_command("0")
+    assert equipment.logical_states["service_brake_1"] is True
+    assert equipment.logical_states["emergency_brake_1"] is False
+
+
+@pytest.mark.parametrize("command", ["", "2", "010x", "true"])
+def test_stcs_atp_rejects_non_binary_commands(command: str) -> None:
+    equipment = StcsAtp("stcs_atp")
+    with pytest.raises(ValueError, match="0.*1"):
+        equipment.apply_command(command)
 
 
 def test_stcs_atp_command_is_not_changed_by_train_step() -> None:
     train = _train()  # standing still: speed 0.0
 
     assert train.set_equipment(
-        EquipmentSet(key="stcs_atp", command="brake_emergency")
+        EquipmentSet(key="stcs_atp", command="10000000000000000")
     ).ok
 
     train.step(0.05)  # no motion demanded, speed stays 0.0
-    assert _atp_state(train).last_command == "brake_emergency"
+    assert _atp_state(train).last_command == "10000000000000000"
 
 
 def test_standard_consist_includes_stcs_atp() -> None:
     state = _atp_state(_train())
     assert state.last_command is None
+
+
+def test_stcs_atp_has_train_out_state_shape() -> None:
+    equipment = StcsAtp("stcs_atp")
+    states = equipment.train_out_states
+
+    assert len(states) == 30
+    assert all(value is False for value in states.values())
+    assert states["emergency_brake_1_inner_feedback"] is False
+    assert states["cab_activation"] is False
+    assert states["c2_control_state_2_2"] is False
+
+    states["cab_activation"] = True
+    assert equipment.train_out_states["cab_activation"] is False
+    assert equipment.read_state().train_out_signal == "0" * 30
