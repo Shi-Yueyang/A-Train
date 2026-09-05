@@ -413,10 +413,12 @@ reset()
 
 `apply_control(command)` validates the command's train and cab identity,
 updates requested control state, and returns a structured result. It does not
-advance time or mutate position, speed, or acceleration. `step(dt)` resolves
-acceleration from the held drive demand alone — no equipment affects the
-dynamics — and integrates the physical state. `get_snapshot()` returns a newly constructed immutable
-train snapshot; it never exposes the aggregate or mutable equipment objects.
+advance time or mutate position, speed, or acceleration. `step(dt)` is the
+aggregate coordination point: it collects reference-free intents emitted by
+equipment and resolves them centrally before integrating the physical state.
+The intent contract is present, but the current resolver has no domain effects
+yet. `get_snapshot()` returns a newly constructed immutable train snapshot; it
+never exposes the aggregate or mutable equipment objects.
 
 Represent configuration with frozen dataclasses and runtime state with private
 mutable dataclasses. Validate all numeric configuration and control inputs at
@@ -463,17 +465,21 @@ or modify train physical state directly.
 Equipment component
   key                       # equipment type identifier
   apply_control(...)        # plain-value command or delivery (per component)
+      emit_intents()            # reference-free requests for train-level effects
   read_state()
   reset()
 ```
 
-The aggregate coordinates components in a documented, stable order: apply
-accepted controls, resolve train dynamics, then construct the
-snapshot. New equipment such as vigilance, pantograph control, or passenger
-systems can be added by implementing this
-interface and extending the aggregate's configuration and snapshot types. Do
-not add protocol-specific behavior to an equipment component; adapters
-translate protocol data into equipment commands and publish snapshot data.
+An intent identifies a source equipment key, a target equipment key or the
+reserved `train` target, an action, and an optional value. Equipment never
+holds references to other equipment and never applies an intent itself. The
+aggregate coordinates components in a documented, stable order: apply
+accepted controls, collect and resolve intents, advance train dynamics, then
+construct the snapshot. New equipment such as vigilance, pantograph control,
+or passenger systems can be added by implementing this interface and extending
+the aggregate's configuration and snapshot types. Do not add protocol-specific
+behavior to an equipment component; adapters translate protocol data into
+equipment commands and publish snapshot data.
 
 Keep snapshot extensions backward-compatible: add an optional frozen nested
 snapshot for new equipment rather than changing existing physical-state field

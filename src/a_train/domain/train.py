@@ -28,6 +28,7 @@ from .equipment import (
     Door,
     Equipment,
     EquipmentContext,
+    EquipmentIntent,
     StcsAtp,
 )
 from .physics import (
@@ -261,9 +262,12 @@ class Train:
     def step(self, dt: float) -> None:
         """Integrate forward-only motion over one fixed step (§3.4).
 
-        No equipment affects the dynamics; the drive demand is the only input.
+        Equipment intents are collected before integration and resolved by the
+        aggregate. The current resolver is intentionally empty until domain
+        rules define the effects.
         """
 
+        self._resolve_equipment_intents(self._collect_equipment_intents())
         accel = resolve_acceleration(self._drive_demand, self._config)
         self._position, self._speed, self._acceleration = integrate_forward(
             position=self._position,
@@ -275,6 +279,20 @@ class Train:
             on_step = getattr(equipment, "step", None)
             if on_step is not None:
                 on_step(dt, self._speed)
+
+    def _collect_equipment_intents(self) -> tuple[EquipmentIntent, ...]:
+        """Collect cross-component requests without sharing equipment refs."""
+        return tuple(
+            intent
+            for equipment in self._equipment.values()
+            for intent in equipment.emit_intents()
+        )
+
+    def _resolve_equipment_intents(
+        self, intents: tuple[EquipmentIntent, ...]
+    ) -> None:
+        """Apply intents in one place once train rules are implemented."""
+        del intents
 
     def _equipment_snapshot(self) -> tuple[EquipmentSnapshot, ...]:
         """Group per-instance snapshots by type key for the train snapshot.

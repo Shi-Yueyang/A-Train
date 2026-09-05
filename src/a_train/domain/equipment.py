@@ -30,6 +30,21 @@ from .snapshots import BtmSnapshot, CabSnapshot, DoorSnapshot, StcsAtpSnapshot
 # -- Equipment protocol -------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class EquipmentIntent:
+    """A reference-free request for a train-level state change.
+
+    ``target`` is an equipment key or the reserved ``"train"`` target.
+    Intent resolution is owned by the train aggregate; equipment only emits
+    intents and never applies them to another component.
+    """
+
+    source: str
+    target: str
+    action: str
+    value: Any = None
+
+
 @runtime_checkable
 class Equipment(Protocol):
     """Common lifecycle interface for pluggable addon equipment instances."""
@@ -50,6 +65,10 @@ class Equipment(Protocol):
 
     def reset(self) -> None:
         """Restore configured initial state."""
+        ...
+
+    def emit_intents(self) -> tuple[EquipmentIntent, ...]:
+        """Report cross-equipment requests for the train to resolve."""
         ...
 
 
@@ -92,6 +111,9 @@ class Door:
     def reset(self) -> None:
         self._state = self._initial
 
+    def emit_intents(self) -> tuple[EquipmentIntent, ...]:
+        return ()
+
 
 # -- Cab ---------------------------------------------------------------------
 
@@ -130,6 +152,9 @@ class Cab:
 
     def reset(self) -> None:
         self._active = self._initial_active
+
+    def emit_intents(self) -> tuple[EquipmentIntent, ...]:
+        return ()
 
 
 # -- BTM ---------------------------------------------------------------------
@@ -173,6 +198,9 @@ class Btm:
     def reset(self) -> None:
         self._pending = None
         self._received_count = 0
+
+    def emit_intents(self) -> tuple[EquipmentIntent, ...]:
+        return ()
 
 
 # -- ATP protection state -------------------------------------------------------
@@ -285,6 +313,9 @@ class StcsAtp:
     def apply_control(self, command: str) -> None:
         """Apply an STCS command through the generic equipment interface."""
         self.apply_command(command)
+
+    def emit_intents(self) -> tuple[EquipmentIntent, ...]:
+        return ()
 
     @property
     def logical_states(self) -> dict[str, bool]:
