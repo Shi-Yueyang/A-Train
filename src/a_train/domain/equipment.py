@@ -32,6 +32,7 @@ from .controls import (
     DoorControl,
     EquipmentControl,
     StcsAtpControl,
+    TrainControl,
 )
 from .snapshots import BtmSnapshot, CabSnapshot, DoorSnapshot, StcsAtpSnapshot
 
@@ -315,10 +316,6 @@ class StcsAtp:
                 self._logical_states[state_name] = bit == "1"
         self._update_train_out_states()
 
-    def apply_command(self, command: str) -> None:
-        """Apply an STCS command through the unified control entry point."""
-        self.apply_control(StcsAtpControl(command))
-
     def _update_train_out_states(self) -> None:
         self._train_out_states["emergency_brake_1_inner_feedback"] = (
             self._logical_states["emergency_brake_1"]
@@ -335,7 +332,19 @@ class StcsAtp:
         )
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
-        return ()
+        brake_active = self._logical_states["maximum_service_brake_7"]
+        if not brake_active:
+            return ()
+        return (
+            EquipmentIntent(
+                source=self.key,
+                target="train",
+                control=TrainControl(
+                    cab_id=1,
+                    drive_demand=-1.0,
+                ),
+            ),
+        )
 
     @property
     def logical_states(self) -> dict[str, bool]:

@@ -10,6 +10,7 @@ import pytest
 
 from a_train.adapters.atp.protocol import parse_atp_command
 from a_train.adapters.atp.signal import decode_atp_signal
+from a_train.domain.controls import StcsAtpControl
 from a_train.domain.equipment import StcsAtp
 from a_train.domain.train import EquipmentSet, Train, TrainConfig
 
@@ -70,7 +71,7 @@ def test_reserved_and_unbound_positions_are_recorded_unchanged() -> None:
 # -- Core-side state machine (domain) ---------------------------------------------
 
 
-def _train() -> Train:
+def _train(*, initial_speed: float = 0.0) -> Train:
     return Train(
         TrainConfig(
             train_id=TID,
@@ -78,6 +79,7 @@ def _train() -> Train:
             initial_active_cab=1,
             max_traction_accel=1.5,
             max_decel=2.0,
+            initial_speed=initial_speed,
         )
     )
 
@@ -88,7 +90,7 @@ def _atp_state(train: Train):
 
 def test_stcs_atp_decodes_binary_command_into_logical_states() -> None:
     equipment = StcsAtp("stcs_atp")
-    equipment.apply_command("101100001")
+    equipment.apply_control(StcsAtpControl("101100001"))
     state = equipment.read_state()
     assert state.last_command == "101100001"
     assert equipment.logical_states["emergency_brake_1"] is True
@@ -105,17 +107,35 @@ def test_stcs_atp_decodes_binary_command_into_logical_states() -> None:
 
 def test_stcs_atp_short_command_preserves_unmentioned_states() -> None:
     equipment = StcsAtp("stcs_atp")
-    equipment.apply_command("000000001")
-    equipment.apply_command("0")
+    equipment.apply_control(StcsAtpControl("000000001"))
+    equipment.apply_control(StcsAtpControl("0"))
     assert equipment.logical_states["service_brake_1"] is True
     assert equipment.logical_states["emergency_brake_1"] is False
+
+
+def test_stcs_atp_maximum_service_brake_requests_train_deceleration() -> None:
+    train = _train(initial_speed=1.0)
+
+    assert train.set_equipment(
+        EquipmentSet(key="stcs_atp", command="001")
+    ).ok
+    train.step(0.05)
+    assert train.get_snapshot().acceleration == -2.0
+    train.step(0.05)
+    assert train.get_snapshot().acceleration == -2.0
+
+    assert train.set_equipment(
+        EquipmentSet(key="stcs_atp", command="000")
+    ).ok
+    train.step(0.05)
+    assert train.get_snapshot().acceleration == -2.0
 
 
 @pytest.mark.parametrize("command", ["", "2", "010x", "true"])
 def test_stcs_atp_rejects_non_binary_commands(command: str) -> None:
     equipment = StcsAtp("stcs_atp")
     with pytest.raises(ValueError, match="0.*1"):
-        equipment.apply_command(command)
+        equipment.apply_control(StcsAtpControl(command))
 
 
 def test_stcs_atp_command_is_not_changed_by_train_step() -> None:

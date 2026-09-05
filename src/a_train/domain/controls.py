@@ -29,7 +29,7 @@ class StcsAtpControl:
 
 @dataclass(frozen=True, kw_only=True)
 class TrainControl:
-    cab_id: int
+    cab_id: int | None = None
     drive_demand: float | None = None
 
 

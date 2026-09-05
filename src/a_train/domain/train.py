@@ -192,7 +192,7 @@ class Train:
         and the state is unchanged.
         """
 
-        if control.cab_id not in self._config.cab_ids:
+        if control.cab_id is not None and control.cab_id not in self._config.cab_ids:
             return ControlResult(
                 ok=False,
                 error=f"cab {control.cab_id} is not configured on {self._config.train_id}",
