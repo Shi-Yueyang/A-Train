@@ -140,7 +140,12 @@ while the channel is READY.
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
-    { "type": "stcs_atp", "key": "stcs_atp", "state": { "last_command": "brake_emergency" } }
+    { "type": "stcs_atp", "key": "stcs_atp", "state": {
+        "last_command": "0001000",
+        "train_out_signal": "000000000000000000000000000000",
+        "train_in_states": [ { "name": "ato_enable", "value": true } ],
+        "train_out_states": [ { "name": "c2_control_state_2_2", "value": false } ]
+    } }
   ]
 }
 ```
@@ -238,10 +243,11 @@ current flags are derived from the most recent assertion of each position.
 
 Decoding is a pure transport translation in `src/a_train/adapters/atp/signal.py`.
 The train-level `stcs_atp` component (`domain/equipment.py`) then applies each
-bit to a plain internal boolean state (the *train-in states*). These states
-are not part of
-`StcsAtpSnapshot` or REST/WebSocket output yet. They are reset to `false` by
-`reset` and a shorter signal leaves unmentioned bit positions unchanged.
+bit to a plain internal boolean state (the *train-in states*). Both state maps
+are exposed on the wire as `StcsAtpSnapshot.train_in_states` and
+`train_out_states`: `{name, value}` entries in bit order, visible in
+`TRAIN_STATE`, REST, and WebSocket. The train-in states are reset to `false`
+by `reset`, and a shorter signal leaves unmentioned bit positions unchanged.
 
 | Bit index | Train-in state |
 | --------- | -------------- |
@@ -268,7 +274,8 @@ other non-binary command is invalid.
 
 The STCS ATP component also maintains a plain internal `train_out_states` map
 for the 30 train-side feedback bits. It is initialized with all values set to
-`false` and is exposed as `train_out_signal` in `StcsAtpSnapshot`. The
+`false` and is exposed as `train_out_signal` (bit string) and
+`train_out_states` (named entries) in `StcsAtpSnapshot`. The
 following feedback states are derived from ATP command states:
 `emergency_brake_1_inner_feedback` mirrors `emergency_brake_1`,
 `emergency_brake_2_inner_feedback` mirrors `emergency_brake_2`,
@@ -413,11 +420,11 @@ simulator ──> {"type":"train_state",...}          (every published snapshot)
 simulator ──> {"type":"train_state",...}
 ATP     ──> {"type":"atp_command","drive_demand":-1.0}
 simulator ──> {"type":"train_state","acceleration":-2.0,...}  (deceleration applied)
-simulator ──> {"type":"train_state",...,"equipment":{"btm":[{"cab_id":1,"pending":true,"payload_b64":"ASOk/wCBcg==","received_count":1}]}}
+simulator ──> {"type":"train_state",...,"equipment":[...,{"type":"btm","key":"btm_1","state":{"cab_id":1,"pending":true,"payload_b64":"ASOk/wCBcg==","received_count":1}}]}
 ATP     ──> {"type":"atp_command","door":"open","drive_demand":0.5}
               (two commands: control, then equipment)
 ATP     ──> {"type":"atp_command","atp_signal":"0001000"}
               (emergency brake asserted on bit 3; state lands in the core)
-simulator ──> {"type":"train_state",...,"stcs_atp":{"last_command":"0111"}}
+simulator ──> {"type":"train_state",...,"equipment":[...,{"type":"stcs_atp","key":"stcs_atp","state":{"last_command":"0111",...,"train_in_states":[...],"train_out_states":[...]}}]}
 simulator ──> {"type":"error","code":"invalid_atp_command",...}  (on a bad request)
 ```

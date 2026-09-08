@@ -44,11 +44,26 @@ class BtmSnapshot:
 
 
 @dataclass(frozen=True)
+class SignalState:
+    """One named boolean signal, ordered by bit index in its snapshot list."""
+
+    name: str
+    value: bool
+
+
+@dataclass(frozen=True)
 class StcsAtpSnapshot:
-    """Read-only view of the last command received by ATP equipment."""
+    """Read-only view of the ATP protection equipment state.
+
+    ``train_in_states`` and ``train_out_states`` list every decoded signal by
+    name in bit order; ``train_out_signal`` is the same train-out state as one
+    bit string, and ``last_command`` the raw last ATP assertion.
+    """
 
     last_command: str | None = None
-    train_out_signal:str = ""
+    train_out_signal: str = ""
+    train_in_states: tuple[SignalState, ...] = ()
+    train_out_states: tuple[SignalState, ...] = ()
 
 
 @dataclass(frozen=True)

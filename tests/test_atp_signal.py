@@ -189,6 +189,23 @@ def test_door_state_feedback_follows_configured_and_reset_door_state() -> None:
     assert _atp_state(train).train_out_signal == "0" * 20 + "11" + "0" * 8
 
 
+def test_stcs_atp_snapshot_lists_named_states_in_bit_order() -> None:
+    equipment = StcsAtp("stcs_atp")
+    equipment.apply_control(StcsAtpControl("100"))
+    state = equipment.read_state()
+
+    assert [s.name for s in state.train_in_states] == list(
+        StcsAtp.ATP_TO_TRAIN_SIGNAL_BY_BIT.values()
+    )
+    assert state.train_in_states[0].value is True
+    assert state.train_in_states[1].value is False
+    assert [s.name for s in state.train_out_states] == list(
+        StcsAtp.TRAIN_TO_ATP_SIGNAL_BY_BIT.values()
+    )
+    assert state.train_out_states[0].name == "emergency_brake_1_inner_feedback"
+    assert state.train_out_states[0].value is True
+
+
 def test_stcs_atp_has_train_out_state_shape() -> None:
     equipment = StcsAtp("stcs_atp")
     states = equipment.train_out_states

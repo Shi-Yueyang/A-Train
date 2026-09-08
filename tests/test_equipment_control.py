@@ -116,6 +116,8 @@ async def test_door_state_reflects_in_stcs_atp_train_out_signal() -> None:
         atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp")
         assert atp["state"]["train_out_signal"][20] == "1"  # door_state_1
         assert atp["state"]["train_out_signal"][21] == "0"  # door_state_2
+        out = {s["name"]: s["value"] for s in atp["state"]["train_out_states"]}
+        assert out["door_state_1"] is True and out["door_state_2"] is False
 
         await _equipment(c, "right_door", command="open")
         await _equipment(c, "left_door", command="close")

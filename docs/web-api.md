@@ -55,7 +55,12 @@ type-specific `state` object:
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
-    { "type": "stcs_atp", "key": "stcs_atp", "state": { "last_command": null } }
+    { "type": "stcs_atp", "key": "stcs_atp", "state": {
+        "last_command": null,
+        "train_out_signal": "000000000000000000000000000000",
+        "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
+        "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": false } ]
+    } }
   ]
 }
 ```
@@ -285,7 +290,12 @@ by equipment type (§3.5).
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
-    { "type": "stcs_atp", "key": "stcs_atp", "state": { "last_command": null } }
+    { "type": "stcs_atp", "key": "stcs_atp", "state": {
+        "last_command": null,
+        "train_out_signal": "000000000000000000000000000000",
+        "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
+        "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": false } ]
+    } }
   ]
 }
 ```
@@ -308,6 +318,13 @@ by equipment type (§3.5).
 | `type` | string | Equipment behavior type. |
 | `key` | string | Unique equipment instance key. |
 | `state` | object | Type-specific state. |
+
+**`stcs_atp` state**: `last_command` is the raw ATP bit string (null until the
+first `atp_signal`); `train_in_states` and `train_out_states` are every
+decoded signal as `{name, value}` in bit order (17 train-in, 30 train-out;
+names and meanings in atp-api.md §4.2); `train_out_signal` is the train-out
+state as one bit string. `door_state_1` / `door_state_2` mirror the
+`left_door` / `right_door` open state.
 
 Future addons add entries without changing existing physical fields; a train
 without an equipment instance simply omits that entry.

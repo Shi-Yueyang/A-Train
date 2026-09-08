@@ -128,6 +128,73 @@ pre#train-state-pre {
   color: #888;
 }
 
+#train-stcs {
+  margin-top: 1rem;
+}
+
+#train-stcs:empty {
+  margin-top: 0;
+}
+
+.stcs-card {
+  display: block;
+}
+
+.stcs-raw {
+  margin: 0 0 0.6rem;
+  color: #888;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.stcs-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0 1.5rem;
+}
+
+.stcs-columns h4 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.stcs-columns table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+.stcs-columns td {
+  padding: 0.1rem 0.35rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.stcs-columns td.bit {
+  width: 2.5rem;
+  color: #888;
+  text-align: right;
+}
+
+.stcs-columns td.value {
+  width: 2rem;
+  text-align: right;
+  font-weight: 700;
+  color: #888;
+}
+
+.stcs-columns tr.on {
+  background: rgba(67, 160, 71, 0.14);
+}
+
+.stcs-columns tr.on td.value {
+  color: #43a047;
+}
+
 .message {
   min-height: 1.2rem;
   font-weight: 600;

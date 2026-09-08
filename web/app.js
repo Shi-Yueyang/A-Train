@@ -179,9 +179,11 @@ function renderTrainState() {
   const sel = selectedTrain();
   const pre = $("train-state-pre");
   const equipmentEl = $("train-equipment");
+  const stcsEl = $("train-stcs");
   if (!sel) {
     pre.textContent = "no trains";
     equipmentEl.replaceChildren();
+    stcsEl.replaceChildren();
     $("cab-state").textContent = "—";
     return;
   }
@@ -204,7 +206,8 @@ function renderTrainState() {
   ];
   pre.textContent = lines.join("\n");
 
-  renderEquipment(equipmentEl, equipment);
+  renderStcs(stcsEl, equipment.find((entry) => entry.type === "stcs_atp"));
+  renderEquipment(equipmentEl, equipment.filter((entry) => entry.type !== "stcs_atp"));
     const doorKey = $("door-side").value || "left_door";
     const door = equipment.find((entry) => entry.key === doorKey);
     const doorState = (door && door.state && door.state.state) || "—";
@@ -214,8 +217,7 @@ function renderTrainState() {
 
 function renderEquipment(container, equipment) {
   container.replaceChildren();
-    const entries = equipment;
-  if (!entries.length) {
+  if (!equipment.length) {
     const empty = document.createElement("p");
     empty.className = "equipment-empty";
     empty.textContent = "No equipment reported";
@@ -223,19 +225,80 @@ function renderEquipment(container, equipment) {
     return;
   }
 
-    for (const entry of entries) {
+  for (const entry of equipment) {
     const card = document.createElement("article");
     card.className = "equipment-card";
 
-      const heading = document.createElement("h3");
-      heading.textContent = `${entry.type} / ${entry.key}`;
+    const heading = document.createElement("h3");
+    heading.textContent = entry.key;
     card.appendChild(heading);
 
-      const details = document.createElement("pre");
-      details.textContent = JSON.stringify(entry.state, null, 2);
+    const details = document.createElement("pre");
+    details.textContent = JSON.stringify(entry.state, null, 2);
     card.appendChild(details);
     container.appendChild(card);
   }
+}
+
+function renderStcs(container, entry) {
+  container.replaceChildren();
+  if (entry) {
+    container.appendChild(buildStcsCard(entry));
+  }
+}
+
+function buildSignalTable(states) {
+  const table = document.createElement("table");
+  for (const [bit, signal] of (states || []).entries()) {
+    const row = document.createElement("tr");
+    if (signal.value) row.className = "on";
+    const bitCell = document.createElement("td");
+    bitCell.className = "bit";
+    bitCell.textContent = String(bit);
+    const nameCell = document.createElement("td");
+    nameCell.textContent = signal.name;
+    const valueCell = document.createElement("td");
+    valueCell.className = "value";
+    valueCell.textContent = signal.value ? "1" : "0";
+    row.append(bitCell, nameCell, valueCell);
+    table.appendChild(row);
+  }
+  return table;
+}
+
+function buildStcsCard(entry) {
+  const state = entry.state || {};
+  const card = document.createElement("article");
+  card.className = "equipment-card stcs-card";
+
+  const heading = document.createElement("h3");
+  heading.textContent = entry.key;
+  card.appendChild(heading);
+
+  const raw = document.createElement("p");
+  raw.className = "stcs-raw";
+  const command = document.createElement("span");
+  command.textContent = `last ATP command: ${state.last_command ?? "—"}`;
+  const signal = document.createElement("span");
+  signal.textContent = `train-out signal: ${state.train_out_signal || "—"}`;
+  raw.append(command, document.createElement("br"), signal);
+  card.appendChild(raw);
+
+  const columns = document.createElement("div");
+  columns.className = "stcs-columns";
+  for (const [title, states] of [
+    ["ATP → train (in)", state.train_in_states],
+    ["train → ATP (out)", state.train_out_states],
+  ]) {
+    const column = document.createElement("div");
+    const label = document.createElement("h4");
+    label.textContent = title;
+    column.appendChild(label);
+    column.appendChild(buildSignalTable(states));
+    columns.appendChild(column);
+  }
+  card.appendChild(columns);
+  return card;
 }
 
 // Sync a demand slider from the live snapshot, but never while it holds the

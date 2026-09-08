@@ -33,7 +33,7 @@ from .controls import (
     StcsAtpControl,
     TrainControl,
 )
-from .snapshots import BtmSnapshot, DoorSnapshot, StcsAtpSnapshot
+from .snapshots import BtmSnapshot, DoorSnapshot, SignalState, StcsAtpSnapshot
 
 # -- Equipment protocol -------------------------------------------------------
 
@@ -343,15 +343,18 @@ class StcsAtp:
         return self._train_out_states.copy()
 
     def read_state(self) -> StcsAtpSnapshot:
+        train_out = tuple(
+            SignalState(name=name, value=self._train_out_states[name])
+            for name in self.TRAIN_TO_ATP_SIGNAL_BY_BIT.values()
+        )
         return StcsAtpSnapshot(
             last_command=self._last_command,
-            train_out_signal="".join(
-                "1"
-                if self._train_out_states[state_name]
-                else "0"
-                for bit_index in range(len(self.TRAIN_TO_ATP_SIGNAL_BY_BIT))
-                for state_name in (self.TRAIN_TO_ATP_SIGNAL_BY_BIT[bit_index],)
+            train_out_signal="".join("1" if signal.value else "0" for signal in train_out),
+            train_in_states=tuple(
+                SignalState(name=name, value=self._train_in_states[name])
+                for name in self.ATP_TO_TRAIN_SIGNAL_BY_BIT.values()
             ),
+            train_out_states=train_out,
         )
 
     def reset(self) -> None:
