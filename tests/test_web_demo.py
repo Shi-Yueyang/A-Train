@@ -12,7 +12,7 @@ async def test_root_serves_demo_page(app_client) -> None:
     r = await app_client.get("/")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
-    assert "A-Train Simulator" in r.text
+    assert "A-Train API Tester" in r.text
     assert "app.js" in r.text
 
 

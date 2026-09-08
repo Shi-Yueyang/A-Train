@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>A-Train Simulator</title>
+    <title>A-Train API Tester</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <main id="app">
-      <h1>A-Train Simulator</h1>
+      <h1>A-Train API Tester</h1>
 
       <section id="status">
         <h2>Simulation</h2>
@@ -29,9 +29,9 @@
         <div class="controls">
           <label>Mode
             <select id="mode">
+              <option value="REALTIME">REALTIME</option>
               <option value="MANUAL">MANUAL</option>
               <option value="SCALED">SCALED</option>
-              <option value="REALTIME">REALTIME</option>
             </select>
           </label>
           <label>Multiplier <input id="multiplier" type="number" step="0.1" min="0.1" value="1.0" /></label>

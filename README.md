@@ -63,7 +63,8 @@ cabs 1 and 2).
 
 **Verify movement in `MANUAL` mode:**
 
-1. Leave the mode on `MANUAL` and click **Run**.
+1. Select `MANUAL` as the mode and click **Run** (Run applies the selected
+   mode for you; **Set Mode** stays available as its own operation).
 2. Drag the **Drive demand** slider up (e.g. `1.00`) and click
    **Apply Demand**.
 3. Set **Step (s)** to `0.50` and click **Step** a few times. Position and

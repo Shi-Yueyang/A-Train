@@ -596,18 +596,23 @@ function scheduleReconnect() {
 
 // -- Controls ----------------------------------------------------------------
 
+function timeModeBody() {
+  const mode = $("mode").value;
+  const mult = mode === "SCALED" ? parseFloat($("multiplier").value) : null;
+  return { mode, time_multiplier: mult };
+}
+
 function bind() {
-  $("btn-run").onclick = () => postCommand("/simulation/start", {});
+  $("btn-run").onclick = async () => {
+    const ok = await postCommand("/simulation/time-mode", timeModeBody());
+    if (ok) await postCommand("/simulation/start", {});
+  };
   $("btn-pause").onclick = () => postCommand("/simulation/pause", {});
   $("btn-reset").onclick = async () => {
     const ok = await postCommand("/simulation/reset", {});
     if (ok) state.dirty = {};
   };
-  $("btn-set-mode").onclick = () => {
-    const mode = $("mode").value;
-    const mult = mode === "SCALED" ? parseFloat($("multiplier").value) : null;
-    postCommand("/simulation/time-mode", { mode, time_multiplier: mult });
-  };
+  $("btn-set-mode").onclick = () => postCommand("/simulation/time-mode", timeModeBody());
   $("btn-step").onclick = () =>
     postCommand("/simulation/step", { delta: parseFloat($("step-delta").value) });
 
