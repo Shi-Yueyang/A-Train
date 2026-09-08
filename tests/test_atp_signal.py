@@ -12,7 +12,7 @@ from a_train.adapters.atp.protocol import parse_atp_command
 from a_train.adapters.atp.signal import decode_atp_signal
 from a_train.domain.controls import StcsAtpControl
 from a_train.domain.equipment import StcsAtp
-from a_train.domain.train import EquipmentSet, Train, TrainConfig
+from a_train.domain.train import EquipmentControlRequest, Train, TrainConfig
 
 TID, CAB = "TRAIN001", 1
 
@@ -116,19 +116,29 @@ def test_stcs_atp_short_command_preserves_unmentioned_states() -> None:
 def test_stcs_atp_maximum_service_brake_requests_train_deceleration() -> None:
     train = _train(initial_speed=1.0)
 
-    assert train.set_equipment(
-        EquipmentSet(key="stcs_atp", command="001")
-    ).ok
+    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp", command="001")).ok
     train.step(0.05)
     assert train.get_snapshot().acceleration == -2.0
     train.step(0.05)
     assert train.get_snapshot().acceleration == -2.0
 
-    assert train.set_equipment(
-        EquipmentSet(key="stcs_atp", command="000")
-    ).ok
+    # The protection brake is a state assertion: releasing the bit removes
+    # the braking force; the train coasts on its remaining speed.
+    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp", command="000")).ok
     train.step(0.05)
-    assert train.get_snapshot().acceleration == -2.0
+    assert train.get_snapshot().acceleration == 0.0
+    assert train.get_snapshot().speed > 0.0
+
+
+def test_stcs_atp_service_brake_does_not_drive_a_standing_train() -> None:
+    train = _train()  # standing still
+
+    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp", command="001")).ok
+    train.step(0.05)
+    snap = train.get_snapshot()
+    assert snap.speed == 0.0
+    assert snap.acceleration == 0.0
+    assert snap.drive_demand == 0.0  # protection no longer writes the legacy lever
 
 
 @pytest.mark.parametrize("command", ["", "2", "010x", "true"])
@@ -142,7 +152,7 @@ def test_stcs_atp_command_is_not_changed_by_train_step() -> None:
     train = _train()  # standing still: speed 0.0
 
     assert train.set_equipment(
-        EquipmentSet(key="stcs_atp", command="10000000000000000")
+        EquipmentControlRequest(key="stcs_atp", command="10000000000000000")
     ).ok
 
     train.step(0.05)  # no motion demanded, speed stays 0.0
@@ -159,14 +169,14 @@ def test_door_state_feedback_tracks_left_and_right_doors() -> None:
     assert _atp_state(train).train_out_signal[20] == "0"
     assert _atp_state(train).train_out_signal[21] == "0"
 
-    assert train.set_equipment(EquipmentSet(key="left_door", command="open")).ok
+    assert train.set_equipment(EquipmentControlRequest(key="left_door", command="open")).ok
     signal = _atp_state(train).train_out_signal
     assert signal[20] == "1" and signal[21] == "0"
 
-    assert train.set_equipment(EquipmentSet(key="right_door", command="open")).ok
+    assert train.set_equipment(EquipmentControlRequest(key="right_door", command="open")).ok
     assert _atp_state(train).train_out_signal == "0" * 20 + "11" + "0" * 8
 
-    assert train.set_equipment(EquipmentSet(key="left_door", command="close")).ok
+    assert train.set_equipment(EquipmentControlRequest(key="left_door", command="close")).ok
     assert _atp_state(train).train_out_signal == "0" * 20 + "01" + "0" * 8
 
 
@@ -183,7 +193,7 @@ def test_door_state_feedback_follows_configured_and_reset_door_state() -> None:
     )
     assert _atp_state(train).train_out_signal == "0" * 20 + "11" + "0" * 8
 
-    assert train.set_equipment(EquipmentSet(key="left_door", command="close")).ok
+    assert train.set_equipment(EquipmentControlRequest(key="left_door", command="close")).ok
     assert _atp_state(train).train_out_signal[20] == "0"
     train.reset()
     assert _atp_state(train).train_out_signal == "0" * 20 + "11" + "0" * 8

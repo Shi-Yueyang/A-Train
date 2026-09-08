@@ -13,7 +13,7 @@ import binascii
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ...domain.train import EquipmentSet, TrainControl
+from ...domain.train import EquipmentControlRequest, TrainControl
 from ...simulation.commands import EquipmentCommand, TrainControlCommand
 from ...simulation.core import SimulationCore
 from ...simulation.snapshots import SimulationSnapshot
@@ -170,11 +170,14 @@ async def set_equipment(
             data = base64.b64decode(body.data, validate=True)
         except (binascii.Error, ValueError):
             raise HTTPException(status_code=400, detail="data must be valid base64") from None
-    payload = EquipmentSet(
+    payload = EquipmentControlRequest(
         key=key,
         command=body.command,
         cab_id=body.cab_id,
         data=data,
+        mode=body.mode,
+        direction=body.direction,
+        acceleration=body.acceleration,
     )
     result = await core.submit_command(EquipmentCommand(train_id=train_id, payload=payload))
     _raise_on_error(result)

@@ -16,10 +16,11 @@ from typing import Any
 
 @dataclass(frozen=True)
 class CabSnapshot:
-    """Read-only view of one cab's native activation state."""
+    """Read-only view of one cab's native activation state and track facing."""
 
     cab_id: int
     active: bool = False
+    facing: str = "forward"
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,23 @@ class BtmSnapshot:
     pending: bool = False
     payload_b64: str | None = None
     received_count: int = 0
+
+
+@dataclass(frozen=True)
+class DrivingSystemSnapshot:
+    """Read-only view of one cab's driving system (driver-room handles).
+
+    ``mode`` is ``"traction"`` / ``"off"`` / ``"brake"``, ``direction`` is
+    ``"forward"`` / ``"off"`` / ``"backward"`` (cab-relative), and
+    ``acceleration`` is the handle effort in ``[0.0, 1.0]``. ``facing``
+    repeats the cab's track-facing for display.
+    """
+
+    cab_id: int = 0
+    facing: str = "forward"
+    mode: str = "off"
+    direction: str = "off"
+    acceleration: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -81,7 +99,11 @@ class TrainSnapshot:
 
     Physical fields keep their names and meanings across versions. Cab
     activation is native train state exposed as one entry per configured cab.
-    Equipment state is a stable tuple of individually addressed entries.
+    ``direction`` is derived from the current speed sign: ``"forward"``,
+    ``"backward"``, or ``"stopped"`` at zero speed. ``drive_demand`` is the
+    held legacy lever and has no effect while any driving system is engaged
+    (the engaged driving system overwrites it). Equipment state is a stable
+    tuple of individually addressed entries.
     """
 
     train_id: str
@@ -89,6 +111,6 @@ class TrainSnapshot:
     speed: float = 0.0
     acceleration: float = 0.0
     position: float = 0.0
-    direction: str = "forward"
+    direction: str = "stopped"
     drive_demand: float = 0.0
     equipment: tuple[EquipmentSnapshot, ...] = field(default_factory=tuple)

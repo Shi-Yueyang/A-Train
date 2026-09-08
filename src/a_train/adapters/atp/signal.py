@@ -7,8 +7,9 @@ intact; ``stcs_atp`` decodes it into internal train-in states.
 
 from __future__ import annotations
 
-from ...domain.train import EquipmentSet
+from ...domain.train import EquipmentControlRequest
 from ...simulation.commands import Command, EquipmentCommand
+
 
 def decode_atp_signal(bits: str, train_id: str, cab_id: int) -> list[Command]:
     """Create one command carrying the validated signal to STCS ATP."""
@@ -16,6 +17,6 @@ def decode_atp_signal(bits: str, train_id: str, cab_id: int) -> list[Command]:
     return [
         EquipmentCommand(
             train_id=train_id,
-            payload=EquipmentSet(key="stcs_atp", command=bits),
+            payload=EquipmentControlRequest(key="stcs_atp", command=bits),
         )
     ]

@@ -10,22 +10,26 @@ from __future__ import annotations
 from .equipment import (
     Btm,
     Door,
+    DrivingSystem,
     EquipmentContext,
+    StcsAtp,
 )
 from .physics import (
-    integrate_forward,
+    integrate,
     is_finite,
     is_normalized,
     is_positive_finite,
     resolve_acceleration,
+    resolve_driver_acceleration,
 )
 from .snapshots import (
     BtmSnapshot,
     CabSnapshot,
     DoorSnapshot,
+    DrivingSystemSnapshot,
     TrainSnapshot,
 )
-from .train import ControlResult, EquipmentSet, Train, TrainConfig, TrainControl
+from .train import ControlResult, EquipmentControlRequest, Train, TrainConfig, TrainControl
 
 __all__ = [
     "Btm",
@@ -34,15 +38,19 @@ __all__ = [
     "ControlResult",
     "Door",
     "DoorSnapshot",
+    "DrivingSystem",
+    "DrivingSystemSnapshot",
     "EquipmentContext",
-    "EquipmentSet",
+    "EquipmentControlRequest",
+    "StcsAtp",
     "Train",
     "TrainConfig",
     "TrainControl",
     "TrainSnapshot",
-    "integrate_forward",
+    "integrate",
     "is_finite",
     "is_normalized",
     "is_positive_finite",
     "resolve_acceleration",
+    "resolve_driver_acceleration",
 ]

@@ -63,7 +63,7 @@ class TrainControlCommand(Command):
 
 @dataclass(frozen=True, kw_only=True)
 class EquipmentCommand(Command):
-    """An equipment-set request submitted through the REST API."""
+    """An equipment-control request submitted through the REST API."""
 
     train_id: str
     payload: Any

@@ -45,9 +45,11 @@ curl http://127.0.0.1:8000/api/atp/status
 
 ## Testing the manual web demo (Phase 2.5)
 
-The browser demo is a manual verification tool for the Phase 1–2 behavior. It
-talks only to the REST API and refreshes after each accepted command; WebSocket
-delivery comes in Phase 4.
+The browser demo is a manual verification tool and a test client of the public
+API: it applies no restriction the API itself does not impose, and it exposes
+a control for every operation the API offers, addressed the same way —
+equipment by instance key (one panel per driving system, per door, per cab
+BTM). It talks only to the REST and WebSocket APIs.
 
 **Start it:**
 
@@ -68,11 +70,20 @@ cabs 1 and 2).
    speed should increase each step; acceleration shows the applied drive
    demand.
 4. Drag the **Drive demand** slider to a negative value (e.g. `-1.00`), click
-   **Apply Demand**, then **Step**. Speed must drop; it never goes negative
-   and position never decreases.
-5. Click **Open** on the doors, then raise **Drive demand** and click
-   **Apply Demand**. The door state flips immediately, but the train still
-   moves: equipment does not affect train dynamics in this version.
+   **Apply Demand**, then **Step**. Speed must drop toward zero and the legacy
+   demand never moves a standing train backward.
+5. Use the **Driving systems** fieldset: every cab's driving system gets its
+   own panel. On the `driving_1` panel set **Mode** `Traction`, **Direction**
+   `Forward`, raise **Acceleration**, click **Apply Handles**, then **Step**.
+   The driving system overwrites the legacy drive demand while its mode is
+   engaged; select **Direction** `Backward` to move the train to decreasing
+   position, and set **Mode** `Brake` to oppose the current motion. The
+   `driving_2` panel (cab 2 faces `backward`) moves the train the other way
+   for the same handle positions, and both panels are live at the same time.
+   Return a **Mode** to `Off` to give the legacy drive demand control again.
+6. Click **Open** on a door panel, then engage a driving system and **Step**.
+   The door state flips immediately, but the train still moves: doors do not
+   gate dynamics in this version.
 
 **Watch live state without refreshing:** the page keeps a WebSocket to `/ws`
 (status badge near the controls: `live` / `connecting…` / `disconnected`; it

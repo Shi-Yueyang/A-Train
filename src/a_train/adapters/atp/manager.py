@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from ...domain.train import EquipmentSet, TrainControl
+from ...domain.train import EquipmentControlRequest, TrainControl
 from ...simulation.commands import EquipmentCommand, TrainControlCommand
 from .client import AtpClient
 from .protocol import make_error, parse_atp_command
@@ -170,7 +170,7 @@ class AtpManager:
                 commands.append(
                     EquipmentCommand(
                         train_id=client.train_id,
-                        payload=EquipmentSet(key=door_key, command=door),
+                        payload=EquipmentControlRequest(key=door_key, command=door),
                     )
                 )
         if atp_signal is not None:

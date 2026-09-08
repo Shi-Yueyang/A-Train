@@ -39,9 +39,12 @@ browser never touches simulator internals.
 ## Cab representation
 
 Cab activation is native train state, not equipment. Every train exposes
-`cabs`: one `{ "cab_id": int, "active": bool }` entry per configured cab, in
-configured order. It changes through `POST /api/trains/{train_id}/commands`
-with `cab_id` plus `active`.
+`cabs`: one `{ "cab_id": int, "active": bool, "facing": string }` entry per
+configured cab, in configured order. `facing` is the cab's immutable track
+facing (`"forward"` drives toward increasing position, `"backward"` toward
+decreasing); the driving system maps its cab-relative direction handle through
+it. It changes through `POST /api/trains/{train_id}/commands` with `cab_id`
+plus `active`.
 
 ## Equipment representation
 
@@ -55,6 +58,8 @@ type-specific `state` object:
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
+    { "type": "driving_system", "key": "driving_2", "state": { "cab_id": 2, "facing": "backward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "stcs_atp", "key": "stcs_atp", "state": {
         "last_command": null,
         "train_out_signal": "000000000000000000000000000000",
@@ -215,7 +220,7 @@ step boundary.
 | Field            | Type           | Notes                                                                                                                                                             |
 | ---------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cab_id`       | integer        | Must be one of the train's configured cabs. Cabs carry no authority (§3.3); any configured cab is accepted. Identifies the cab whose native activation flag `active` sets. |
-| `drive_demand` | number or null | Signed lever in`[-1.0, 1.0]`: positive drives (traction limit), negative decelerates (decel limit). Omitted or null leaves it unchanged. |
+| `drive_demand` | number or null | Signed lever in `[-1.0, 1.0]`: positive drives (traction limit), negative decelerates toward zero (decel limit) and never moves a standing train rearward. Overwritten while any driving system is engaged. Omitted or null leaves it unchanged. |
 | `active`       | bool or null   | Sets this cab's native activation flag. Omitted or null leaves it unchanged; it never affects control acceptance or dynamics. |
 
 **Response 200**: `TrainResponse`.
@@ -239,6 +244,9 @@ with the component's error message on invalid input.
 | `command`   | string             | `door`, `stcs_atp`        | `"open"` / `"close"`; STCS ATP command. |
 | `cab_id`    | integer            | optional consistency check | Target cab, when applicable. |
 | `data`      | string             | `btm_1`, `btm_2` | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400. |
+| `mode`      | string             | `driving_1`, `driving_2`  | Driving-system mode handle: `"traction"` / `"off"` / `"brake"`. |
+| `direction` | string             | `driving_1`, `driving_2`  | Driving-system direction handle: `"forward"` / `"off"` / `"backward"` (cab-relative). |
+| `acceleration` | number          | `driving_1`, `driving_2`  | Driving-system acceleration handle: continuous effort in `[0.0, 1.0]`. |
 
 **Semantics per equipment key**:
 
@@ -247,6 +255,7 @@ with the component's error message on invalid input.
 | `left_door`, `right_door` | `command` `"open"` / `"close"` sets the selected door state. |
 | `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
 | `stcs_atp` | `command` is recorded as `last_command` without interpretation. |
+| `driving_1`, `driving_2` | Sets any subset of the three driver-room handles (no interlocks; each position is independently settable). While a cab's `mode` is `"traction"` or `"brake"`, that driving system **overwrites** the legacy `drive_demand` lever for every step: traction effort is applied in the direction-handle position mapped through the cab's facing (either travel direction is possible, from standstill too); brake effort opposes the current motion and produces no force at standstill. With `mode` `"off"` the legacy lever applies again. Engaged systems of several cabs act additively (net effort is clamped to the handle range). |
 
 **Example**:
 
@@ -278,8 +287,8 @@ by equipment type (§3.5).
 {
   "train_id": "TRAIN001",
   "cabs": [
-    { "cab_id": 1, "active": true },
-    { "cab_id": 2, "active": false }
+    { "cab_id": 1, "active": true, "facing": "forward" },
+    { "cab_id": 2, "active": false, "facing": "backward" }
   ],
   "speed": 0.5,
   "acceleration": 1.5,
@@ -290,6 +299,7 @@ by equipment type (§3.5).
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "stcs_atp", "key": "stcs_atp", "state": {
         "last_command": null,
         "train_out_signal": "000000000000000000000000000000",
@@ -303,12 +313,12 @@ by equipment type (§3.5).
 | Field            | Type   | Notes                                                           |
 | ---------------- | ------ | --------------------------------------------------------------- |
 | `train_id`     | string | Stable identifier.                                              |
-| `cabs`         | array  | Native cab state: one `{cab_id, active}` per configured cab, in configured order. |
-| `speed`        | number | m/s, never negative.                                            |
+| `cabs`         | array  | Native cab state: one `{cab_id, active, facing}` per configured cab, in configured order. |
+| `speed`        | number | m/s, signed: negative means rearward travel.                    |
 | `acceleration` | number | m/s², the value actually applied during the last step (§3.4). |
-| `position`     | number | m along the linear track, never decreases.                      |
-| `direction`    | string | Always`"forward"` in this version (forward-only model).       |
-| `drive_demand` | number | The held signed lever in`[-1.0, 1.0]`.                        |
+| `position`     | number | m along the linear track; may decrease with rearward motion.   |
+| `direction`    | string | Derived from the speed sign: `"forward"` (v > 0), `"backward"` (v < 0), `"stopped"` (v = 0). |
+| `drive_demand` | number | The held legacy signed lever in`[-1.0, 1.0]`; without an engaged driving system, negative values decelerate toward (and clamp at) zero and never move a standing train rearward. Ignored for any step in which a driving system or the ATP protection brake is engaged, but its value persists. |
 | `equipment`    | array | One `{type, key, state}` entry per equipment instance. |
 
 **`equipment` entries**:
@@ -324,7 +334,11 @@ first `atp_signal`); `train_in_states` and `train_out_states` are every
 decoded signal as `{name, value}` in bit order (17 train-in, 30 train-out;
 names and meanings in atp-api.md §4.2); `train_out_signal` is the train-out
 state as one bit string. `door_state_1` / `door_state_2` mirror the
-`left_door` / `right_door` open state.
+`left_door` / `right_door` open state. `direction_handle_forward_1` /
+`direction_handle_forward_2` / `direction_handle_backward` and
+`traction_handle_traction` / `traction_handle_brake` mirror the driving
+systems' raw handle positions (per-cab where the name is numbered;
+"any cab" for `direction_handle_backward` and the traction bits).
 
 Future addons add entries without changing existing physical fields; a train
 without an equipment instance simply omits that entry.
@@ -339,8 +353,9 @@ command body has no effect (extra fields are ignored).
 The equipment model is flat in every REST and WebSocket response. `equipment`
 is an array of entries shaped as `{ "type": string, "key": string, "state":
 object }`. The key uniquely identifies one instance, for example
-`left_door`, `right_door`, `btm_1`, or `stcs_atp`. Equipment commands address that instance
-directly through `/api/trains/{train_id}/equipment/{key}`; there is no implicit
+`left_door`, `right_door`, `btm_1`, `driving_1`, or `stcs_atp`. Equipment
+commands address that instance directly through
+`/api/trains/{train_id}/equipment/{key}`; there is no implicit
 type grouping or slot field.
 
 One-way live state stream (simulator → browser, §5.3). The client receives:

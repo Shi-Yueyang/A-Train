@@ -62,26 +62,27 @@
           </fieldset>
           <button id="btn-apply-demand">Apply Demand</button>
         </div>
-        <div class="controls">
-          <fieldset>
-            <legend>Doors</legend>
-            <label>Side
-              <select id="door-side">
-                <option value="left_door">Left</option>
-                <option value="right_door">Right</option>
-              </select>
-            </label>
-            <button id="btn-door-open">Open</button>
-            <button id="btn-door-close">Close</button>
-            <output id="door-state">closed</output>
-          </fieldset>
-        </div>
+        <fieldset id="driving-systems">
+          <legend>Driving systems (one panel per instance)</legend>
+          <div class="equipment-grid" id="driving-panels"></div>
+        </fieldset>
+        <fieldset id="doors-group">
+          <legend>Doors (one per instance)</legend>
+          <div class="equipment-grid" id="door-controls"></div>
+        </fieldset>
         <div class="controls btm-controls">
           <label class="btm-payload-label" for="btm-payload">BTM payload (hex)
             <textarea id="btm-payload" rows="2" placeholder="01 23 a4 ff 00 81 72"></textarea>
             <output id="btm-base64" class="btm-base64" aria-live="polite"></output>
           </label>
-          <button id="btn-send-btm">Send BTM</button>
+          <span id="btm-send-buttons" class="controls"></span>
+        </div>
+        <div class="controls">
+          <fieldset>
+            <legend>STCS ATP command (raw bit string, per instance)</legend>
+            <input id="stcs-command" type="text" size="12" placeholder="0001000" />
+            <span id="stcs-send-buttons" class="controls"></span>
+          </fieldset>
         </div>
       </section>
 

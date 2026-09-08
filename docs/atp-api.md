@@ -109,13 +109,14 @@ These three inbound/outbound message families are the complete protocol; unknown
 
 ## 3. Simulator → ATP Messages
 
-Cab activation is native train state: `TRAIN_STATE.cabs` carries one
-`{cab_id, active}` entry per configured cab. `TRAIN_STATE.equipment` is a
-flat array of independently addressed equipment entries. Each entry has
-`type`, `key`, and `state` fields. For example, the BTM state for cab 1 is
-the entry with `type: "btm"` and `key: "btm_1"`; ATP must not look for a
-type-grouped `equipment.btm` object; select the entry whose key is the target
-BTM instance instead.
+Cab activation and facing are native train state: `TRAIN_STATE.cabs` carries
+one `{cab_id, active, facing}` entry per configured cab.
+`TRAIN_STATE.equipment` is a flat array of independently addressed equipment
+entries. Each entry has `type`, `key`, and `state` fields. For example, the
+BTM state for cab 1 is the entry with `type: "btm"` and `key: "btm_1"`, and
+the cab 1 driver room is the entry with `type: "driving_system"` and
+`key: "driving_1"`; ATP must not look for a type-grouped `equipment.btm`
+object; select the entry whose key is the target instance instead.
 
 ### 3.1 TRAIN_STATE — cyclic world observation
 
@@ -133,13 +134,14 @@ while the channel is READY.
   "position": 15320.4,
   "direction": "forward",
   "cabs": [
-    { "cab_id": 1, "active": true },
-    { "cab_id": 2, "active": false }
+    { "cab_id": 1, "active": true, "facing": "forward" },
+    { "cab_id": 2, "active": false, "facing": "backward" }
   ],
   "equipment": [
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "stcs_atp", "key": "stcs_atp", "state": {
         "last_command": "0001000",
         "train_out_signal": "000000000000000000000000000000",
@@ -154,11 +156,11 @@ while the channel is READY.
 | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `train_id`     | string | The channel's train.                                                                                                                                   |
 | `cab_id`       | int    | The channel's cab; both cabs of one train get identical physical values, differing only in`cab_id`.                                                  |
-| `speed`        | number | m/s, never negative (forward-only model).                                                                                                              |
+| `speed`        | number | m/s, signed: negative means rearward travel.                                                                                                           |
 | `acceleration` | number | m/s² of the last integrated step.                                                                                                                     |
-| `position`     | number | m along the linear track from the fixed origin.                                                                                                        |
-| `direction`    | string | `"forward"` in the current model; reserved for future multi-direction movement.                                                                      |
-| `cabs`         | array | Native cab state: one `{cab_id, active}` entry per configured cab, in configured order. |
+| `position`     | number | m along the linear track from the fixed origin; may decrease with rearward motion.                                                                    |
+| `direction`    | string | Derived from the speed sign: `"forward"`, `"backward"`, or `"stopped"`.                                                                              |
+| `cabs`         | array | Native cab state: one `{cab_id, active, facing}` entry per configured cab, in configured order. `facing` is the cab's immutable track facing. |
 | `equipment`    | array | Flat canonical equipment entries, each shaped as `{type, key, state}`. |
 
 `TRAIN_STATE` remains a read-only observation: ATP derives its protection decisions from it and acts back on the train only through `ATP_COMMAND` (§4.1; architectural boundary §4.1 of architectural.md). The simulator publishes the full equipment state because ATP peers may need more than the ATP protection flags alone.
@@ -221,8 +223,11 @@ Processing pipeline (manager → core):
 Semantics of the two controls:
 
 - `drive_demand`: signed normalized lever. Positive scales the traction
-  limit, negative scales the deceleration limit; it persists until the next
-  demand.
+  limit, negative scales the deceleration limit as a brake-style force that
+  clamps at zero speed and never moves a standing train rearward; it persists
+  until the next demand. While any cab's driving system is engaged (its mode
+  handle not `off`) it **overwrites** the legacy lever, but the lever value
+  persists and applies again once every driving system is off.
 - `door`: flips the train-level door equipment state immediately; door state
   and movement are independent in this version.
 
@@ -322,8 +327,22 @@ current state as an equipment intent carrying `stcs_atp`'s own control type
 feedback whenever equipment changes, steps, resets, or is constructed with a
 configured open door.
 
-The recorded command does not affect physics. Protection behavior can be added
-later without changing the transport command translation.
+`direction_handle_forward_1` / `direction_handle_forward_2` (bits 5-6),
+`direction_handle_backward` (bit 7), `traction_handle_traction` (bit 9), and
+`traction_handle_brake` (bit 10) mirror the driving systems' raw handle
+positions (see §3.1 and architectural.md §3.5): the numbered bits are per-cab,
+the unnumbered ones are true if any cab asserts them. Each `driving_X`
+equipment asserts its full handle state to `stcs_atp` through an
+`StcsAtpControl` intent resolved by the train aggregate.
+
+Asserting `maximum_service_brake_7` (bit 2) is not merely recorded: the
+`stcs_atp` equipment emits a `train`-target intent asserting a full brake
+effort, which the train applies as a motion-opposing protection brake on every
+step the bit remains asserted, including rearward braking of a
+track-negative train. The brake clamps to a stop within a step and produces no
+force at standstill. The protection brake acts as a constraint alongside the
+driver: an engaged driving system cannot clear it, and releasing the bit
+(bit `0`) removes the braking force.
 
 Unbound bit positions (index ≥ 17) are silently ignored, so ATP can send
 longer strings today without breaking older or newer peers.

@@ -23,9 +23,9 @@ from typing import Any
 
 from .controls import (
     BtmControl,
-    Control,
     DoorControl,
-    EquipmentControl,
+    DriverControl,
+    DrivingSystemControl,
     StcsAtpControl,
     TrainControl,
 )
@@ -33,17 +33,19 @@ from .equipment import (
     EQUIPMENT_FACTORIES,
     Btm,
     Door,
+    DrivingSystem,
     Equipment,
     EquipmentContext,
     EquipmentIntent,
     StcsAtp,
 )
 from .physics import (
-    integrate_forward,
+    integrate,
     is_finite,
     is_normalized,
     is_positive_finite,
     resolve_acceleration,
+    resolve_driver_acceleration,
 )
 from .snapshots import CabSnapshot, EquipmentSnapshot, TrainSnapshot
 
@@ -61,21 +63,26 @@ class ControlResult:
 
 
 @dataclass(frozen=True)
-class EquipmentSet:
-    """A transport-neutral equipment-set request (§3.5).
+class EquipmentControlRequest:
+    """A transport-neutral equipment-control request (§3.5).
 
     The generic REST equipment endpoint maps its JSON body onto this command;
     the train dispatcher validates the fields each equipment type requires:
 
     - ``door``: ``command`` is ``"open"`` or ``"close"``.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
-        - ``stcs_atp``: ``command`` is recorded as the last received command.
+    - ``stcs_atp``: ``command`` is recorded as the last received command.
+    - ``driving_system``: ``mode``/``direction``/``acceleration`` handle
+      positions; every combination of fields may be set together.
     """
 
     key: str
     command: str | None = None
     cab_id: int | None = None
     data: bytes | None = None
+    mode: str | None = None
+    direction: str | None = None
+    acceleration: float | None = None
 
 
 @dataclass(frozen=True)
@@ -97,8 +104,11 @@ class EquipmentConfig:
 class TrainConfig:
     """Frozen per-train configuration (§3.2).
 
-    Acceleration limits are positive and finite. This version models
-    forward-only movement: initial speed is non-negative.
+    Acceleration limits are positive and finite. Motion is reversible along
+    the single linear track: speed may be negative (rearward). Each cab's
+    ``cab_facings`` entry is its track facing, ``+1`` (the cab drives toward
+    increasing position) or ``-1``; the driving system maps its cab-relative
+    direction handle through this facing.
     """
 
     train_id: str
@@ -109,6 +119,7 @@ class TrainConfig:
     initial_position: float = 0.0
     initial_speed: float = 0.0
     initial_door_state: str = "closed"
+    cab_facings: dict[int, int] | None = None
     equipment_configs: tuple[EquipmentConfig, ...] = ()
 
     def __post_init__(self) -> None:
@@ -125,16 +136,32 @@ class TrainConfig:
             raise ValueError("initial_active_cab must be one of cab_ids")
         if not is_finite(self.initial_position):
             raise ValueError("initial_position must be finite")
-        if not (is_finite(self.initial_speed) and self.initial_speed >= 0.0):
-            raise ValueError("initial_speed must be a non-negative finite number")
+        if not is_finite(self.initial_speed):
+            raise ValueError("initial_speed must be a finite number")
         if not is_positive_finite(self.max_traction_accel):
             raise ValueError("max_traction_accel must be a positive finite number")
         if not is_positive_finite(self.max_decel):
             raise ValueError("max_decel must be a positive finite number")
         if self.initial_door_state not in ("open", "closed"):
             raise ValueError("initial_door_state must be 'open' or 'closed'")
+        if self.cab_facings is None:
+            # Real driver rooms: the first cab faces track-increasing, the
+            # other faces the opposite way.
+            object.__setattr__(
+                self,
+                "cab_facings",
+                {cab_id: 1 if index == 0 else -1 for index, cab_id in enumerate(self.cab_ids)},
+            )
+        else:
+            facings = dict(self.cab_facings)
+            if set(facings) != set(self.cab_ids):
+                raise ValueError("cab_facings must cover exactly the configured cabs")
+            if any(facing not in (-1, 1) for facing in facings.values()):
+                raise ValueError("cab facings must be +1 or -1")
+            object.__setattr__(self, "cab_facings", facings)
         if not self.equipment_configs:
-            # Standard fit: one Btm per cab, two Doors, one StcsAtp.
+            # Standard fit: one Btm and one DrivingSystem per cab, two Doors,
+            # one StcsAtp.
             object.__setattr__(
                 self,
                 "equipment_configs",
@@ -144,6 +171,10 @@ class TrainConfig:
                         EquipmentConfig("door", "right_door"),
                     ]
                     + [EquipmentConfig("btm", f"btm_{cab_id}") for cab_id in self.cab_ids]
+                    + [
+                        EquipmentConfig("driving_system", f"driving_{cab_id}")
+                        for cab_id in self.cab_ids
+                    ]
                     + [EquipmentConfig("stcs_atp", "stcs_atp")]
                 ),
             )
@@ -164,7 +195,10 @@ class Train:
         # Build every addon equipment instance through the factory registry;
         # TrainConfig guarantees a fully populated equipment_configs. The
         # context carries train-scope values; params override per instance.
-        ctx = EquipmentContext(initial_door_state=config.initial_door_state)
+        ctx = EquipmentContext(
+            initial_door_state=config.initial_door_state,
+            cab_facings=config.cab_facings,
+        )
         self._equipment: dict[str, Equipment[Any]] = {
             eq_cfg.key: EQUIPMENT_FACTORIES[eq_cfg.type](eq_cfg.key, ctx, **eq_cfg.params)
             for eq_cfg in config.equipment_configs
@@ -175,6 +209,7 @@ class Train:
         self._acceleration = 0.0
 
         self._drive_demand = 0.0
+        self._driver_inputs: tuple[DriverControl, ...] = ()
         self._cab_active = {
             cab_id: cab_id == config.initial_active_cab for cab_id in config.cab_ids
         }
@@ -209,8 +244,8 @@ class Train:
             self._cab_active[control.cab_id] = control.active
         return ControlResult()
 
-    def set_equipment(self, command: EquipmentSet) -> ControlResult:
-        """Apply an equipment-set command immediately (no time advance).
+    def set_equipment(self, command: EquipmentControlRequest) -> ControlResult:
+        """Apply an equipment-control request immediately (no time advance).
 
         Every equipment state change is routed to the component and validated
         at the aggregate boundary.
@@ -218,7 +253,10 @@ class Train:
 
         equipment = self._equipment.get(command.key)
         if equipment is None:
-            return ControlResult(ok=False, error=f"no '{command.key}' equipment on {self._config.train_id}")
+            return ControlResult(
+                ok=False,
+                error=f"no '{command.key}' equipment on {self._config.train_id}",
+            )
 
         try:
             equipment.apply_control(self._equipment_control(equipment, command))
@@ -228,7 +266,7 @@ class Train:
         return ControlResult()
 
     @staticmethod
-    def _equipment_control(equipment: Equipment[Any], command: EquipmentSet):
+    def _equipment_control(equipment: Equipment[Any], command: EquipmentControlRequest):
         if isinstance(equipment, Door):
             if command.command is None:
                 raise ValueError("door requires a command")
@@ -241,19 +279,35 @@ class Train:
             if command.command is None:
                 raise ValueError("stcs_atp requires a command")
             return StcsAtpControl(command.command)
+        if isinstance(equipment, DrivingSystem):
+            if command.mode is None and command.direction is None and command.acceleration is None:
+                raise ValueError("driving system requires mode, direction, or acceleration")
+            return DrivingSystemControl(
+                mode=command.mode,
+                direction=command.direction,
+                acceleration=command.acceleration,
+            )
         raise ValueError(f"equipment '{command.key}' does not expose settable state")
 
     def step(self, dt: float) -> None:
-        """Integrate forward-only motion over one fixed step (§3.4).
+        """Integrate reversible motion over one fixed step (§3.4).
 
-        Equipment intents are collected before integration and resolved by the
-        aggregate. The current resolver is intentionally empty until domain
-        rules define the effects.
+        Equipment intents are collected before integration and resolved by
+        the aggregate. An engaged driving system (or an asserted ATP
+        protection brake) overwrites the legacy drive-demand lever for the
+        step; with no driver intents the lever applies unchanged.
         """
 
         self._resolve_equipment_intents(self._collect_equipment_intents())
-        accel = resolve_acceleration(self._drive_demand, self._config)
-        self._position, self._speed, self._acceleration = integrate_forward(
+        if self._driver_inputs:
+            traction = max(-1.0, min(1.0, sum(d.traction for d in self._driver_inputs)))
+            brake = max(0.0, min(1.0, sum(d.brake for d in self._driver_inputs)))
+            accel = resolve_driver_acceleration(
+                traction, brake, speed=self._speed, limits=self._config
+            )
+        else:
+            accel = resolve_acceleration(self._drive_demand, self._config, speed=self._speed)
+        self._position, self._speed, self._acceleration = integrate(
             position=self._position,
             speed=self._speed,
             acceleration=accel,
@@ -267,23 +321,29 @@ class Train:
     def _collect_equipment_intents(self) -> tuple[EquipmentIntent, ...]:
         """Collect cross-component requests without sharing equipment refs."""
         return tuple(
-            intent
-            for equipment in self._equipment.values()
-            for intent in equipment.emit_intents()
+            intent for equipment in self._equipment.values() for intent in equipment.emit_intents()
         )
 
-    def _resolve_equipment_intents(
-        self, intents: tuple[EquipmentIntent, ...]
-    ) -> None:
-        """Route intents without embedding equipment-specific action logic."""
+    def _resolve_equipment_intents(self, intents: tuple[EquipmentIntent, ...]) -> None:
+        """Route intents without embedding equipment-specific action logic.
+
+        Driver intents are state assertions: the aggregate rebuilds its
+        driver-input set from the current batch, so an input absent from the
+        batch (mode back to ``off``, brake released) lapses automatically.
+        """
+
+        driver_inputs: list[DriverControl] = []
         for intent in intents:
             if intent.target == "train":
                 if isinstance(intent.control, TrainControl):
                     self.apply_control(intent.control)
+                elif isinstance(intent.control, DriverControl):
+                    driver_inputs.append(intent.control)
                 continue
             target = self._equipment.get(intent.target)
             if target is not None:
                 target.apply_control(intent.control)
+        self._driver_inputs = tuple(driver_inputs)
 
     def _equipment_snapshot(self) -> tuple[EquipmentSnapshot, ...]:
         """Group per-instance snapshots by type key for the train snapshot.
@@ -300,16 +360,23 @@ class Train:
 
     def get_snapshot(self) -> TrainSnapshot:
         equipment = self._equipment_snapshot()
+        facings = self._config.cab_facings
         return TrainSnapshot(
             train_id=self._config.train_id,
             cabs=tuple(
-                CabSnapshot(cab_id=cab_id, active=active)
+                CabSnapshot(
+                    cab_id=cab_id,
+                    active=active,
+                    facing="forward" if facings[cab_id] == 1 else "backward",
+                )
                 for cab_id, active in self._cab_active.items()
             ),
             speed=self._speed,
             acceleration=self._acceleration,
             position=self._position,
-            direction="forward",
+            direction=(
+                "forward" if self._speed > 0.0 else "backward" if self._speed < 0.0 else "stopped"
+            ),
             drive_demand=self._drive_demand,
             equipment=equipment,
         )
@@ -322,8 +389,7 @@ class Train:
         self._acceleration = 0.0
         self._drive_demand = 0.0
         self._cab_active = {
-            cab_id: cab_id == self._config.initial_active_cab
-            for cab_id in self._config.cab_ids
+            cab_id: cab_id == self._config.initial_active_cab for cab_id in self._config.cab_ids
         }
         for eq in self._equipment.values():
             eq.reset()

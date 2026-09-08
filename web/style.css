@@ -123,6 +123,18 @@ pre#train-state-pre {
   overflow-wrap: anywhere;
 }
 
+#driving-panels {
+  grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr));
+}
+
+.driving-card .controls {
+  gap: 0.5rem;
+}
+
+.driving-card input[type="range"] {
+  width: 6rem;
+}
+
 .equipment-empty {
   margin: 0;
   color: #888;

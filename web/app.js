@@ -1,10 +1,13 @@
 // A-Train browser demo client (Phase 2.5).
 //
-// A thin client of the simulator. It subscribes to the `/ws` snapshot stream
-// so state updates continuously without polling, and submits run/pause/reset/
-// time-mode/step and train-control commands through the REST API. The page
-// renders every received snapshot; rejected commands surface their error
-// without changing the displayed state. The UI contains no simulation rules.
+// A thin test client of the simulator (architectural.md §5.1): it applies no
+// restriction the API itself does not impose, and every API operation is
+// reachable, addressed the same way the API addresses it — equipment by
+// instance key (one panel per driving system, door, BTM, STCS ATP), train
+// commands by cab. It subscribes to the `/ws` snapshot stream so state
+// updates continuously without polling, and submits commands through the REST
+// API. Rejected commands surface their error without changing the displayed
+// state. The UI contains no simulation rules.
 
 const API = "/api";
 const state = {
@@ -15,7 +18,10 @@ const state = {
   error: null,
   notice: null,
   ws: "connecting",
-  dirty: { drive: false },
+  // Per-control unsaved-intent flags keyed by control id ("drive") or
+  // equipment instance key ("driving_1"). A snapshot never overwrites a
+  // control the operator has edited but not yet applied.
+  dirty: {},
 };
 
 const $ = (id) => document.getElementById(id);
@@ -97,6 +103,7 @@ async function postCommand(path, body) {
     state.notice = null;
     renderMessage();
   }
+  return res.ok;
 }
 
 function fmt(n, d = 4) {
@@ -185,12 +192,13 @@ function renderTrainState() {
     equipmentEl.replaceChildren();
     stcsEl.replaceChildren();
     $("cab-state").textContent = "—";
+    renderEquipmentControls([]);
     return;
   }
   const equipment = sel.equipment || [];
   const cabs = sel.cabs || [];
   const cabText = cabs
-    .map((c) => `${c.cab_id}=${c.active ? "active" : "inactive"}`)
+    .map((c) => `${c.cab_id}=${c.active ? "active" : "inactive"} (${c.facing})`)
     .join(", ");
   const selected = cabs.find((c) => c.cab_id === state.selectedCab);
   $("cab-state").textContent = selected
@@ -202,17 +210,216 @@ function renderTrainState() {
     `position        ${fmt(sel.position)} m`,
     `speed           ${fmt(sel.speed)} m/s`,
     `acceleration    ${fmt(sel.acceleration)} m/s^2`,
+    `direction       ${sel.direction}`,
     `drive_demand    ${fmt(sel.drive_demand)}`,
   ];
   pre.textContent = lines.join("\n");
 
   renderStcs(stcsEl, equipment.find((entry) => entry.type === "stcs_atp"));
   renderEquipment(equipmentEl, equipment.filter((entry) => entry.type !== "stcs_atp"));
-    const doorKey = $("door-side").value || "left_door";
-    const door = equipment.find((entry) => entry.key === doorKey);
-    const doorState = (door && door.state && door.state.state) || "—";
-  $("door-state").textContent = doorState;
   syncSlider("drive", sel.drive_demand);
+  renderEquipmentControls(equipment);
+}
+
+// -- Instance-addressed equipment controls ------------------------------------
+//
+// One interactive card per equipment instance of the selected train. Cards
+// are rebuilt only when the instance set changes, so live snapshots cannot
+// steal focus; values are synced from each snapshot unless dirty.
+
+const controlSignature = {};
+
+function ensurePanels(container, signature, rebuild) {
+  if (controlSignature[container.id] === signature) return;
+  controlSignature[container.id] = signature;
+  for (const key of Object.keys(state.dirty)) {
+    if (key !== "drive") delete state.dirty[key];
+  }
+  container.replaceChildren(...rebuild());
+}
+
+function byType(equipment, type) {
+  return equipment.filter((entry) => entry.type === type);
+}
+
+function renderEquipmentControls(equipment) {
+  const trainId = state.selectedTrainId;
+  const prefix = (list) => list.map((e) => `${trainId}:${e.key}`).join(",");
+
+  ensurePanels(
+    $("driving-panels"),
+    prefix(byType(equipment, "driving_system")),
+    () => byType(equipment, "driving_system").map(buildDrivingCard)
+  );
+  ensurePanels(
+    $("door-controls"),
+    prefix(byType(equipment, "door")),
+    () => byType(equipment, "door").map(buildDoorCard)
+  );
+  ensurePanels(
+    $("btm-send-buttons"),
+    prefix(byType(equipment, "btm")),
+    () => byType(equipment, "btm").map(buildBtmSendButton)
+  );
+  ensurePanels(
+    $("stcs-send-buttons"),
+    prefix(byType(equipment, "stcs_atp")),
+    () => byType(equipment, "stcs_atp").map(buildStcsSendButton)
+  );
+
+  syncDrivingPanels(equipment);
+  syncDoorCards(equipment);
+}
+
+function dirtyKey(key) {
+  return `${state.selectedTrainId}:${key}`;
+}
+
+function selectEl(values, labels) {
+  const sel = document.createElement("select");
+  values.forEach((value, index) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = labels ? labels[index] : value;
+    sel.appendChild(option);
+  });
+  return sel;
+}
+
+function buildDrivingCard(entry) {
+  const key = entry.key;
+  const card = document.createElement("article");
+  card.className = "equipment-card driving-card";
+  card.dataset.key = key;
+
+  const heading = document.createElement("h3");
+  heading.textContent = key;
+  card.appendChild(heading);
+
+  const readout = document.createElement("p");
+  readout.className = "stcs-raw";
+  card.appendChild(readout);
+
+  const row = document.createElement("div");
+  row.className = "controls";
+  const mode = selectEl(["off", "traction", "brake"], ["Off", "Traction", "Brake"]);
+  const direction = selectEl(["off", "forward", "backward"], ["Off", "Forward", "Backward"]);
+  const accel = document.createElement("input");
+  accel.type = "range";
+  accel.min = "0";
+  accel.max = "1";
+  accel.step = "0.01";
+  accel.value = "0";
+  const accelVal = document.createElement("output");
+  accelVal.textContent = "0.00";
+
+  const markDirty = () => {
+    state.dirty[dirtyKey(key)] = true;
+    accelVal.textContent = fmt(parseFloat(accel.value), 2);
+  };
+  mode.onchange = markDirty;
+  direction.onchange = markDirty;
+  accel.oninput = markDirty;
+
+  const apply = document.createElement("button");
+  apply.textContent = "Apply Handles";
+  apply.onclick = async () => {
+    const ok = await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
+      mode: mode.value,
+      direction: direction.value,
+      acceleration: parseFloat(accel.value),
+    });
+    if (ok) delete state.dirty[dirtyKey(key)];
+  };
+
+  row.append(
+    labeled("Mode", mode),
+    labeled("Direction", direction),
+    labeled("Acceleration", accel, accelVal),
+    apply
+  );
+  card.appendChild(row);
+  card.widgets = { readout, mode, direction, accel, accelVal };
+  return card;
+}
+
+function labeled(text, ...controls) {
+  const label = document.createElement("label");
+  label.append(text);
+  for (const control of controls) label.append(control);
+  return label;
+}
+
+function syncDrivingPanels(equipment) {
+  for (const card of $("driving-panels").children) {
+    const entry = equipment.find((e) => e.key === card.dataset.key);
+    if (!entry || !card.widgets) continue;
+    const s = entry.state;
+    const w = card.widgets;
+    w.readout.textContent =
+      `cab ${s.cab_id} · facing ${s.facing} · ${s.mode}/${s.direction}/${fmt(s.acceleration, 2)}`;
+    if (state.dirty[dirtyKey(card.dataset.key)]) continue;
+    w.mode.value = s.mode;
+    w.direction.value = s.direction;
+    w.accel.value = String(s.acceleration);
+    w.accelVal.textContent = fmt(s.acceleration, 2);
+  }
+}
+
+function buildDoorCard(entry) {
+  const key = entry.key;
+  const card = document.createElement("article");
+  card.className = "equipment-card";
+  card.dataset.key = key;
+
+  const heading = document.createElement("h3");
+  heading.textContent = key;
+  card.appendChild(heading);
+
+  const readout = document.createElement("p");
+  readout.className = "stcs-raw";
+  card.appendChild(readout);
+
+  const row = document.createElement("div");
+  row.className = "controls";
+  for (const command of ["open", "close"]) {
+    const button = document.createElement("button");
+    button.textContent = command === "open" ? "Open" : "Close";
+    button.onclick = () =>
+      postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, { command });
+    row.appendChild(button);
+  }
+  card.appendChild(row);
+  card.widgets = { readout };
+  return card;
+}
+
+function syncDoorCards(equipment) {
+  for (const card of $("door-controls").children) {
+    const entry = equipment.find((e) => e.key === card.dataset.key);
+    if (!entry || !card.widgets) continue;
+    card.widgets.readout.textContent = `state: ${entry.state.state}`;
+  }
+}
+
+function buildBtmSendButton(entry) {
+  const key = entry.key;
+  const button = document.createElement("button");
+  button.textContent = `Send → ${key}`;
+  button.onclick = () => sendBtmPayload(key);
+  return button;
+}
+
+function buildStcsSendButton(entry) {
+  const key = entry.key;
+  const button = document.createElement("button");
+  button.textContent = `Send → ${key}`;
+  button.onclick = async () => {
+    await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
+      command: $("stcs-command").value,
+    });
+  };
+  return button;
 }
 
 function renderEquipment(container, equipment) {
@@ -393,10 +600,8 @@ function bind() {
   $("btn-run").onclick = () => postCommand("/simulation/start", {});
   $("btn-pause").onclick = () => postCommand("/simulation/pause", {});
   $("btn-reset").onclick = async () => {
-    await postCommand("/simulation/reset", {});
-    if (!state.error) {
-      state.dirty.drive = false;
-    }
+    const ok = await postCommand("/simulation/reset", {});
+    if (ok) state.dirty = {};
   };
   $("btn-set-mode").onclick = () => {
     const mode = $("mode").value;
@@ -410,7 +615,7 @@ function bind() {
     state.selectedTrainId = e.target.value;
     const sel = selectedTrain();
     state.selectedCab = sel ? sel.cabs[0].cab_id : null;
-    state.dirty.drive = false;
+    state.dirty = {};
     render();
   };
   $("cab-select").onchange = (e) => {
@@ -423,13 +628,11 @@ function bind() {
     $("drive-val").textContent = fmt(parseFloat(e.target.value), 2);
   };
   $("btn-apply-demand").onclick = async () => {
-    await postCommand(`/trains/${state.selectedTrainId}/commands`, {
+    const ok = await postCommand(`/trains/${state.selectedTrainId}/commands`, {
       cab_id: state.selectedCab,
       drive_demand: parseFloat($("drive").value),
     });
-    if (!state.error) {
-      state.dirty.drive = false;
-    }
+    if (ok) delete state.dirty.drive;
   };
   $("btn-cab-activate").onclick = () =>
     postCommand(`/trains/${state.selectedTrainId}/commands`, {
@@ -441,20 +644,11 @@ function bind() {
       cab_id: state.selectedCab,
       active: false,
     });
-  $("btn-door-open").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/equipment/${$("door-side").value}`, {
-      command: "open",
-    });
-  $("btn-door-close").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/equipment/${$("door-side").value}`, {
-      command: "close",
-    });
-  $("btn-send-btm").onclick = () =>
-    sendBtmPayload();
+
   $("btm-payload").oninput = renderBtmEncoding;
 }
 
-async function sendBtmPayload() {
+async function sendBtmPayload(key) {
   let data;
   try {
     data = hexToBase64($("btm-payload").value);
@@ -464,9 +658,7 @@ async function sendBtmPayload() {
     renderMessage();
     return;
   }
-    await postCommand(`/trains/${state.selectedTrainId}/equipment/btm_${state.selectedCab}`, {
-    data,
-  });
+  await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, { data });
 }
 
 bind();

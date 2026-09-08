@@ -66,11 +66,26 @@ class EquipmentSetRequest(BaseModel):
     data: str | None = Field(
         default=None, description="Base64-encoded opaque payload (btm, atp-api.md §3.2)."
     )
+    mode: str | None = Field(
+        default=None,
+        description="Driving-system mode handle: 'traction', 'off', or 'brake'.",
+    )
+    direction: str | None = Field(
+        default=None,
+        description="Driving-system direction handle: 'forward', 'off', or 'backward'.",
+    )
+    acceleration: float | None = Field(
+        default=None,
+        description="Driving-system acceleration handle, continuous effort in [0.0, 1.0].",
+    )
 
 
 class CabResponse(BaseModel):
     cab_id: int
     active: bool
+    facing: str = Field(
+        description="Cab track facing: 'forward' drives toward increasing position."
+    )
 
 
 class TrainResponse(BaseModel):
@@ -119,7 +134,9 @@ def _serialize_equipment(equipment: tuple[object, ...]) -> list[object]:
 
 
 def _cabs_to_response(snap: TrainSnapshot) -> list[CabResponse]:
-    return [CabResponse(cab_id=cab.cab_id, active=cab.active) for cab in snap.cabs]
+    return [
+        CabResponse(cab_id=cab.cab_id, active=cab.active, facing=cab.facing) for cab in snap.cabs
+    ]
 
 
 def train_snapshot_to_response(snap: TrainSnapshot) -> TrainResponse:

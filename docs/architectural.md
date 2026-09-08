@@ -313,16 +313,19 @@ reproduced exactly.
 
 Equipment is modeled as a flat collection of uniquely keyed instances. Each
 instance has a behavior `type` and an instance `key`; train-scoped equipment
-such as `left_door` and `right_door`, and cab-scoped equipment such as `btm_1`, use the same
-addressing model. Snapshots preserve this shape as an array of `{type, key,
+such as `left_door` and `right_door`, and cab-scoped equipment such as `btm_1`
+and `driving_1`, use the same addressing model. Snapshots preserve this shape as an array of `{type, key,
 state}` entries. Adapters address equipment by key and do not infer identity
 from list position or an implicit slot.
 
 ## 3.1 Responsibility and Boundary
 
 The train model owns mutable train state and converts accepted control commands
-into physical motion. In this version no train-facing equipment affects the
-physical integration; future train rules may explicitly define such effects. It does not know whether a command originated from the
+into physical motion. Train-facing equipment acts on that motion only through
+reference-free intents resolved by the train aggregate: driving systems assert
+the driver request that overwrites the legacy drive-demand lever while
+engaged, and an asserted ATP protection brake applies as a motion-opposing
+constraint the driver cannot clear. It does not know whether a command originated from the
 browser, an ATP process, or a test. Adapters identify the train and cab, then
 submit a transport-neutral command to the simulation core.
 
@@ -339,23 +342,28 @@ Each train has immutable configuration and mutable runtime state.
 
 | Category       | Required values                                                                                                            |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Configuration  | Train ID, one or two cab IDs, initial cab activation flags, initial position, maximum traction acceleration, and maximum deceleration. |
-| Physical state | Position in metres, speed in metres per second, and acceleration in metres per second squared.                              |
-| Control state  | Signed drive demand and each cab's activation flag. Door state lives in door equipment (§3.5). |
+| Configuration  | Train ID, one or two cab IDs, each cab's track facing (`+1`/`-1`), initial cab activation flags, initial position, maximum traction acceleration, and maximum deceleration. |
+| Physical state | Position in metres, signed speed in metres per second, and signed acceleration in metres per second squared.               |
+| Control state  | Signed drive-demand lever and each cab's activation flag. Door state and driver-room handle state live in equipment (§3.5). |
 
 Cab activation is native train state owned directly by the train aggregate and
-published as one `{cab_id, active}` entry per configured cab in every train
-snapshot; it is not equipment. The cab activation flags and initial physical
+published as one `{cab_id, active, facing}` entry per configured cab in every
+train snapshot; it is not equipment. Each cab's facing is immutable
+configuration describing which way the driver room looks along the track: the
+default is the first cab facing track-increasing and the second cab facing the
+opposite way. The cab facing and initial physical
 state are supplied by simulator configuration. `reset` restores those
 configured values and clears all control state, including each cab's
-activation flag and the door state.
+activation flag, the door state, and the driving-system handle positions.
 
 Acceleration limits are positive, finite, per-train configuration values.
 Drive demand is a signed, normalized lever in `[-1.0, 1.0]`: positive scales
-the maximum traction acceleration, negative scales the maximum deceleration.
-The model knows force and speed only; there is no separate brake concept.
-This version models forward-only movement: position never decreases and speed
-never becomes negative.
+the maximum traction acceleration, negative scales the maximum deceleration as
+a brake-style force. Movement is reversible along the single linear track:
+signed speed and position may become negative, driven by the driving system's
+traction (see §3.3 and §3.5); the legacy drive-demand lever itself never moves
+a standing train rearward, and the driving system overwrites it for any step
+while engaged.
 
 ## 3.3 Controls
 
@@ -365,7 +373,7 @@ or dynamics:
 
 | Command              | Range or value     | Effect                                                                                                  |
 | -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
-| Drive demand         | `-1.0` to `1.0` | Signed normalized force lever: positive requests a proportion of maximum traction acceleration, negative requests a proportion of maximum deceleration. |
+| Drive demand         | `-1.0` to `1.0` | Signed normalized force lever: positive requests a proportion of maximum traction acceleration, negative requests a proportion of maximum deceleration as a brake-style force that never moves a standing train rearward. Overwritten for any step while a driving system is engaged (§3.5). |
 | Cab activation       | True or false      | Sets the native activation flag of the cab identified by the command.                                   |
 | Door command         | Open or close      | Changes the train door state.                                                                            |
 
@@ -373,30 +381,51 @@ or dynamics:
 
 The simulation core updates every train once for each fixed simulation step in
 stable train-ID order. For a step duration `dt`, the train resolves one
-acceleration value from the signed drive demand:
+signed acceleration value. With no engaged driver intent, it resolves from
+the signed drive demand:
 
 1. If drive demand is greater than zero, use maximum traction acceleration scaled by the demand.
-2. Otherwise, if drive demand is less than zero, use negative maximum deceleration scaled by the demand magnitude.
+2. Otherwise, if drive demand is less than zero, use negative maximum deceleration scaled by the demand magnitude, except at standstill where the brake-style lever produces no force.
 3. Otherwise, use zero acceleration.
 
-The model integrates the resolved acceleration over `dt`, clamps the resulting
-speed to zero or greater, and updates position using the average of the prior
-and resulting speed. If deceleration would bring the train to rest within a
-step, the model clamps speed to zero and uses only the distance travelled
-before stopping. It must not create reverse movement through numerical
-integration.
+While any driving system or ATP protection brake is engaged, the train
+instead resolves the net signed traction effort (each mapped through its
+cab's facing into track-relative terms) against the traction limit plus the
+net brake effort against the deceleration limit; a brake force always opposes
+the current motion and is zero at standstill. The legacy lever is overwritten
+for such a step but its value persists.
+
+The model integrates the resolved acceleration over `dt` with signed speed and
+updates position using the average of the prior and resulting speed. Motion is
+reversible: a force applied at standstill starts moving the train in its own
+direction, so rearward traction decreases position. When the net force carries
+the train across zero speed within a step, the model clamps speed to zero and
+uses only the distance travelled before stopping, in either direction.
 
 Acceleration recorded in the public snapshot is the acceleration actually
 applied during that step. At standstill with no effective drive command, it
-is zero.
+is zero. Snapshot `direction` is derived from the speed sign: `"forward"`,
+`"backward"`, or `"stopped"` at zero speed.
 
 ## 3.5 Train-Facing Equipment Boundary
 
-Doors, BTM, and ATP protection state are train-local equipment. Their
-state may be included in a train snapshot, but their transport and protocol
-handling remain outside the train model. Cab activation is not equipment; it
-is native train state owned by the aggregate (§3.2) and addressed through
-train controls, not the equipment endpoint.
+Doors, BTM, ATP protection state, and each cab's driving system are
+train-local equipment. Their state may be included in a train snapshot, but
+their transport and protocol handling remain outside the train model. Cab
+activation is not equipment; it is native train state owned by the aggregate
+(§3.2) and addressed through train controls, not the equipment endpoint.
+
+Each cab's driving system represents the real driver room: a mode handle
+(`traction` / `off` / `brake`), a direction handle (`forward` / `off` /
+`backward`, cab-relative), and a continuous acceleration handle
+(`[0.0, 1.0]`). The handles have no interlock; their "off" positions are the
+mutual neutral states. The system maps its handles through the cab's immutable
+track facing and asserts the result to the train through a `train`-target
+intent while its mode handle is engaged, overwriting the legacy drive-demand
+lever; a released (off) intent lapses and the lever applies again. Engaged
+systems of several cabs act additively; cabs still carry no authority. Each
+driving system also asserts its raw handle positions to `stcs_atp` as a
+feedback intent, the same pattern as door state.
 
 BTM payloads are opaque byte arrays. The train model can receive a BTM
 delivery request for a cab, but does not interpret its contents; the ATP
@@ -406,8 +435,9 @@ adapter delivers the payload over the protocol.
 
 Implement the train model in `domain/train.py` as the aggregate that owns one
 train's mutable state. Keep calculations that do not require aggregate state
-in `domain/physics.py`, keep cab activation state on the aggregate itself, and
-keep door, BTM, and ATP-brake behavior in `domain/equipment.py`. The
+in `domain/physics.py`, keep cab activation and facing state on the aggregate
+itself, and
+keep door, BTM, ATP-brake, and driving-system behavior in `domain/equipment.py`. The
 simulation core calls only a
 small aggregate API:
 
@@ -423,9 +453,13 @@ updates requested control state, and returns a structured result. It does not
 advance time or mutate position, speed, or acceleration. `step(dt)` is the
 aggregate coordination point: it collects reference-free intents emitted by
 equipment and resolves them centrally before integrating the physical state.
-The resolver applies `train`-target intents as train controls and routes
-equipment-target intents to the target's `apply_control()` (e.g. door state
-feedback into `stcs_atp`); it also runs after every accepted equipment
+The resolver applies `train`-target `TrainControl` intents as train controls,
+rebuilds its driver-input set from the `train`-target driver intents in the
+current batch (state assertions: an absent input lapses, so a released
+protection brake or a returned-to-off driving handle stops affecting the
+next step), and routes equipment-target intents to the target's
+`apply_control()` (e.g. door and driving-system handle feedback into
+`stcs_atp`); it also runs after every accepted equipment
 control, after reset, and once at construction. `get_snapshot()` returns a newly constructed immutable train snapshot; it
 never exposes the aggregate or mutable equipment objects.
 
@@ -437,30 +471,32 @@ normalized demands must be in the inclusive range `-1.0` through `1.0`.
 ### Physics Integration
 
 `physics.py` should provide pure functions for resolving acceleration and
-integrating forward-only motion. The aggregate supplies the prior physical
-state, effective control state, configured limits, and `dt`; the functions
-return the resulting physical state without side effects. Keep the stop-within-
-a-step calculation in this module so every train type applies the same
-zero-speed clamping rule.
+integrating reversible signed motion. The aggregate supplies the prior
+physical state, effective control state, configured limits, and `dt`; the
+functions return the resulting physical state without side effects. Keep the
+stop-within-a-step calculation in this module so every train type applies the
+same zero-crossing clamping rule.
 
 The first implementation should use constant acceleration over a fixed step.
-For a train with initial speed $v_0$, resolved acceleration $a$, and step
+For a train with initial speed $v_0$, resolved signed acceleration $a$, and step
 duration $dt$, calculate the unconstrained speed as:
 
 $$
 v_1 = v_0 + a \cdot dt
 $$
 
-When $v_1 \geq 0$, advance position using:
+When the force does not carry the train across zero ($v_0 \cdot v_1 \geq 0$,
+which includes starting from standstill in either direction), advance position
+using:
 
 $$
 x_1 = x_0 + \frac{v_0 + v_1}{2} \cdot dt
 $$
 
-When deceleration would make $v_1 < 0$, calculate the stopping duration
-$t_{stop} = -v_0 / a$, advance only for $t_{stop}$, and return zero speed and
-zero acceleration. This makes manual and wall-clock modes share identical
-train movement behavior.
+When the net force would cross zero speed within the step, calculate the
+stopping duration $t_{stop} = -v_0 / a$, advance only for $t_{stop}$, and
+return zero speed and zero acceleration. This makes manual and wall-clock
+modes share identical train movement behavior.
 
 ### Extensible Equipment
 
@@ -567,6 +603,14 @@ boundary that makes this safe is §4.1: ATP requests, physics decides.
 # 5. Web & API
 
 ## 5.1 Web Architecture
+
+The web UI is a **test tool for the public API**: it must not apply any
+restriction the API itself does not impose. Whatever the REST API can do must
+be reachable from the page, addressed the same way the API addresses it —
+equipment by instance key (every `driving_1`, `driving_2`, `left_door`, …
+gets its own control), not through UI-only scoping such as a selector that
+hides sibling instances. The UI mirrors API validation errors but never
+pre-validates, gates, or aggregates commands the API accepts separately.
 
 The web UI should communicate only with the simulator.
 
