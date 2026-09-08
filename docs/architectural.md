@@ -423,8 +423,10 @@ updates requested control state, and returns a structured result. It does not
 advance time or mutate position, speed, or acceleration. `step(dt)` is the
 aggregate coordination point: it collects reference-free intents emitted by
 equipment and resolves them centrally before integrating the physical state.
-The intent contract is present, but the current resolver has no domain effects
-yet. `get_snapshot()` returns a newly constructed immutable train snapshot; it
+The resolver applies `train`-target intents as train controls and routes
+equipment-target intents to the target's `apply_control()` (e.g. door state
+feedback into `stcs_atp`); it also runs after every accepted equipment
+control, after reset, and once at construction. `get_snapshot()` returns a newly constructed immutable train snapshot; it
 never exposes the aggregate or mutable equipment objects.
 
 Represent configuration with frozen dataclasses and runtime state with private

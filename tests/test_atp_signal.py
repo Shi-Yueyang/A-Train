@@ -88,16 +88,16 @@ def _atp_state(train: Train):
     return next(entry.state for entry in train.get_snapshot().equipment if entry.key == "stcs_atp")
 
 
-def test_stcs_atp_decodes_binary_command_into_logical_states() -> None:
+def test_stcs_atp_decodes_binary_command_into_train_in_states() -> None:
     equipment = StcsAtp("stcs_atp")
     equipment.apply_control(StcsAtpControl("101100001"))
     state = equipment.read_state()
     assert state.last_command == "101100001"
-    assert equipment.logical_states["emergency_brake_1"] is True
-    assert equipment.logical_states["emergency_brake_2"] is False
-    assert equipment.logical_states["maximum_service_brake_7"] is True
-    assert equipment.logical_states["ato_enable"] is True
-    assert equipment.logical_states["service_brake_1"] is True
+    assert equipment.train_in_states["emergency_brake_1"] is True
+    assert equipment.train_in_states["emergency_brake_2"] is False
+    assert equipment.train_in_states["maximum_service_brake_7"] is True
+    assert equipment.train_in_states["ato_enable"] is True
+    assert equipment.train_in_states["service_brake_1"] is True
     assert equipment.train_out_states["emergency_brake_1_inner_feedback"] is True
     assert equipment.train_out_states["emergency_brake_2_inner_feedback"] is False
     assert equipment.train_out_states["emergency_brake_feedback"] is True
@@ -109,8 +109,8 @@ def test_stcs_atp_short_command_preserves_unmentioned_states() -> None:
     equipment = StcsAtp("stcs_atp")
     equipment.apply_control(StcsAtpControl("000000001"))
     equipment.apply_control(StcsAtpControl("0"))
-    assert equipment.logical_states["service_brake_1"] is True
-    assert equipment.logical_states["emergency_brake_1"] is False
+    assert equipment.train_in_states["service_brake_1"] is True
+    assert equipment.train_in_states["emergency_brake_1"] is False
 
 
 def test_stcs_atp_maximum_service_brake_requests_train_deceleration() -> None:
@@ -152,6 +152,41 @@ def test_stcs_atp_command_is_not_changed_by_train_step() -> None:
 def test_standard_consist_includes_stcs_atp() -> None:
     state = _atp_state(_train())
     assert state.last_command is None
+
+
+def test_door_state_feedback_tracks_left_and_right_doors() -> None:
+    train = _train()
+    assert _atp_state(train).train_out_signal[20] == "0"
+    assert _atp_state(train).train_out_signal[21] == "0"
+
+    assert train.set_equipment(EquipmentSet(key="left_door", command="open")).ok
+    signal = _atp_state(train).train_out_signal
+    assert signal[20] == "1" and signal[21] == "0"
+
+    assert train.set_equipment(EquipmentSet(key="right_door", command="open")).ok
+    assert _atp_state(train).train_out_signal == "0" * 20 + "11" + "0" * 8
+
+    assert train.set_equipment(EquipmentSet(key="left_door", command="close")).ok
+    assert _atp_state(train).train_out_signal == "0" * 20 + "01" + "0" * 8
+
+
+def test_door_state_feedback_follows_configured_and_reset_door_state() -> None:
+    train = Train(
+        TrainConfig(
+            train_id=TID,
+            cab_ids=(1,),
+            initial_active_cab=1,
+            max_traction_accel=1.0,
+            max_decel=1.0,
+            initial_door_state="open",
+        )
+    )
+    assert _atp_state(train).train_out_signal == "0" * 20 + "11" + "0" * 8
+
+    assert train.set_equipment(EquipmentSet(key="left_door", command="close")).ok
+    assert _atp_state(train).train_out_signal[20] == "0"
+    train.reset()
+    assert _atp_state(train).train_out_signal == "0" * 20 + "11" + "0" * 8
 
 
 def test_stcs_atp_has_train_out_state_shape() -> None:

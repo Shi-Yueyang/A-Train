@@ -165,7 +165,7 @@ class Train:
         # TrainConfig guarantees a fully populated equipment_configs. The
         # context carries train-scope values; params override per instance.
         ctx = EquipmentContext(initial_door_state=config.initial_door_state)
-        self._equipment: dict[str, Equipment] = {
+        self._equipment: dict[str, Equipment[Any]] = {
             eq_cfg.key: EQUIPMENT_FACTORIES[eq_cfg.type](eq_cfg.key, ctx, **eq_cfg.params)
             for eq_cfg in config.equipment_configs
         }
@@ -178,6 +178,9 @@ class Train:
         self._cab_active = {
             cab_id: cab_id == config.initial_active_cab for cab_id in config.cab_ids
         }
+        # Sync observer equipment (e.g. door feedback into stcs_atp) with the
+        # configured initial state before the first snapshot is taken.
+        self._resolve_equipment_intents(self._collect_equipment_intents())
 
     @property
     def train_id(self) -> str:
@@ -221,10 +224,11 @@ class Train:
             equipment.apply_control(self._equipment_control(equipment, command))
         except ValueError as exc:
             return ControlResult(ok=False, error=str(exc))
+        self._resolve_equipment_intents(self._collect_equipment_intents())
         return ControlResult()
 
     @staticmethod
-    def _equipment_control(equipment: Equipment, command: EquipmentSet):
+    def _equipment_control(equipment: Equipment[Any], command: EquipmentSet):
         if isinstance(equipment, Door):
             if command.command is None:
                 raise ValueError("door requires a command")
@@ -323,3 +327,4 @@ class Train:
         }
         for eq in self._equipment.values():
             eq.reset()
+        self._resolve_equipment_intents(self._collect_equipment_intents())

@@ -23,7 +23,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
 from .controls import (
     BtmControl,
@@ -36,6 +36,8 @@ from .controls import (
 from .snapshots import BtmSnapshot, DoorSnapshot, StcsAtpSnapshot
 
 # -- Equipment protocol -------------------------------------------------------
+
+EquipmentControlT = TypeVar("EquipmentControlT", bound=EquipmentControl)
 
 
 @dataclass(frozen=True)
@@ -53,8 +55,15 @@ class EquipmentIntent:
 
 
 @runtime_checkable
-class Equipment(Protocol):
-    """Common lifecycle interface for pluggable addon equipment instances."""
+class Equipment(Protocol[EquipmentControlT]):
+    """Common lifecycle interface for pluggable addon equipment instances.
+
+    The protocol is generic in the component's own control type: a component
+    accepts exactly its declared control, which is also its complete writable
+    surface. Instances are stored by key and dispatched dynamically, so the
+    aggregate holds ``Equipment[Any]`` and each component keeps a runtime
+    type guard as the boundary check.
+    """
 
     @property
     def type(self) -> str:
@@ -66,7 +75,7 @@ class Equipment(Protocol):
         """Unique instance identity within one train."""
         ...
 
-    def apply_control(self, control: EquipmentControl) -> None:
+    def apply_control(self, control: EquipmentControlT) -> None:
         """Apply a control owned by this equipment."""
         ...
 
@@ -85,20 +94,30 @@ class Equipment(Protocol):
 
 # -- Equipment factories ------------------------------------------------------
 
-EQUIPMENT_FACTORIES: dict[str, Callable[..., Equipment]] = {}
+EQUIPMENT_FACTORIES: dict[str, Callable[..., Equipment[Any]]] = {}
 
 # -- Door --------------------------------------------------------------------
 
 
 class Door:
-    """One train door's state. Door motion is instantaneous on ``apply_control``."""
+    """One train door's state. Door motion is instantaneous on ``apply_control``.
+
+    A door with a known ``side`` ("left" or "right") reports its current
+    state as an intent to the train-level ``stcs_atp`` feedback; the aggregate
+    resolves it, so the door never references another component.
+    """
 
     type = "door"
 
-    def __init__(self, key: str, *, initial_state: str = "closed") -> None:
+    def __init__(
+        self, key: str, *, initial_state: str = "closed", side: str | None = None
+    ) -> None:
         if initial_state not in ("open", "closed"):
             raise ValueError(f"invalid initial door state: {initial_state!r}")
+        if side not in (None, "left", "right"):
+            raise ValueError(f"invalid door side: {side!r}")
         self._key = key
+        self._side = side
         self._initial = initial_state
         self._state = initial_state
 
@@ -110,7 +129,7 @@ class Door:
     def closed(self) -> bool:
         return self._state == "closed"
 
-    def apply_control(self, control: EquipmentControl) -> None:
+    def apply_control(self, control: DoorControl) -> None:
         if not isinstance(control, DoorControl) or control.command not in ("open", "close"):
             raise ValueError("door control must be 'open' or 'close'")
         self._state = "open" if control.command == "open" else "closed"
@@ -122,7 +141,14 @@ class Door:
         self._state = self._initial
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
-        return ()
+        if self._side is None:
+            return ()
+        opened = self._state == "open"
+        if self._side == "left":
+            control = StcsAtpControl(left_door_open=opened)
+        else:
+            control = StcsAtpControl(right_door_open=opened)
+        return (EquipmentIntent(source=self._key, target="stcs_atp", control=control),)
 
 
 # -- BTM ---------------------------------------------------------------------
@@ -147,7 +173,7 @@ class Btm:
     def key(self) -> str:
         return self._key
 
-    def apply_control(self, control: EquipmentControl) -> None:
+    def apply_control(self, control: BtmControl) -> None:
         if not isinstance(control, BtmControl):
             raise ValueError("btm control is invalid")
         if control.cab_id is not None and control.cab_id != self._cab_id:
@@ -182,7 +208,7 @@ class StcsAtp:
     """Train-level ATP equipment that decodes ATP output bits into state.
 
     Bit zero is the leftmost character in the command. A command updates the
-    logical states it contains; positions beyond its length retain their last
+    train-in states it contains; positions beyond its length retain their last
     value so shorter assertions do not clear unrelated outputs.
     """
 
@@ -247,7 +273,7 @@ class StcsAtp:
         self._train_out_states = {
             state_name: False for state_name in self.TRAIN_TO_ATP_SIGNAL_BY_BIT.values()
         }
-        self._logical_states = {
+        self._train_in_states = {
             state_name: False for state_name in self.ATP_TO_TRAIN_SIGNAL_BY_BIT.values()
         }
 
@@ -255,11 +281,17 @@ class StcsAtp:
     def key(self) -> str:
         return self._key
 
-    def apply_control(self, control: EquipmentControl) -> None:
-        """Apply a binary output command to the corresponding logical states."""
+    def apply_control(self, control: StcsAtpControl) -> None:
+        """Apply the stcs_atp control: door feedback fields and/or bit string."""
         if not isinstance(control, StcsAtpControl):
             raise ValueError("stcs_atp control is invalid")
+        if control.left_door_open is not None:
+            self._train_out_states["door_state_1"] = control.left_door_open
+        if control.right_door_open is not None:
+            self._train_out_states["door_state_2"] = control.right_door_open
         command = control.command
+        if command is None:
+            return
         if not isinstance(command, str) or not command or any(bit not in "01" for bit in command):
             raise ValueError("stcs_atp command must be a non-empty string of '0' and '1'")
 
@@ -267,26 +299,26 @@ class StcsAtp:
         for bit_index, bit in enumerate(command):
             state_name = self.ATP_TO_TRAIN_SIGNAL_BY_BIT.get(bit_index)
             if state_name is not None:
-                self._logical_states[state_name] = bit == "1"
+                self._train_in_states[state_name] = bit == "1"
         self._update_train_out_states()
 
     def _update_train_out_states(self) -> None:
         self._train_out_states["emergency_brake_1_inner_feedback"] = (
-            self._logical_states["emergency_brake_1"]
+            self._train_in_states["emergency_brake_1"]
         )
         self._train_out_states["emergency_brake_2_inner_feedback"] = (
-            self._logical_states["emergency_brake_2"]
+            self._train_in_states["emergency_brake_2"]
         )
         self._train_out_states["emergency_brake_feedback"] = (
-            self._logical_states["emergency_brake_1"]
-            or self._logical_states["emergency_brake_2"]
+            self._train_in_states["emergency_brake_1"]
+            or self._train_in_states["emergency_brake_2"]
         )
         self._train_out_states["service_brake_7_feedback"] = (
-            self._logical_states["maximum_service_brake_7"]
+            self._train_in_states["maximum_service_brake_7"]
         )
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
-        brake_active = self._logical_states["maximum_service_brake_7"]
+        brake_active = self._train_in_states["maximum_service_brake_7"]
         if not brake_active:
             return ()
         return (
@@ -301,9 +333,9 @@ class StcsAtp:
         )
 
     @property
-    def logical_states(self) -> dict[str, bool]:
-        """Return a copy of the decoded logical state, excluding snapshots."""
-        return self._logical_states.copy()
+    def train_in_states(self) -> dict[str, bool]:
+        """Return a copy of the decoded train-in state, excluding snapshots."""
+        return self._train_in_states.copy()
 
     @property
     def train_out_states(self) -> dict[str, bool]:
@@ -324,8 +356,8 @@ class StcsAtp:
 
     def reset(self) -> None:
         self._last_command = None
-        for state_name in self._logical_states:
-            self._logical_states[state_name] = False
+        for state_name in self._train_in_states:
+            self._train_in_states[state_name] = False
         for state_name in self._train_out_states:
             self._train_out_states[state_name] = False
 
@@ -345,10 +377,14 @@ def _create_door(
     ctx: EquipmentContext,
     *,
     initial_state: str | None = None,
+    side: str | None = None,
 ) -> Door:
     if initial_state is None:
         initial_state = ctx.initial_door_state
-    return Door(key, initial_state=initial_state)
+    if side is None:
+        prefix = key.split("_", 1)[0]
+        side = prefix if prefix in ("left", "right") else None
+    return Door(key, initial_state=initial_state, side=side)
 
 
 def _create_btm(key: str, _ctx: EquipmentContext) -> Btm:

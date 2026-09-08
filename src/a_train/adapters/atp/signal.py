@@ -2,7 +2,7 @@
 
 ``atp_signal`` is a string of ``'0'``/``'1'`` characters, e.g. ``"0001000"``;
 the leftmost character is bit index 0. The transport adapter keeps the signal
-intact; ``stcs_atp`` decodes it into internal logical states.
+intact; ``stcs_atp`` decodes it into internal train-in states.
 """
 
 from __future__ import annotations

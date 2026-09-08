@@ -104,6 +104,32 @@ async def test_btm_delivery_through_equipment_endpoint() -> None:
         assert r.status_code == 400  # invalid base64
 
 
+# -- Door state feeds the stcs_atp train-out feedback through the public API ---
+
+
+async def test_door_state_reflects_in_stcs_atp_train_out_signal() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        status, snap = await _equipment(c, "left_door", command="open")
+        assert status == 200
+        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp")
+        assert atp["state"]["train_out_signal"][20] == "1"  # door_state_1
+        assert atp["state"]["train_out_signal"][21] == "0"  # door_state_2
+
+        await _equipment(c, "right_door", command="open")
+        await _equipment(c, "left_door", command="close")
+        snap = await _train(c)
+        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp")
+        assert atp["state"]["train_out_signal"][20] == "0"
+        assert atp["state"]["train_out_signal"][21] == "1"
+
+        await c.post("/api/simulation/reset")
+        snap = await _train(c)
+        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp")
+        assert atp["state"]["train_out_signal"][20:22] == "00"
+
+
 # -- Cab activation is native train state, no authority ------------------------
 
 

@@ -238,11 +238,12 @@ current flags are derived from the most recent assertion of each position.
 
 Decoding is a pure transport translation in `src/a_train/adapters/atp/signal.py`.
 The train-level `stcs_atp` component (`domain/equipment.py`) then applies each
-bit to a plain internal boolean state. These logical states are not part of
+bit to a plain internal boolean state (the *train-in states*). These states
+are not part of
 `StcsAtpSnapshot` or REST/WebSocket output yet. They are reset to `false` by
 `reset` and a shorter signal leaves unmentioned bit positions unchanged.
 
-| Bit index | Internal state |
+| Bit index | Train-in state |
 | --------- | -------------- |
 | 0 | `emergency_brake_1` |
 | 1 | `emergency_brake_2` |
@@ -267,14 +268,14 @@ other non-binary command is invalid.
 
 The STCS ATP component also maintains a plain internal `train_out_states` map
 for the 30 train-side feedback bits. It is initialized with all values set to
-`false` and is not part of `StcsAtpSnapshot` yet. The following feedback states
-are derived from ATP command states: `emergency_brake_1_inner_feedback` mirrors
-`emergency_brake_1`, `emergency_brake_2_inner_feedback` mirrors
-`emergency_brake_2`, `emergency_brake_feedback` is true when either emergency
-brake is active, and `service_brake_7_feedback` mirrors
-`maximum_service_brake_7`:
+`false` and is exposed as `train_out_signal` in `StcsAtpSnapshot`. The
+following feedback states are derived from ATP command states:
+`emergency_brake_1_inner_feedback` mirrors `emergency_brake_1`,
+`emergency_brake_2_inner_feedback` mirrors `emergency_brake_2`,
+`emergency_brake_feedback` is true when either emergency brake is active, and
+`service_brake_7_feedback` mirrors `maximum_service_brake_7`:
 
-| Bit | Internal state |
+| Bit | Train-out state |
 | ---: | --- |
 | 0 | `emergency_brake_1_inner_feedback` |
 | 1 | `emergency_brake_2_inner_feedback` |
@@ -306,6 +307,13 @@ brake is active, and `service_brake_7_feedback` mirrors
 | 27 | `system_switch_cbtc` |
 | 28 | `c2_control_state_1_2` |
 | 29 | `c2_control_state_2_2` |
+
+`door_state_1` and `door_state_2` (bits 20-21) reflect the physical door
+state: true while `left_door` / `right_door` is open. Each door reports its
+current state as an equipment intent carrying `stcs_atp`'s own control type
+(`StcsAtpControl` door-feedback fields); the train aggregate resolves the
+feedback whenever equipment changes, steps, resets, or is constructed with a
+configured open door.
 
 The recorded command does not affect physics. Protection behavior can be added
 later without changing the transport command translation.
