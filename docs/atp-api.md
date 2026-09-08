@@ -133,7 +133,8 @@ while the channel is READY.
   "equipment": [
     { "type": "cab", "key": "cab_1", "state": { "cab_id": 1, "active": true } },
     { "type": "cab", "key": "cab_2", "state": { "cab_id": 2, "active": false } },
-    { "type": "door", "key": "door_main", "state": { "state": "closed" } },
+    { "type": "door", "key": "left_door", "state": { "state": "closed" } },
+    { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
     { "type": "stcs_atp", "key": "stcs_atp", "state": { "last_command": "brake_emergency" } }
   ]
@@ -195,7 +196,7 @@ Processing pipeline (manager → core):
    applied).
 2. Map to the transport-neutral commands the REST API uses:
    - `drive_demand` → `TrainControlCommand(train_id, TrainControl(cab_id, drive_demand))`
-   - `door` → `EquipmentCommand(train_id, EquipmentSet(key="door", command=door))`
+  - `door` → two `EquipmentCommand` values targeting `left_door` and `right_door` with the same command
   - `atp_signal` → one STCS ATP command containing the raw signal (§4.2)
      A message may carry several fields; each contributes its commands in the
      order listed above.

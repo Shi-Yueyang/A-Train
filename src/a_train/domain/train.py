@@ -138,13 +138,16 @@ class TrainConfig:
         if self.initial_door_state not in ("open", "closed"):
             raise ValueError("initial_door_state must be 'open' or 'closed'")
         if not self.equipment_configs:
-            # Standard fit: one Cab + one Btm per cab, one Door, one StcsAtp.
+            # Standard fit: one Cab + one Btm per cab, two Doors, one StcsAtp.
             object.__setattr__(
                 self,
                 "equipment_configs",
                 tuple(
                     [EquipmentConfig("cab", f"cab_{cab_id}") for cab_id in self.cab_ids]
-                    + [EquipmentConfig("door", "door_main")]
+                    + [
+                        EquipmentConfig("door", "left_door"),
+                        EquipmentConfig("door", "right_door"),
+                    ]
                     + [EquipmentConfig("btm", f"btm_{cab_id}") for cab_id in self.cab_ids]
                     + [EquipmentConfig("stcs_atp", "stcs_atp")]
                 ),

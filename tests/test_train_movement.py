@@ -219,8 +219,9 @@ async def test_train_reset_restores_state_and_clears_equipment() -> None:
         assert reset_state["speed"] == 0.0
         assert reset_state["acceleration"] == 0.0
         assert reset_state["drive_demand"] == 0.0
-        door = next(e for e in reset_state["equipment"] if e["key"] == "door_main")
-        assert door["state"]["state"] == "closed"
+        doors = [e for e in reset_state["equipment"] if e["type"] == "door"]
+        assert {e["key"] for e in doors} == {"left_door", "right_door"}
+        assert all(e["state"]["state"] == "closed" for e in doors)
         cab_flags = {
             e["state"]["cab_id"]: e["state"]["active"]
             for e in reset_state["equipment"]
@@ -254,8 +255,9 @@ async def test_equipment_nested_snapshots_do_not_change_physical_fields() -> Non
             and cabs[0]["active"] is True
         )
         assert cabs[1]["active"] is False
-        door = next(e for e in snap["equipment"] if e["key"] == "door_main")
-        assert door["state"]["state"] == "closed"
+        doors = [e for e in snap["equipment"] if e["type"] == "door"]
+        assert {e["key"] for e in doors} == {"left_door", "right_door"}
+        assert all(e["state"]["state"] == "closed" for e in doors)
         assert any(e["type"] == "btm" for e in snap["equipment"])
 
 

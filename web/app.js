@@ -202,7 +202,8 @@ function renderTrainState() {
   pre.textContent = lines.join("\n");
 
   renderEquipment(equipmentEl, equipment);
-    const door = equipment.find((entry) => entry.key === "door_main");
+    const doorKey = $("door-side").value || "left_door";
+    const door = equipment.find((entry) => entry.key === doorKey);
     const doorState = (door && door.state && door.state.state) || "—";
   $("door-state").textContent = doorState;
   syncSlider("drive", sel.drive_demand);
@@ -365,11 +366,11 @@ function bind() {
     }
   };
   $("btn-door-open").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/equipment/door`, {
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${$("door-side").value}`, {
       command: "open",
     });
   $("btn-door-close").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/equipment/door`, {
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${$("door-side").value}`, {
       command: "close",
     });
   $("btn-send-btm").onclick = () =>

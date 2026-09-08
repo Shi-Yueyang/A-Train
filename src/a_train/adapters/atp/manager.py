@@ -166,12 +166,13 @@ class AtpManager:
                 )
             )
         if door is not None:
-            commands.append(
-                EquipmentCommand(
-                    train_id=client.train_id,
-                    payload=EquipmentSet(key="door", command=door),
+            for door_key in ("left_door", "right_door"):
+                commands.append(
+                    EquipmentCommand(
+                        train_id=client.train_id,
+                        payload=EquipmentSet(key=door_key, command=door),
+                    )
                 )
-            )
         if atp_signal is not None:
             commands.extend(decode_atp_signal(atp_signal, client.train_id, client.cab_id))
 

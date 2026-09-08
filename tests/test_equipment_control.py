@@ -49,9 +49,9 @@ async def test_door_state_applies_immediately_without_affecting_drive() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
 
-        status, snap = await _equipment(c, "door_main", command="open")
+        status, snap = await _equipment(c, "left_door", command="open")
         assert status == 200
-        door = next(e for e in snap["equipment"] if e["key"] == "door_main")
+        door = next(e for e in snap["equipment"] if e["key"] == "left_door")
         assert door["state"]["state"] == "open"  # no step required
 
         await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 1.0})
@@ -67,16 +67,16 @@ async def test_invalid_equipment_commands_are_rejected_without_state_change() ->
     async with running_app([T1]) as c:
         await _manual_start(c)
 
-        status, body = await _equipment(c, "door_main", command="explode")
+        status, body = await _equipment(c, "left_door", command="explode")
         assert status == 400
-        door = next(e for e in (await _train(c))["equipment"] if e["key"] == "door_main")
+        door = next(e for e in (await _train(c))["equipment"] if e["key"] == "left_door")
         assert door["state"]["state"] == "closed"
 
         status, _ = await _equipment(c, "unknown_device", command="open")
         assert status == 400
         assert all(e["key"] != "unknown_device" for e in (await _train(c))["equipment"])
 
-        r = await c.post("/api/trains/NOPE/equipment/door_main", json={"command": "open"})
+        r = await c.post("/api/trains/NOPE/equipment/left_door", json={"command": "open"})
         assert r.status_code == 400
 
 
@@ -174,6 +174,6 @@ async def test_equipment_changes_do_not_advance_time(command: str) -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
         before = (await c.get("/api/status")).json()["simulation_time"]
-        await _equipment(c, "door_main", command=command)
+        await _equipment(c, "right_door", command=command)
         after = (await c.get("/api/status")).json()["simulation_time"]
         assert after == before

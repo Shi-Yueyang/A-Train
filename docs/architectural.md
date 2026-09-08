@@ -313,7 +313,7 @@ reproduced exactly.
 
 Equipment is modeled as a flat collection of uniquely keyed instances. Each
 instance has a behavior `type` and an instance `key`; train-scoped equipment
-such as `door_main` and cab-scoped equipment such as `btm_1` use the same
+such as `left_door` and `right_door`, and cab-scoped equipment such as `btm_1`, use the same
 addressing model. Snapshots preserve this shape as an array of `{type, key,
 state}` entries. Adapters address equipment by key and do not infer identity
 from list position or an implicit slot.

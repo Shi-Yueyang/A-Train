@@ -47,7 +47,8 @@ type-specific `state` object:
   "equipment": [
     { "type": "cab", "key": "cab_1", "state": { "cab_id": 1, "active": true } },
     { "type": "cab", "key": "cab_2", "state": { "cab_id": 2, "active": false } },
-    { "type": "door", "key": "door_main", "state": { "state": "closed" } },
+    { "type": "door", "key": "left_door", "state": { "state": "closed" } },
+    { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
     { "type": "stcs_atp", "key": "stcs_atp", "state": { "last_command": null } }
   ]
@@ -232,7 +233,7 @@ with the component's error message on invalid input.
 
 | Key      | Behavior                                                                                                                                                                                               |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `door_main` | `command` `"open"` / `"close"` sets the train door state. |
+| `left_door`, `right_door` | `command` `"open"` / `"close"` sets the selected door state. |
 | `cab_1`, `cab_2` | `"activate"` / `"deactivate"` sets that cab's local activation flag. |
 | `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
 | `stcs_atp` | `command` is recorded as `last_command` without interpretation. |
@@ -240,7 +241,7 @@ with the component's error message on invalid input.
 **Example**:
 
 ```http
-POST /api/trains/TRAIN001/equipment/door_main
+POST /api/trains/TRAIN001/equipment/left_door
 Content-Type: application/json
 
 { "command": "open" }
@@ -275,7 +276,8 @@ by equipment type (§3.5).
   "equipment": [
     { "type": "cab", "key": "cab_1", "state": { "cab_id": 1, "active": true } },
     { "type": "cab", "key": "cab_2", "state": { "cab_id": 2, "active": false } },
-    { "type": "door", "key": "door_main", "state": { "state": "closed" } },
+    { "type": "door", "key": "left_door", "state": { "state": "closed" } },
+    { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
     { "type": "stcs_atp", "key": "stcs_atp", "state": { "last_command": null } }
   ]
@@ -314,7 +316,7 @@ command body has no effect (extra fields are ignored).
 The equipment model is flat in every REST and WebSocket response. `equipment`
 is an array of entries shaped as `{ "type": string, "key": string, "state":
 object }`. The key uniquely identifies one instance, for example `cab_1`,
-`door_main`, `btm_1`, or `stcs_atp`. Equipment commands address that instance
+`left_door`, `right_door`, `btm_1`, or `stcs_atp`. Equipment commands address that instance
 directly through `/api/trains/{train_id}/equipment/{key}`; there is no implicit
 type grouping or slot field.
 
