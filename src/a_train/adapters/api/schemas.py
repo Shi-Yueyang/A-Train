@@ -45,6 +45,10 @@ class TrainControlRequest(BaseModel):
         default=None,
         description="Signed drive lever in [-1.0, 1.0]: positive drives, negative decelerates.",
     )
+    active: bool | None = Field(
+        default=None,
+        description="Sets the cab's native activation flag; omitted leaves it unchanged.",
+    )
 
 
 class EquipmentSetRequest(BaseModel):
@@ -56,7 +60,7 @@ class EquipmentSetRequest(BaseModel):
 
     command: str | None = Field(
         default=None,
-        description="Named command: 'open'/'close' (door), 'activate'/'deactivate' (cab).",
+        description="Named command: 'open'/'close' (door).",
     )
     cab_id: int | None = Field(default=None, description="Optional cab identity check.")
     data: str | None = Field(
@@ -64,9 +68,14 @@ class EquipmentSetRequest(BaseModel):
     )
 
 
+class CabResponse(BaseModel):
+    cab_id: int
+    active: bool
+
+
 class TrainResponse(BaseModel):
     train_id: str
-    cab_ids: list[int]
+    cabs: list[CabResponse]
     speed: float
     acceleration: float
     position: float
@@ -109,10 +118,14 @@ def _serialize_equipment(equipment: tuple[object, ...]) -> list[object]:
     return [_serialize(snapshot) for snapshot in equipment]
 
 
+def _cabs_to_response(snap: TrainSnapshot) -> list[CabResponse]:
+    return [CabResponse(cab_id=cab.cab_id, active=cab.active) for cab in snap.cabs]
+
+
 def train_snapshot_to_response(snap: TrainSnapshot) -> TrainResponse:
     return TrainResponse(
         train_id=snap.train_id,
-        cab_ids=list(snap.cab_ids),
+        cabs=_cabs_to_response(snap),
         speed=snap.speed,
         acceleration=snap.acceleration,
         position=snap.position,
@@ -125,7 +138,7 @@ def train_snapshot_to_response(snap: TrainSnapshot) -> TrainResponse:
 def _train_to_dict(snap: TrainSnapshot) -> dict:
     return {
         "train_id": snap.train_id,
-        "cab_ids": list(snap.cab_ids),
+        "cabs": [dataclasses.asdict(cab) for cab in snap.cabs],
         "speed": snap.speed,
         "acceleration": snap.acceleration,
         "position": snap.position,

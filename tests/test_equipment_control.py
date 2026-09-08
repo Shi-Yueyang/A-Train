@@ -1,7 +1,7 @@
 """Equipment state through the generic REST endpoint.
 
 Covers immediate application (no fixed step needed), per-type validation,
-cab flags as plain equipment state, and error isolation, all observed through
+cab flags as native train state, and error isolation, all observed through
 the public API against the real application (§6.1).
 """
 
@@ -104,10 +104,10 @@ async def test_btm_delivery_through_equipment_endpoint() -> None:
         assert r.status_code == 400  # invalid base64
 
 
-# -- Cab activation is a plain equipment flag, no authority --------------------
+# -- Cab activation is native train state, no authority ------------------------
 
 
-async def test_cab_activate_is_local_flag_with_no_control_effect() -> None:
+async def test_cab_activate_is_native_flag_with_no_control_effect() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
 
@@ -115,13 +115,9 @@ async def test_cab_activate_is_local_flag_with_no_control_effect() -> None:
         r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 0.5})
         assert r.status_code == 200
 
-        status, snap = await _equipment(c, "cab_2", command="activate")
-        assert status == 200
-        flags = {
-            entry["state"]["cab_id"]: entry["state"]["active"]
-            for entry in snap["equipment"]
-            if entry["type"] == "cab"
-        }
+        r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 2, "active": True})
+        assert r.status_code == 200
+        flags = {entry["cab_id"]: entry["active"] for entry in r.json()["cabs"]}
         assert flags == {1: True, 2: True}  # flags independent, no transfer
 
         # The former cab is still accepted; cabs carry no authority.
@@ -130,26 +126,28 @@ async def test_cab_activate_is_local_flag_with_no_control_effect() -> None:
 
         # Both cabs can be deactivated in any order.
         for cab_id in (1, 2):
-            status, _ = await _equipment(c, f"cab_{cab_id}", command="deactivate")
-            assert status == 200
-        flags = {
-            entry["state"]["cab_id"]: entry["state"]["active"]
-            for entry in (await _train(c))["equipment"]
-            if entry["type"] == "cab"
-        }
+            r = await c.post(
+                "/api/trains/TRAIN001/commands", json={"cab_id": cab_id, "active": False}
+            )
+            assert r.status_code == 200
+        flags = {entry["cab_id"]: entry["active"] for entry in (await _train(c))["cabs"]}
         assert flags == {1: False, 2: False}
 
-        # An unconfigured cab is rejected.
-        status, _ = await _equipment(c, "cab_9", command="activate")
+        # An unconfigured cab is rejected and its activation flag is unchanged.
+        r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 9, "active": True})
+        assert r.status_code == 400
+        flags = {entry["cab_id"]: entry["active"] for entry in (await _train(c))["cabs"]}
+        assert flags == {1: False, 2: False}
+
+        # Cabs are no longer equipment entries.
+        snap = await _train(c)
+        assert all(e["type"] != "cab" for e in snap["equipment"])
+        status, _ = await _equipment(c, "cab_1", command="activate")
         assert status == 400
 
         # Reset restores the configured activation flags.
         await c.post("/api/simulation/reset")
-        reset_flags = {
-            entry["state"]["cab_id"]: entry["state"]["active"]
-            for entry in (await _train(c))["equipment"]
-            if entry["type"] == "cab"
-        }
+        reset_flags = {entry["cab_id"]: entry["active"] for entry in (await _train(c))["cabs"]}
         assert reset_flags == {1: True, 2: False}
 
 

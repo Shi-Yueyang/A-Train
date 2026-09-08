@@ -1,4 +1,4 @@
-"""Doors, cabs, and BTM equipment behaviour (§3.5, §3.6, atp-api.md §3.2).
+"""Doors, BTM, and ATP-protection equipment behaviour (§3.5, §3.6, atp-api.md §3.2).
 
 Every train-facing equipment capability is a narrow component behind the train
 aggregate. A component keeps private mutable state, accepts plain-value
@@ -8,7 +8,7 @@ imports adapters, accesses the simulation clock, or modifies train physical
 state directly. Adapters translate protocol data into equipment calls and
 publish snapshot data.
 
-Addon equipment (Cab, Door, BTM, StcsAtp, and future equipment) implements
+Addon equipment (Door, BTM, StcsAtp, and future equipment) implements
 the ``Equipment`` protocol: a ``type`` naming the behavior and a unique
 ``key`` naming the instance. ``EQUIPMENT_FACTORIES`` maps type to a factory
 and may be invoked any number of times; a factory receives ``(key,
@@ -27,14 +27,13 @@ from typing import Any, Protocol, runtime_checkable
 
 from .controls import (
     BtmControl,
-    CabControl,
     Control,
     DoorControl,
     EquipmentControl,
     StcsAtpControl,
     TrainControl,
 )
-from .snapshots import BtmSnapshot, CabSnapshot, DoorSnapshot, StcsAtpSnapshot
+from .snapshots import BtmSnapshot, DoorSnapshot, StcsAtpSnapshot
 
 # -- Equipment protocol -------------------------------------------------------
 
@@ -121,51 +120,6 @@ class Door:
 
     def reset(self) -> None:
         self._state = self._initial
-
-    def emit_intents(self) -> tuple[EquipmentIntent, ...]:
-        return ()
-
-
-# -- Cab ---------------------------------------------------------------------
-
-
-class Cab:
-    """One cab's local state: an activation flag with no control-side effect."""
-
-    type = "cab"
-
-    def __init__(self, key: str, cab_id: int, *, initial_active: bool = False) -> None:
-        self._key = key
-        self._cab_id = cab_id
-        self._initial_active = initial_active
-        self._active = initial_active
-
-    @property
-    def cab_id(self) -> int:
-        return self._cab_id
-
-    @property
-    def key(self) -> str:
-        return self._key
-
-    @property
-    def active(self) -> bool:
-        return self._active
-
-    def apply_control(self, control: EquipmentControl) -> None:
-        if not isinstance(control, CabControl):
-            raise ValueError("cab control is invalid")
-        if control.command not in ("activate", "deactivate"):
-            raise ValueError("cab control must be 'activate' or 'deactivate'")
-        if control.cab_id is not None and control.cab_id != self._cab_id:
-            raise ValueError("cab_id does not match equipment key")
-        self._active = control.command == "activate"
-
-    def read_state(self) -> CabSnapshot:
-        return CabSnapshot(cab_id=self._cab_id, active=self._active)
-
-    def reset(self) -> None:
-        self._active = self._initial_active
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
         return ()
@@ -384,19 +338,6 @@ class EquipmentContext:
     """Train-scope configuration factories may need to build instances."""
 
     initial_door_state: str
-    initial_active_cab: int
-
-
-def _create_cab(
-    key: str,
-    ctx: EquipmentContext,
-    *,
-    initial_active: bool | None = None,
-) -> Cab:
-    cab_id = int(key.removeprefix("cab_"))
-    if initial_active is None:
-        initial_active = cab_id == ctx.initial_active_cab
-    return Cab(key, cab_id, initial_active=initial_active)
 
 
 def _create_door(
@@ -418,7 +359,6 @@ def _create_stcs_atp(key: str, _ctx: EquipmentContext) -> StcsAtp:
     return StcsAtp(key)
 
 
-EQUIPMENT_FACTORIES["cab"] = _create_cab
 EQUIPMENT_FACTORIES["door"] = _create_door
 EQUIPMENT_FACTORIES["btm"] = _create_btm
 EQUIPMENT_FACTORIES["stcs_atp"] = _create_stcs_atp

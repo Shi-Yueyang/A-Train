@@ -145,6 +145,7 @@ async def control_train(
     payload = TrainControl(
         cab_id=body.cab_id,
         drive_demand=body.drive_demand,
+        active=body.active,
     )
     result = await core.submit_command(TrainControlCommand(train_id=train_id, payload=payload))
     _raise_on_error(result)

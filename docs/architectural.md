@@ -93,9 +93,9 @@ There are three categories of processes.
 **Simulator process** is organised in three layers (the same split as the
 repository structure in §7.2):
 
-* **Domain model** — train aggregates (physics and controls), train-local
-  equipment (doors, cabs, BTM, ATP protection, §3.5), and the world model
-  (linear track and signals).
+* **Domain model** — train aggregates (physics, controls, and native cab
+  activation state, §3.2), train-local equipment (doors, BTM, ATP protection,
+  §3.5), and the world model (linear track and signals).
 * **Simulation core** — simulation state machine and fixed-step clock,
   serialized command processing, and read-only state snapshots.
 * **Adapters** (in-process) — ATP connections and the Web API. They translate
@@ -341,11 +341,14 @@ Each train has immutable configuration and mutable runtime state.
 | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Configuration  | Train ID, one or two cab IDs, initial cab activation flags, initial position, maximum traction acceleration, and maximum deceleration. |
 | Physical state | Position in metres, speed in metres per second, and acceleration in metres per second squared.                              |
-| Control state  | Signed drive demand and door state.                                                                                         |
+| Control state  | Signed drive demand and each cab's activation flag. Door state lives in door equipment (§3.5). |
 
-The cab activation flags and initial physical state are supplied by simulator
-configuration. `reset` restores those configured values and clears all control
-state, including the door state.
+Cab activation is native train state owned directly by the train aggregate and
+published as one `{cab_id, active}` entry per configured cab in every train
+snapshot; it is not equipment. The cab activation flags and initial physical
+state are supplied by simulator configuration. `reset` restores those
+configured values and clears all control state, including each cab's
+activation flag and the door state.
 
 Acceleration limits are positive, finite, per-train configuration values.
 Drive demand is a signed, normalized lever in `[-1.0, 1.0]`: positive scales
@@ -356,13 +359,14 @@ never becomes negative.
 
 ## 3.3 Controls
 
-The train accepts these normalized commands from any configured cab. Cabs are
-train-local equipment (§3.5) and carry no authority; a cab's activation flag
-never affects control acceptance or dynamics:
+The train accepts these normalized commands from any configured cab. Cabs
+carry no authority; a cab's activation flag never affects control acceptance
+or dynamics:
 
 | Command              | Range or value     | Effect                                                                                                  |
 | -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
 | Drive demand         | `-1.0` to `1.0` | Signed normalized force lever: positive requests a proportion of maximum traction acceleration, negative requests a proportion of maximum deceleration. |
+| Cab activation       | True or false      | Sets the native activation flag of the cab identified by the command.                                   |
 | Door command         | Open or close      | Changes the train door state.                                                                            |
 
 ## 3.4 Per-Step Dynamics
@@ -388,9 +392,11 @@ is zero.
 
 ## 3.5 Train-Facing Equipment Boundary
 
-Doors, cabs, BTM, and ATP protection state are train-local equipment. Their
+Doors, BTM, and ATP protection state are train-local equipment. Their
 state may be included in a train snapshot, but their transport and protocol
-handling remain outside the train model.
+handling remain outside the train model. Cab activation is not equipment; it
+is native train state owned by the aggregate (§3.2) and addressed through
+train controls, not the equipment endpoint.
 
 BTM payloads are opaque byte arrays. The train model can receive a BTM
 delivery request for a cab, but does not interpret its contents; the ATP
@@ -400,8 +406,9 @@ adapter delivers the payload over the protocol.
 
 Implement the train model in `domain/train.py` as the aggregate that owns one
 train's mutable state. Keep calculations that do not require aggregate state
-in `domain/physics.py`, and keep cab, door, BTM, and ATP-brake behavior in
-`domain/equipment.py`. The simulation core calls only a
+in `domain/physics.py`, keep cab activation state on the aggregate itself, and
+keep door, BTM, and ATP-brake behavior in `domain/equipment.py`. The
+simulation core calls only a
 small aggregate API:
 
 ```text
@@ -732,7 +739,7 @@ train-simulator/
 │   │   ├── __init__.py             # Public domain types.
 │   │   ├── train.py                # Train aggregate and stable per-step update entry point.
 │   │   ├── physics.py              # Drive force, acceleration, speed, and position calculations.
-│   │   ├── equipment.py            # Doors, cabs, BTM, and ATP-brake equipment behavior.
+│   │   ├── equipment.py            # Doors, BTM, and ATP-brake equipment behavior.
 │   │   └── signals.py              # Linear-track signal state and signal-aspect rules.
 │   │
 │   ├── adapters/                   # I/O boundaries that translate external data into core commands.

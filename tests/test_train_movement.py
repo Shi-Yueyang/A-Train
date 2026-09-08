@@ -222,11 +222,7 @@ async def test_train_reset_restores_state_and_clears_equipment() -> None:
         doors = [e for e in reset_state["equipment"] if e["type"] == "door"]
         assert {e["key"] for e in doors} == {"left_door", "right_door"}
         assert all(e["state"]["state"] == "closed" for e in doors)
-        cab_flags = {
-            e["state"]["cab_id"]: e["state"]["active"]
-            for e in reset_state["equipment"]
-            if e["type"] == "cab"
-        }
+        cab_flags = {c["cab_id"]: c["active"] for c in reset_state["cabs"]}
         assert cab_flags == {1: True, 2: False}  # configured cabs restored
         btm = [e["state"] for e in reset_state["equipment"] if e["type"] == "btm"]
         assert all(b["pending"] is False and b["received_count"] == 0 for b in btm)
@@ -247,14 +243,12 @@ async def test_equipment_nested_snapshots_do_not_change_physical_fields() -> Non
             assert field in snap
         assert snap["direction"] == "forward"
 
-        # Equipment is exposed as individually addressed entries.
-        cabs = [e["state"] for e in snap["equipment"] if e["type"] == "cab"]
+        # Cabs are native train state, one entry per configured cab.
+        cabs = snap["cabs"]
         assert len(cabs) == 2
-        assert (
-            cabs[0]["cab_id"] == 1
-            and cabs[0]["active"] is True
-        )
+        assert cabs[0]["cab_id"] == 1 and cabs[0]["active"] is True
         assert cabs[1]["active"] is False
+        assert all(e["type"] != "cab" for e in snap["equipment"])
         doors = [e for e in snap["equipment"] if e["type"] == "door"]
         assert {e["key"] for e in doors} == {"left_door", "right_door"}
         assert all(e["state"]["state"] == "closed" for e in doors)

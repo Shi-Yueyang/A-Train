@@ -11,12 +11,6 @@ class DoorControl:
 
 
 @dataclass(frozen=True)
-class CabControl:
-    command: str
-    cab_id: int | None = None
-
-
-@dataclass(frozen=True)
 class BtmControl:
     data: bytes
     cab_id: int | None = None
@@ -31,7 +25,8 @@ class StcsAtpControl:
 class TrainControl:
     cab_id: int | None = None
     drive_demand: float | None = None
+    active: bool | None = None
 
 
-EquipmentControl = DoorControl | CabControl | BtmControl | StcsAtpControl
+EquipmentControl = DoorControl | BtmControl | StcsAtpControl
 Control = EquipmentControl | TrainControl

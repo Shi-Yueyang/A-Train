@@ -44,8 +44,8 @@ function setState(status, trains) {
     state.selectedTrainId = trains[0] ? trains[0].train_id : null;
   }
   const sel = selectedTrain();
-  if (sel && !sel.cab_ids.includes(state.selectedCab)) {
-    state.selectedCab = sel.cab_ids[0];
+  if (sel && !sel.cabs.some((c) => c.cab_id === state.selectedCab)) {
+    state.selectedCab = sel.cabs[0].cab_id;
   }
   render();
 }
@@ -158,14 +158,14 @@ function renderTrainSelectors() {
   const sel = selectedTrain();
   if (sel) {
     if (
-      cabSel.children.length !== sel.cab_ids.length ||
+      cabSel.children.length !== sel.cabs.length ||
       ![...cabSel.options].some((o) => Number(o.value) === state.selectedCab)
     ) {
       cabSel.innerHTML = "";
-      for (const c of sel.cab_ids) {
+      for (const c of sel.cabs) {
         const o = document.createElement("option");
-        o.value = String(c);
-        o.textContent = String(c);
+        o.value = String(c.cab_id);
+        o.textContent = String(c.cab_id);
         cabSel.appendChild(o);
       }
     }
@@ -182,15 +182,18 @@ function renderTrainState() {
   if (!sel) {
     pre.textContent = "no trains";
     equipmentEl.replaceChildren();
+    $("cab-state").textContent = "—";
     return;
   }
-    const equipment = sel.equipment || [];
-    const cabs = equipment
-      .filter((entry) => entry.type === "cab")
-      .map((entry) => entry.state);
-  const cabText = cabs.length
-    ? cabs.map((e) => `${e.cab_id}${e.active ? " (on)" : ""}`).join(", ")
-    : sel.cab_ids.join(", ");
+  const equipment = sel.equipment || [];
+  const cabs = sel.cabs || [];
+  const cabText = cabs
+    .map((c) => `${c.cab_id}=${c.active ? "active" : "inactive"}`)
+    .join(", ");
+  const selected = cabs.find((c) => c.cab_id === state.selectedCab);
+  $("cab-state").textContent = selected
+    ? `cab ${selected.cab_id}: ${selected.active ? "active" : "inactive"}`
+    : "—";
   const lines = [
     `train_id        ${sel.train_id}`,
     `cabs            ${cabText}`,
@@ -343,7 +346,7 @@ function bind() {
   $("train-select").onchange = (e) => {
     state.selectedTrainId = e.target.value;
     const sel = selectedTrain();
-    state.selectedCab = sel ? sel.cab_ids[0] : null;
+    state.selectedCab = sel ? sel.cabs[0].cab_id : null;
     state.dirty.drive = false;
     render();
   };
@@ -365,6 +368,16 @@ function bind() {
       state.dirty.drive = false;
     }
   };
+  $("btn-cab-activate").onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/commands`, {
+      cab_id: state.selectedCab,
+      active: true,
+    });
+  $("btn-cab-deactivate").onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/commands`, {
+      cab_id: state.selectedCab,
+      active: false,
+    });
   $("btn-door-open").onclick = () =>
     postCommand(`/trains/${state.selectedTrainId}/equipment/${$("door-side").value}`, {
       command: "open",

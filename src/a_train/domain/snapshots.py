@@ -2,9 +2,10 @@
 
 Snapshots are read-only views produced by the train aggregate. They contain
 only scalar values, immutable tuples, and frozen nested dataclasses; they never
-expose a mutable internal object. Equipment state (cabs, doors, BTM) is
-represented as individually addressed entries, so new equipment can be added
-without changing TrainSnapshot.
+expose a mutable internal object. Cab activation is native train state and is
+reported per configured cab in ``TrainSnapshot.cabs``. Equipment state (doors,
+BTM) is represented as individually addressed entries, so new equipment can be
+added without changing TrainSnapshot.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class CabSnapshot:
-    """Read-only view of one cab's local state."""
+    """Read-only view of one cab's native activation state."""
 
     cab_id: int
     active: bool = False
@@ -63,12 +64,13 @@ class EquipmentSnapshot:
 class TrainSnapshot:
     """Read-only view of a single train at a point in simulation time.
 
-    Physical fields keep their names and meanings across versions. Equipment
-    state is a stable tuple of individually addressed entries.
+    Physical fields keep their names and meanings across versions. Cab
+    activation is native train state exposed as one entry per configured cab.
+    Equipment state is a stable tuple of individually addressed entries.
     """
 
     train_id: str
-    cab_ids: tuple[int, ...] = ()
+    cabs: tuple[CabSnapshot, ...] = ()
     speed: float = 0.0
     acceleration: float = 0.0
     position: float = 0.0

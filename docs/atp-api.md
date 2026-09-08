@@ -109,11 +109,13 @@ These three inbound/outbound message families are the complete protocol; unknown
 
 ## 3. Simulator → ATP Messages
 
-`TRAIN_STATE.equipment` is a flat array of independently addressed entries.
-Each entry has `type`, `key`, and `state` fields. For example, the BTM state
-for cab 1 is the entry with `type: "btm"` and `key: "btm_1"`; ATP must not
-look for a type-grouped `equipment.btm` object; select the entry whose key is
-the target BTM instance instead.
+Cab activation is native train state: `TRAIN_STATE.cabs` carries one
+`{cab_id, active}` entry per configured cab. `TRAIN_STATE.equipment` is a
+flat array of independently addressed equipment entries. Each entry has
+`type`, `key`, and `state` fields. For example, the BTM state for cab 1 is
+the entry with `type: "btm"` and `key: "btm_1"`; ATP must not look for a
+type-grouped `equipment.btm` object; select the entry whose key is the target
+BTM instance instead.
 
 ### 3.1 TRAIN_STATE — cyclic world observation
 
@@ -130,9 +132,11 @@ while the channel is READY.
   "acceleration": -0.15,
   "position": 15320.4,
   "direction": "forward",
+  "cabs": [
+    { "cab_id": 1, "active": true },
+    { "cab_id": 2, "active": false }
+  ],
   "equipment": [
-    { "type": "cab", "key": "cab_1", "state": { "cab_id": 1, "active": true } },
-    { "type": "cab", "key": "cab_2", "state": { "cab_id": 2, "active": false } },
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
@@ -149,6 +153,7 @@ while the channel is READY.
 | `acceleration` | number | m/s² of the last integrated step.                                                                                                                     |
 | `position`     | number | m along the linear track from the fixed origin.                                                                                                        |
 | `direction`    | string | `"forward"` in the current model; reserved for future multi-direction movement.                                                                      |
+| `cabs`         | array | Native cab state: one `{cab_id, active}` entry per configured cab, in configured order. |
 | `equipment`    | array | Flat canonical equipment entries, each shaped as `{type, key, state}`. |
 
 `TRAIN_STATE` remains a read-only observation: ATP derives its protection decisions from it and acts back on the train only through `ATP_COMMAND` (§4.1; architectural boundary §4.1 of architectural.md). The simulator publishes the full equipment state because ATP peers may need more than the ATP protection flags alone.

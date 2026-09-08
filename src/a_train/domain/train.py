@@ -23,7 +23,6 @@ from typing import Any
 
 from .controls import (
     BtmControl,
-    CabControl,
     Control,
     DoorControl,
     EquipmentControl,
@@ -33,7 +32,6 @@ from .controls import (
 from .equipment import (
     EQUIPMENT_FACTORIES,
     Btm,
-    Cab,
     Door,
     Equipment,
     EquipmentContext,
@@ -47,7 +45,7 @@ from .physics import (
     is_positive_finite,
     resolve_acceleration,
 )
-from .snapshots import EquipmentSnapshot, TrainSnapshot
+from .snapshots import CabSnapshot, EquipmentSnapshot, TrainSnapshot
 
 
 @dataclass(frozen=True)
@@ -70,8 +68,6 @@ class EquipmentSet:
     the train dispatcher validates the fields each equipment type requires:
 
     - ``door``: ``command`` is ``"open"`` or ``"close"``.
-    - ``cab``: ``cab_id`` plus ``command`` ``"activate"`` or ``"deactivate"``;
-      sets that cab's local flag only, with no control-side effect.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
         - ``stcs_atp``: ``command`` is recorded as the last received command.
     """
@@ -138,13 +134,12 @@ class TrainConfig:
         if self.initial_door_state not in ("open", "closed"):
             raise ValueError("initial_door_state must be 'open' or 'closed'")
         if not self.equipment_configs:
-            # Standard fit: one Cab + one Btm per cab, two Doors, one StcsAtp.
+            # Standard fit: one Btm per cab, two Doors, one StcsAtp.
             object.__setattr__(
                 self,
                 "equipment_configs",
                 tuple(
-                    [EquipmentConfig("cab", f"cab_{cab_id}") for cab_id in self.cab_ids]
-                    + [
+                    [
                         EquipmentConfig("door", "left_door"),
                         EquipmentConfig("door", "right_door"),
                     ]
@@ -169,10 +164,7 @@ class Train:
         # Build every addon equipment instance through the factory registry;
         # TrainConfig guarantees a fully populated equipment_configs. The
         # context carries train-scope values; params override per instance.
-        ctx = EquipmentContext(
-            initial_door_state=config.initial_door_state,
-            initial_active_cab=config.initial_active_cab,
-        )
+        ctx = EquipmentContext(initial_door_state=config.initial_door_state)
         self._equipment: dict[str, Equipment] = {
             eq_cfg.key: EQUIPMENT_FACTORIES[eq_cfg.type](eq_cfg.key, ctx, **eq_cfg.params)
             for eq_cfg in config.equipment_configs
@@ -183,6 +175,9 @@ class Train:
         self._acceleration = 0.0
 
         self._drive_demand = 0.0
+        self._cab_active = {
+            cab_id: cab_id == config.initial_active_cab for cab_id in config.cab_ids
+        }
 
     @property
     def train_id(self) -> str:
@@ -202,16 +197,18 @@ class Train:
             )
         if control.drive_demand is not None and not is_normalized(control.drive_demand):
             return ControlResult(ok=False, error="drive_demand must be in [-1.0, 1.0]")
+        if control.active is not None and control.cab_id is None:
+            return ControlResult(ok=False, error="cab activation requires cab_id")
 
         if control.drive_demand is not None:
             self._drive_demand = control.drive_demand
+        if control.active is not None:
+            self._cab_active[control.cab_id] = control.active
         return ControlResult()
 
     def set_equipment(self, command: EquipmentSet) -> ControlResult:
         """Apply an equipment-set command immediately (no time advance).
 
-        Cab ``activate``/``deactivate`` set that cab's local flag and nothing
-        else; cabs hold no authority, so control acceptance is unaffected.
         Every equipment state change is routed to the component and validated
         at the aggregate boundary.
         """
@@ -232,10 +229,6 @@ class Train:
             if command.command is None:
                 raise ValueError("door requires a command")
             return DoorControl(command.command)
-        if isinstance(equipment, Cab):
-            if command.command is None:
-                raise ValueError("cab requires a command")
-            return CabControl(command.command, command.cab_id)
         if isinstance(equipment, Btm):
             if command.data is None:
                 raise ValueError("btm requires data")
@@ -292,8 +285,8 @@ class Train:
         """Group per-instance snapshots by type key for the train snapshot.
 
         Train-level singletons (empty slot, one instance) expose a single
-        snapshot; slotted equipment (per-cab cabs, BTM, multiple doors)
-        exposes a tuple with one entry per instance, §3.5.
+        snapshot; slotted equipment (per-cab BTM, multiple doors) exposes a
+        tuple with one entry per instance, §3.5.
         """
 
         return tuple(
@@ -305,7 +298,10 @@ class Train:
         equipment = self._equipment_snapshot()
         return TrainSnapshot(
             train_id=self._config.train_id,
-            cab_ids=self._config.cab_ids,
+            cabs=tuple(
+                CabSnapshot(cab_id=cab_id, active=active)
+                for cab_id, active in self._cab_active.items()
+            ),
             speed=self._speed,
             acceleration=self._acceleration,
             position=self._position,
@@ -321,5 +317,9 @@ class Train:
         self._speed = self._config.initial_speed
         self._acceleration = 0.0
         self._drive_demand = 0.0
+        self._cab_active = {
+            cab_id: cab_id == self._config.initial_active_cab
+            for cab_id in self._config.cab_ids
+        }
         for eq in self._equipment.values():
             eq.reset()

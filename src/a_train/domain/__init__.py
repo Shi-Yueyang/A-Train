@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from .equipment import (
     Btm,
-    Cab,
     Door,
     EquipmentContext,
 )
@@ -31,7 +30,6 @@ from .train import ControlResult, EquipmentSet, Train, TrainConfig, TrainControl
 __all__ = [
     "Btm",
     "BtmSnapshot",
-    "Cab",
     "CabSnapshot",
     "ControlResult",
     "Door",

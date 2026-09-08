@@ -36,6 +36,13 @@ browser never touches simulator internals.
 | `SCALED`   | `simulation_delta = wall_delta * multiplier`  |
 | `MANUAL`   | Advances only via`POST /api/simulation/step`. |
 
+## Cab representation
+
+Cab activation is native train state, not equipment. Every train exposes
+`cabs`: one `{ "cab_id": int, "active": bool }` entry per configured cab, in
+configured order. It changes through `POST /api/trains/{train_id}/commands`
+with `cab_id` plus `active`.
+
 ## Equipment representation
 
 Every train exposes equipment as a flat array of independently addressed
@@ -45,8 +52,6 @@ type-specific `state` object:
 ```json
 {
   "equipment": [
-    { "type": "cab", "key": "cab_1", "state": { "cab_id": 1, "active": true } },
-    { "type": "cab", "key": "cab_2", "state": { "cab_id": 2, "active": false } },
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
@@ -199,13 +204,14 @@ step boundary.
 **Request body** (`TrainControlRequest`):
 
 ```json
-{ "cab_id": 1, "drive_demand": 0.75 }
+{ "cab_id": 1, "drive_demand": 0.75, "active": true }
 ```
 
 | Field            | Type           | Notes                                                                                                                                                             |
 | ---------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cab_id`       | integer        | Must be one of the train's configured cabs. Cabs carry no authority (§3.3); any configured cab is accepted.                                                                                                                   |
+| `cab_id`       | integer        | Must be one of the train's configured cabs. Cabs carry no authority (§3.3); any configured cab is accepted. Identifies the cab whose native activation flag `active` sets. |
 | `drive_demand` | number or null | Signed lever in`[-1.0, 1.0]`: positive drives (traction limit), negative decelerates (decel limit). Omitted or null leaves it unchanged. |
+| `active`       | bool or null   | Sets this cab's native activation flag. Omitted or null leaves it unchanged; it never affects control acceptance or dynamics. |
 
 **Response 200**: `TrainResponse`.
 
@@ -225,7 +231,7 @@ with the component's error message on invalid input.
 
 | Field         | Type               | Used by                    | Notes                                                        |
 | ------------- | ------------------ | -------------------------- | ------------------------------------------------------------ |
-| `command`   | string             | `door`, `cab`, `stcs_atp` | `"open"` / `"close"`; `"activate"` / `"deactivate"`; STCS ATP command. |
+| `command`   | string             | `door`, `stcs_atp`        | `"open"` / `"close"`; STCS ATP command. |
 | `cab_id`    | integer            | optional consistency check | Target cab, when applicable. |
 | `data`      | string             | `btm_1`, `btm_2` | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400. |
 
@@ -234,7 +240,6 @@ with the component's error message on invalid input.
 | Key      | Behavior                                                                                                                                                                                               |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `left_door`, `right_door` | `command` `"open"` / `"close"` sets the selected door state. |
-| `cab_1`, `cab_2` | `"activate"` / `"deactivate"` sets that cab's local activation flag. |
 | `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
 | `stcs_atp` | `command` is recorded as `last_command` without interpretation. |
 
@@ -267,15 +272,16 @@ by equipment type (§3.5).
 ```json
 {
   "train_id": "TRAIN001",
-  "cab_ids": [1, 2],
+  "cabs": [
+    { "cab_id": 1, "active": true },
+    { "cab_id": 2, "active": false }
+  ],
   "speed": 0.5,
   "acceleration": 1.5,
   "position": 0.0125,
   "direction": "forward",
   "drive_demand": 1.0,
   "equipment": [
-    { "type": "cab", "key": "cab_1", "state": { "cab_id": 1, "active": true } },
-    { "type": "cab", "key": "cab_2", "state": { "cab_id": 2, "active": false } },
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
@@ -287,7 +293,7 @@ by equipment type (§3.5).
 | Field            | Type   | Notes                                                           |
 | ---------------- | ------ | --------------------------------------------------------------- |
 | `train_id`     | string | Stable identifier.                                              |
-| `cab_ids`      | array  | Configured cabs.                                                |
+| `cabs`         | array  | Native cab state: one `{cab_id, active}` per configured cab, in configured order. |
 | `speed`        | number | m/s, never negative.                                            |
 | `acceleration` | number | m/s², the value actually applied during the last step (§3.4). |
 | `position`     | number | m along the linear track, never decreases.                      |
@@ -315,7 +321,7 @@ command body has no effect (extra fields are ignored).
 
 The equipment model is flat in every REST and WebSocket response. `equipment`
 is an array of entries shaped as `{ "type": string, "key": string, "state":
-object }`. The key uniquely identifies one instance, for example `cab_1`,
+object }`. The key uniquely identifies one instance, for example
 `left_door`, `right_door`, `btm_1`, or `stcs_atp`. Equipment commands address that instance
 directly through `/api/trains/{train_id}/equipment/{key}`; there is no implicit
 type grouping or slot field.
