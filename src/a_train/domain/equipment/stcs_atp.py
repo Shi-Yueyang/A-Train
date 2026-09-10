@@ -135,6 +135,7 @@ class StcsAtp:
         self._train_out_states["service_brake_7_feedback"] = not self._train_in_states[
             "maximum_service_brake_7"
         ]
+        self._train_out_states["sleep_signal"] = not self._train_out_states["cab_activation"]
         modes = {cab: handle[0] for cab, handle in self._handles.items()}
         directions = {cab: handle[1] for cab, handle in self._handles.items()}
         self._train_out_states["direction_handle_forward_1"] = directions.get(1, "off") == "forward"

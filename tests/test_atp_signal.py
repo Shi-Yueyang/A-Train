@@ -85,7 +85,7 @@ def test_stcs_atp_decodes_binary_command_into_train_in_states() -> None:
     assert equipment.train_out_states["emergency_brake_2_inner_feedback"] is True
     assert equipment.train_out_states["emergency_brake_feedback"] is False
     assert equipment.train_out_states["service_brake_7_feedback"] is False
-    assert equipment.read_state().train_out_signal == "010000000000000000000000000000"
+    assert equipment.read_state().train_out_signal == "010000001000000000000000000000"
 
 
 def test_stcs_atp_short_command_preserves_unmentioned_states() -> None:
@@ -175,16 +175,22 @@ def test_cab_activation_is_reflected_in_matching_stcs_output() -> None:
     equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
     assert equipment["stcs_atp_1"].train_out_states[4].value is True
     assert equipment["stcs_atp_2"].train_out_states[4].value is False
+    assert equipment["stcs_atp_1"].train_out_states[8].value is False
+    assert equipment["stcs_atp_2"].train_out_states[8].value is True
 
     assert train.apply_control(TrainControl(cab_id=2, active=True)).ok
     equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
     assert equipment["stcs_atp_1"].train_out_states[4].value is True
     assert equipment["stcs_atp_2"].train_out_states[4].value is True
+    assert equipment["stcs_atp_1"].train_out_states[8].value is False
+    assert equipment["stcs_atp_2"].train_out_states[8].value is False
 
     assert train.apply_control(TrainControl(cab_id=1, active=False)).ok
     equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
     assert equipment["stcs_atp_1"].train_out_states[4].value is False
     assert equipment["stcs_atp_2"].train_out_states[4].value is True
+    assert equipment["stcs_atp_1"].train_out_states[8].value is True
+    assert equipment["stcs_atp_2"].train_out_states[8].value is False
 
 
 def test_stcs_observes_generic_cab_state() -> None:
@@ -264,6 +270,7 @@ def test_stcs_atp_has_train_out_state_shape() -> None:
                 "emergency_brake_2_inner_feedback",
                 "emergency_brake_feedback",
                 "service_brake_7_feedback",
+                "sleep_signal",
             }
         )
         for name, value in states.items()
@@ -274,4 +281,4 @@ def test_stcs_atp_has_train_out_state_shape() -> None:
 
     states["cab_activation"] = True
     assert equipment.train_out_states["cab_activation"] is False
-    assert equipment.read_state().train_out_signal == "1111" + "0" * 26
+    assert equipment.read_state().train_out_signal == "1111" + "0" * 4 + "1" + "0" * 21
