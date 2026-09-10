@@ -23,6 +23,7 @@ from typing import Any
 
 from .controls import (
     BtmControl,
+    CabStateControl,
     DoorControl,
     DriverControl,
     DrivingSystemControl,
@@ -216,8 +217,7 @@ class Train:
         self._cab_key = {cab_id: False for cab_id in config.cab_ids}
         # Sync observer equipment (e.g. door feedback into stcs_atp) with the
         # configured initial state before the first snapshot is taken.
-        self._resolve_equipment_intents(self._collect_equipment_intents())
-        self._sync_cab_feedback()
+        self._resolve_all_intents()
 
     @property
     def train_id(self) -> str:
@@ -246,10 +246,10 @@ class Train:
             self._drive_demand = control.drive_demand
         if control.active is not None:
             self._cab_active[control.cab_id] = control.active
-            self._sync_cab_feedback()
         if control.key is not None:
             self._cab_key[control.cab_id] = control.key
-            self._sync_cab_feedback()
+        if control.active is not None or control.key is not None:
+            self._resolve_all_intents()
         return ControlResult()
 
     def set_equipment(self, command: EquipmentControlRequest) -> ControlResult:
@@ -270,21 +270,27 @@ class Train:
             equipment.apply_control(self._equipment_control(equipment, command))
         except ValueError as exc:
             return ControlResult(ok=False, error=str(exc))
-        self._resolve_equipment_intents(self._collect_equipment_intents())
-        self._sync_cab_feedback()
+        self._resolve_all_intents()
         return ControlResult()
 
-    def _sync_cab_feedback(self) -> None:
-        for cab_id, key_inserted in self._cab_key.items():
-            equipment = self._equipment.get(f"stcs_atp_{cab_id}")
-            if isinstance(equipment, StcsAtp):
-                equipment.apply_control(
-                    StcsAtpControl(
-                        cab_id=cab_id,
-                        key_activation=key_inserted,
-                        cab_activation=self._cab_active[cab_id],
-                    )
-                )
+    def _resolve_all_intents(self) -> None:
+        self._resolve_equipment_intents(
+            self._collect_equipment_intents() + self._cab_state_intents()
+        )
+
+    def _cab_state_intents(self) -> tuple[EquipmentIntent, ...]:
+        return tuple(
+            EquipmentIntent(
+                source=f"cab_{cab_id}",
+                target="all_equipments",
+                control=CabStateControl(
+                    cab_id=cab_id,
+                    active=self._cab_active[cab_id],
+                    key_inserted=self._cab_key[cab_id],
+                ),
+            )
+            for cab_id in self._cab_active
+        )
 
     @staticmethod
     def _equipment_control(equipment: Equipment[Any], command: EquipmentControlRequest):
@@ -364,6 +370,11 @@ class Train:
             target = self._equipment.get(intent.target)
             if target is not None:
                 target.apply_control(intent.control)
+            elif intent.target == "all_equipments" and isinstance(intent.control, CabStateControl):
+                for equipment in self._equipment.values():
+                    observe_cab_state = getattr(equipment, "observe_cab_state", None)
+                    if observe_cab_state is not None:
+                        observe_cab_state(intent.control)
             elif intent.target == "stcs_atp":
                 for equipment in self._equipment.values():
                     if equipment.type == "stcs_atp":
@@ -420,5 +431,4 @@ class Train:
         self._cab_key = {cab_id: False for cab_id in self._config.cab_ids}
         for eq in self._equipment.values():
             eq.reset()
-        self._resolve_equipment_intents(self._collect_equipment_intents())
-        self._sync_cab_feedback()
+        self._resolve_all_intents()

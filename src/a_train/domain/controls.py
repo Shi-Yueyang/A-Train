@@ -17,6 +17,15 @@ class BtmControl:
 
 
 @dataclass(frozen=True)
+class CabStateControl:
+    """Native state observed by equipment associated with one cab."""
+
+    cab_id: int
+    active: bool
+    key_inserted: bool
+
+
+@dataclass(frozen=True)
 class StcsAtpControl:
     """The complete writable surface of one ``stcs_atp_<cab_id>`` instance.
 
@@ -31,8 +40,6 @@ class StcsAtpControl:
     command: str | None = None
     left_door_open: bool | None = None
     right_door_open: bool | None = None
-    key_activation: bool | None = None
-    cab_activation: bool | None = None
     cab_id: int | None = None
     direction: str | None = None
     mode: str | None = None
@@ -70,4 +77,4 @@ class TrainControl:
 
 
 EquipmentControl = DoorControl | BtmControl | StcsAtpControl | DrivingSystemControl
-Control = EquipmentControl | TrainControl | DriverControl
+Control = EquipmentControl | CabStateControl | TrainControl | DriverControl

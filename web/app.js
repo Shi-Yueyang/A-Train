@@ -222,7 +222,7 @@ function renderTrainState() {
   ];
   pre.textContent = lines.join("\n");
 
-  renderStcs(stcsEl, equipment.find((entry) => entry.type === "stcs_atp"));
+  renderStcs(stcsEl, equipment.filter((entry) => entry.type === "stcs_atp"));
   renderEquipment(equipmentEl, equipment.filter((entry) => entry.type !== "stcs_atp"));
   syncSlider("drive", sel.drive_demand);
   renderEquipmentControls(equipment);
@@ -454,9 +454,9 @@ function renderEquipment(container, equipment) {
   }
 }
 
-function renderStcs(container, entry) {
+function renderStcs(container, entries) {
   container.replaceChildren();
-  if (entry) {
+  for (const entry of entries) {
     container.appendChild(buildStcsCard(entry));
   }
 }
@@ -486,16 +486,26 @@ function buildStcsCard(entry) {
   card.className = "equipment-card stcs-card";
 
   const heading = document.createElement("h3");
+  const cabMatch = /^stcs_atp_(\d+)$/.exec(entry.key);
+  const cabLabel = cabMatch ? `Cab ${cabMatch[1]}` : "Cab —";
   heading.textContent = entry.key;
   card.appendChild(heading);
 
   const raw = document.createElement("p");
   raw.className = "stcs-raw";
+  const cab = document.createElement("span");
+  cab.textContent = `cab: ${cabLabel}`;
   const command = document.createElement("span");
   command.textContent = `last ATP command: ${state.last_command ?? "—"}`;
   const signal = document.createElement("span");
   signal.textContent = `train-out signal: ${state.train_out_signal || "—"}`;
-  raw.append(command, document.createElement("br"), signal);
+  raw.append(
+    cab,
+    document.createElement("br"),
+    command,
+    document.createElement("br"),
+    signal
+  );
   card.appendChild(raw);
 
   const columns = document.createElement("div");

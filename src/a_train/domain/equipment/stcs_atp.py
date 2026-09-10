@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..controls import DriverControl, StcsAtpControl
+from ..controls import CabStateControl, DriverControl, StcsAtpControl
 from ..snapshots import SignalState, StcsAtpSnapshot
 from .base import EquipmentIntent
 
@@ -88,10 +88,6 @@ class StcsAtp:
             self._train_out_states["door_state_1"] = control.left_door_open
         if control.right_door_open is not None:
             self._train_out_states["door_state_2"] = control.right_door_open
-        if control.key_activation is not None:
-            self._train_out_states["key_activation"] = control.key_activation
-        if control.cab_activation is not None:
-            self._train_out_states["cab_activation"] = control.cab_activation
         if control.direction is not None or control.mode is not None:
             self._apply_handle_feedback(control)
         if control.command is not None:
@@ -106,6 +102,13 @@ class StcsAtp:
                 state_name = self.ATP_TO_TRAIN_SIGNAL_BY_BIT.get(bit_index)
                 if state_name is not None:
                     self._train_in_states[state_name] = bit == "1"
+        self._update_train_out_states()
+
+    def observe_cab_state(self, state: CabStateControl) -> None:
+        if state.cab_id != self._cab_id:
+            return
+        self._train_out_states["cab_activation"] = state.active
+        self._train_out_states["key_activation"] = state.key_inserted
         self._update_train_out_states()
 
     def _apply_handle_feedback(self, control: StcsAtpControl) -> None:

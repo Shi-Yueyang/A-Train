@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from a_train.adapters.atp.protocol import parse_atp_command
-from a_train.domain.controls import StcsAtpControl, TrainControl
+from a_train.domain.controls import CabStateControl, StcsAtpControl, TrainControl
 from a_train.domain.equipment import StcsAtp
 from a_train.domain.train import EquipmentControlRequest, Train, TrainConfig
 
@@ -185,6 +185,17 @@ def test_cab_activation_is_reflected_in_matching_stcs_output() -> None:
     equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
     assert equipment["stcs_atp_1"].train_out_states[4].value is False
     assert equipment["stcs_atp_2"].train_out_states[4].value is True
+
+
+def test_stcs_observes_generic_cab_state() -> None:
+    equipment = StcsAtp("stcs_atp_2", cab_id=2)
+    equipment.observe_cab_state(CabStateControl(cab_id=2, active=True, key_inserted=True))
+    assert equipment.train_out_states["cab_activation"] is True
+    assert equipment.train_out_states["key_activation"] is True
+
+    equipment.observe_cab_state(CabStateControl(cab_id=1, active=False, key_inserted=False))
+    assert equipment.train_out_states["cab_activation"] is True
+    assert equipment.train_out_states["key_activation"] is True
 
 
 def test_door_state_feedback_tracks_left_and_right_doors() -> None:
