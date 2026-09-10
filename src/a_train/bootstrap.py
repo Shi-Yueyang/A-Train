@@ -96,7 +96,7 @@ def _endpoints_from_environment() -> tuple[AtpEndpoint, ...]:
     """Decode ATP endpoints set by the ``run`` command (atp-api.md §6, config.py)."""
 
     entries = decode_env(os.environ.get(ATP_ENDPOINTS_ENV, ""))
-    return tuple(AtpEndpoint(e["train_id"], e["cab_id"], e["host"], e["port"]) for e in entries)
+    return tuple(AtpEndpoint(e["cab_id"], e["host"], e["port"]) for e in entries)
 
 
 def create_app(

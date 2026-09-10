@@ -38,32 +38,32 @@ T1 = TrainConfig(
     initial_position=0.0,
 )
 
-EP1 = {"train_id": "TRAIN001", "cab_id": 1, "host": "127.0.0.1", "port": 9101}
+EP1 = {"cab_id": 1, "host": "127.0.0.1", "port": 9101}
 
 
 # -- Endpoint spec / file parsing ----------------------------------------------
 
 
 def test_parse_endpoint_spec_accepts_ipv4() -> None:
-    assert parse_endpoint_spec("TRAIN001:1=127.0.0.1:9101") == EP1
+    assert parse_endpoint_spec("1=127.0.0.1:9101") == EP1
 
 
 def test_parse_endpoint_spec_accepts_bracketed_ipv6() -> None:
-    got = parse_endpoint_spec("TRAIN001:2=[::1]:9102")
-    assert got == {"train_id": "TRAIN001", "cab_id": 2, "host": "::1", "port": 9102}
+    got = parse_endpoint_spec("2=[::1]:9102")
+    assert got == {"cab_id": 2, "host": "::1", "port": 9102}
 
 
 @pytest.mark.parametrize(
     "bad",
     [
-        "TRAIN001:1:127.0.0.1",  # no '='
-        "TRAIN001=127.0.0.1:9101",  # no cab id
-        "TRAIN001:x=127.0.0.1:9101",  # cab id not int
-        "TRAIN001:0=127.0.0.1:9101",  # cab id below 1
-        "TRAIN001:1=127.0.0.1",  # no port
-        "TRAIN001:1=127.0.0.1:abc",  # port not int
-        "TRAIN001:1=127.0.0.1:0",  # port out of range
-        "TRAIN001:1=127.0.0.1:99999",  # port out of range
+        "1:127.0.0.1",  # no '='
+        "=127.0.0.1:9101",  # no cab id
+        "x=127.0.0.1:9101",  # cab id not int
+        "0=127.0.0.1:9101",  # cab id below 1
+        "1=127.0.0.1",  # no port
+        "1=127.0.0.1:abc",  # port not int
+        "1=127.0.0.1:0",  # port out of range
+        "1=127.0.0.1:99999",  # port out of range
     ],
 )
 def test_parse_endpoint_spec_rejects_invalid(bad: str) -> None:
@@ -79,7 +79,7 @@ def test_load_endpoints_file(tmp_path) -> None:
 
 def test_load_endpoints_file_rejects_invalid_fields(tmp_path) -> None:
     path = tmp_path / "atp.json"
-    missing = {"train_id": "T", "cab_id": 1}
+    missing = {"cab_id": 1}
     path.write_text(json.dumps({"atp_endpoints": [missing]}), encoding="utf-8")
     with pytest.raises(ConfigError, match="host"):
         load_endpoints_file(path)
@@ -88,13 +88,13 @@ def test_load_endpoints_file_rejects_invalid_fields(tmp_path) -> None:
 def test_resolve_endpoints_merges_file_and_specs(tmp_path) -> None:
     path = tmp_path / "atp.json"
     path.write_text(json.dumps([EP1]), encoding="utf-8")
-    spec = {"train_id": "TRAIN001", "cab_id": 2, "host": "127.0.0.1", "port": 9102}
-    assert resolve_endpoints(path, ["TRAIN001:2=127.0.0.1:9102"]) == [EP1, spec]
+    spec = {"cab_id": 2, "host": "127.0.0.1", "port": 9102}
+    assert resolve_endpoints(path, ["2=127.0.0.1:9102"]) == [EP1, spec]
 
 
 def test_resolve_endpoints_rejects_duplicate_cab() -> None:
     with pytest.raises(ConfigError, match="duplicate"):
-        resolve_endpoints(None, ["TRAIN001:1=127.0.0.1:9101", "TRAIN001:1=127.0.0.1:9102"])
+        resolve_endpoints(None, ["1=127.0.0.1:9101", "1=127.0.0.1:9102"])
 
 
 def test_env_roundtrip() -> None:
@@ -106,7 +106,7 @@ def test_env_rejects_malformed() -> None:
     with pytest.raises(ConfigError):
         decode_env("{not json")
     with pytest.raises(ConfigError):
-        decode_env('{"train_id": "TRAIN001"}')
+        decode_env('{"cab_id": 1}')
 
 
 # -- run command wiring ---------------------------------------------------------
@@ -144,7 +144,7 @@ def test_run_command_reports_invalid_spec_without_starting(monkeypatch, capsys) 
     monkeypatch.setattr("uvicorn.run", boom)
     code = cli.main(["run", "--atp", "nonsense"])
     assert code == 2
-    assert "TRAIN_ID:CAB_ID=HOST:PORT" in capsys.readouterr().err
+    assert "CAB_ID=HOST:PORT" in capsys.readouterr().err
 
 
 # -- The factory path: create_app() with no explicit endpoints ------------------

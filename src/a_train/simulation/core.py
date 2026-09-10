@@ -66,8 +66,9 @@ class SimulationCore:
         self._sequence = 0
         self._results: dict[int, asyncio.Future[CommandResult]] = {}
 
-        self._trains: dict[str, Train] = {cfg.train_id: Train(cfg) for cfg in train_configs}
-        self._train_ids_sorted: tuple[str, ...] = tuple(sorted(self._trains))
+        if len(train_configs) != 1:
+            raise ValueError("exactly one train configuration is required")
+        self._train = Train(train_configs[0])
 
         self._latest_snapshot = self._build_snapshot()
 
@@ -93,6 +94,10 @@ class SimulationCore:
 
     def get_snapshot(self) -> SimulationSnapshot:
         return self._latest_snapshot
+
+    @property
+    def train_id(self) -> str:
+        return self._train.train_id
 
     def subscribe(
         self, maxsize: int = _DEFAULT_SUBSCRIBER_MAXSIZE
@@ -202,8 +207,7 @@ class SimulationCore:
         self._simulation_time = 0.0
         self._accumulator = 0.0
         self._monotonic_ref = None
-        for train in self._trains.values():
-            train.reset()
+        self._train.reset()
         return CommandResult()
 
     def _apply_set_time_mode(self, command: SetTimeModeCommand) -> CommandResult:
@@ -236,17 +240,15 @@ class SimulationCore:
         return CommandResult()
 
     def _apply_train_control(self, command: TrainControlCommand) -> CommandResult:
-        train = self._trains.get(command.train_id)
-        if train is None:
+        if command.train_id != self._train.train_id:
             return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
-        result = train.apply_control(command.payload)
+        result = self._train.apply_control(command.payload)
         return CommandResult(ok=result.ok, error=result.error)
 
     def _apply_equipment(self, command: EquipmentCommand) -> CommandResult:
-        train = self._trains.get(command.train_id)
-        if train is None:
+        if command.train_id != self._train.train_id:
             return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
-        result = train.set_equipment(command.payload)
+        result = self._train.set_equipment(command.payload)
         return CommandResult(ok=result.ok, error=result.error)
 
     # -- Fixed-step update cycle (§2.5) ----------------------------------
@@ -259,9 +261,8 @@ class SimulationCore:
     def _run_fixed_step(self, duration: float) -> None:
         # 1. Advance simulation time to the nominal-step end.
         self._simulation_time += duration
-        # 2. Update each train's equipment and physics in stable train-ID order.
-        for train_id in self._train_ids_sorted:
-            self._trains[train_id].step(duration)
+        # 2. Update the train's equipment and physics.
+        self._train.step(duration)
         # 3. Produce a read-only state snapshot.
         self._latest_snapshot = self._build_snapshot()
         self._publish_snapshot()
@@ -287,13 +288,12 @@ class SimulationCore:
             future.set_result(result)
 
     def _build_snapshot(self) -> SimulationSnapshot:
-        trains = tuple(self._trains[tid].get_snapshot() for tid in self._train_ids_sorted)
         return SimulationSnapshot(
             simulation_state=self._state,
             simulation_time=self._simulation_time,
             time_mode=self._time_mode,
             time_multiplier=self._time_multiplier,
-            trains=trains,
+            trains=(self._train.get_snapshot(),),
         )
 
     def _publish_snapshot(self) -> None:

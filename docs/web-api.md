@@ -38,7 +38,7 @@ browser never touches simulator internals.
 
 ## Cab representation
 
-Cab activation is native train state, not equipment. Every train exposes
+Cab activation is native train state, not equipment. The train exposes
 `cabs`: one `{ "cab_id": int, "active": bool, "key": bool, "facing": string }` entry per
 configured cab, in configured order. `facing` is the cab's immutable track
 facing (`"forward"` drives toward increasing position, `"backward"` toward
@@ -48,7 +48,7 @@ plus `active`.
 
 ## Equipment representation
 
-Every train exposes equipment as a flat array of independently addressed
+The train exposes equipment as a flat array of independently addressed
 instances. Each entry has a behavior `type`, a unique instance `key`, and a
 type-specific `state` object:
 
@@ -187,7 +187,8 @@ retained in the accumulator, §2.3).
 
 ### GET /api/trains
 
-Lists all trains in stable train-ID order.
+Returns the single configured train in the response envelope retained for the
+WebSocket contract.
 
 **Response 200**:
 
@@ -197,7 +198,7 @@ Lists all trains in stable train-ID order.
 
 Items are `TrainResponse` objects (see [Response models](#response-models)).
 
-### GET /api/trains/
+### GET /api/trains/{train_id}
 
 Reads one train.
 
@@ -205,7 +206,7 @@ Reads one train.
 
 **Errors**: 404 unknown train.
 
-### POST /api/trains//commands
+### POST /api/trains/{train_id}/commands
 
 Applies a normalized control through the train aggregate (§3.3). Control state
 changes are accepted immediately; physical effects appear at the next fixed
@@ -229,7 +230,7 @@ step boundary.
 **Errors**: 400 unknown train; `cab_id` is not a configured cab; `drive_demand`
 outside `[-1.0, 1.0]` or not finite.
 
-### POST /api/trains//equipment/
+### POST /api/trains/{train_id}/equipment/{equipment_key}
 
 Sets train-facing equipment state through the generic equipment endpoint
 (§3.5). `{key}` is the registered equipment type. Equipment changes are applied

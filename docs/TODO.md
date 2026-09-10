@@ -61,7 +61,7 @@ and transport-neutral snapshots.
 
 * Implement the `Train` aggregate API: `apply_control`, `step`,
   `get_snapshot`, and `reset`.
-* Define frozen per-train configuration and private mutable physical and
+* Define one frozen train configuration and private mutable physical and
   control state.
 * Validate train configuration, cab identity, and the normalized signed
   drive demand at the aggregate boundary.
@@ -71,14 +71,12 @@ and transport-neutral snapshots.
   components with plain-value control calls, `read_state`, and `reset`.
 * Define the stable aggregate update order: apply accepted controls, resolve
   dynamics, then construct a snapshot.
-* Implement stable train-ID update order and immutable train snapshots with
+* Implement immutable train snapshots with
   optional nested equipment snapshots.
 * Build bounded subscriber queues for simulation snapshots.
 
 ### Train World Passing Criteria
 
-* Multiple trains produce stable, repeatable public snapshots using the same
-  initial state and command sequence.
 * A valid train-control request submitted through REST changes train control
   state only at the defined simulation boundary; invalid train, cab, or demand
   input returns a clear error and leaves state unchanged.
@@ -108,11 +106,11 @@ the complete browser client planned for Phase 4.
 
 * Serve a static browser page from the FastAPI application.
 * Display the current simulation state, time mode, time multiplier, simulation
-  time, and each train's position, speed, acceleration, and control state.
+  time, and the train's position, speed, acceleration, and control state.
 * Provide controls to run, pause, reset, select `MANUAL` or `SCALED` mode, set
   a time multiplier, and advance a configurable manual step.
 * Provide controls for the signed drive demand and for door state for a
-  selected train and cab.
+  selected cab.
 * Subscribe to the `/ws` snapshot stream on page load and render every received
   snapshot. Commands are submitted through the REST API; the resulting snapshot
   is delivered back over the WebSocket, so the page never polls.

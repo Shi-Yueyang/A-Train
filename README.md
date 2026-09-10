@@ -1,6 +1,6 @@
 # A-Train Simulator
 
-A-Train is a deterministic, headless train simulator written in Python. It owns
+A-Train is a deterministic, headless single-train simulator written in Python. It owns
 the simulated physical world, advances it on a fixed-step clock driven by a
 single `SimulationCore` event loop, and communicates with external ATP
 (Automatic Train Protection) processes over TCP using a text-based NDJSON
@@ -30,12 +30,10 @@ curl http://127.0.0.1:8000/api/status
 
 ## ATP
 
-Add one endpoint per cab:
+The simulator hosts one train, identified as `TRAIN001` by default. Add one endpoint per cab:
 
 ```bash
-python -m a_train run \
-  --atp TRAIN001:1=127.0.0.1:9101 \
-  --atp TRAIN001:2=127.0.0.1:9102
+python -m a_train run --host 127.0.0.1 --port 8000 --atp 1=127.0.0.1:9101 --atp 2=127.0.0.1:9102
 ```
 
 Or use a JSON config file:

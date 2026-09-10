@@ -32,7 +32,7 @@ T1 = TrainConfig(
 
 
 def _cabs(endpoints_port: int) -> list[AtpEndpoint]:
-    return [AtpEndpoint("TRAIN001", cab_id, "127.0.0.1", endpoints_port) for cab_id in (1, 2)]
+    return [AtpEndpoint(cab_id, "127.0.0.1", endpoints_port) for cab_id in (1, 2)]
 
 
 def _manager(c):  # AtpManager
@@ -92,7 +92,7 @@ async def test_channels_become_ready_without_handshake() -> None:
 
 async def test_channel_becomes_ready_when_server_appears_later() -> None:
     port = _free_port()
-    async with running_app([T1], [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]) as c:
+    async with running_app([T1], [AtpEndpoint(1, "127.0.0.1", port)]) as c:
         await asyncio.sleep(0.15)  # several refused retries already elapsed
         assert _manager(c).ready_endpoints == frozenset()
 
@@ -174,7 +174,7 @@ async def test_ready_connection_survives_unknown_inbound_messages() -> None:
 
 async def test_send_message_writes_framed_ndjson_to_peer() -> None:
     port = _free_port()
-    async with running_app([T1], [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]) as c:
+    async with running_app([T1], [AtpEndpoint(1, "127.0.0.1", port)]) as c:
         manager = _manager(c)
 
         # Channel down: the write path refuses.
@@ -201,7 +201,7 @@ async def test_send_message_writes_framed_ndjson_to_peer() -> None:
 
 async def test_rest_reports_connection_states_through_the_lifecycle() -> None:
     port = _free_port()
-    async with running_app([T1], [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]) as c:
+    async with running_app([T1], [AtpEndpoint(1, "127.0.0.1", port)]) as c:
         await asyncio.sleep(0.15)  # refused attempts put the client in backoff
 
         async def _status_until(*states: str, timeout: float = 5.0) -> dict:

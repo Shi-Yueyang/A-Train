@@ -36,16 +36,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--atp",
         action="append",
         default=[],
-        metavar="TRAIN_ID:CAB_ID=HOST:PORT",
+        metavar="CAB_ID=HOST:PORT",
         help=(
             "Connect to an external ATP process; repeatable, one per cab, "
-            "e.g. --atp TRAIN001:1=127.0.0.1:9101"
+            "e.g. --atp 1=127.0.0.1:9101"
         ),
     )
     run_p.add_argument(
         "--atp-config",
         metavar="FILE",
-        help='JSON file: {"atp_endpoints": [{"train_id", "cab_id", "host", "port"}, ...]}',
+        help='JSON file: {"atp_endpoints": [{"cab_id", "host", "port"}, ...]}',
     )
 
     return parser

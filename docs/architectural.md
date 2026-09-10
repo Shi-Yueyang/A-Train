@@ -11,8 +11,8 @@
 The system shall:
 
 * Run on **Linux and Windows**.
-* Simulate one or more trains.
-* Support trains with **one or two cabs**.
+* Simulate one train.
+* Support the train with **one or two cabs**.
 * Communicate with external ATP processes using **TCP**.
 * Use a **text-based protocol** for easy debugging.
 * Transport arbitrary binary BTM datagrams.
@@ -204,7 +204,7 @@ sequence.
 ```text
 1. Apply queued ATP and train-control commands in arrival order.
 2. Advance simulation time by the nominal fixed-step duration.
-3. Update each train's equipment and physics in stable train-ID order.
+3. Update the train's equipment and physics.
 4. Produce a state snapshot for the Web API and ATP Manager.
 ```
 
@@ -338,7 +338,8 @@ directly. The train model determines the physical result of drive requests.
 
 ## 3.2 Configuration and State
 
-Each train has immutable configuration and mutable runtime state.
+The simulator has one train with immutable configuration and mutable runtime
+state. `train_id` remains its stable identity for snapshots and ATP messages.
 
 | Category       | Required values                                                                                                            |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -379,8 +380,8 @@ or dynamics:
 
 ## 3.4 Per-Step Dynamics
 
-The simulation core updates every train once for each fixed simulation step in
-stable train-ID order. For a step duration `dt`, the train resolves one
+The simulation core updates the train once for each fixed simulation step. For
+a step duration `dt`, the train resolves one
 signed acceleration value. With no engaged driver intent, it resolves from
 the signed drive demand:
 

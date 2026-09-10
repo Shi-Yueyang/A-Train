@@ -171,8 +171,7 @@ non-multiple like `0.12` advances `0.10` and keeps `0.02` for the next step.
 Per §2.5, each nominal fixed step performs:
 
 1. **Advance simulation time** to the step end (`simulation_time += duration`).
-2. **Update each train's equipment and physics in stable train-ID order** —
-   `for train_id in self._train_ids_sorted: self._trains[train_id].step(duration)`.
+2. **Update the train's equipment and physics** — `self._train.step(duration)`.
 3. **Produce a snapshot** — `_build_snapshot()` + `_publish_snapshot()`.
 
 The train's own `step(dt)` runs the aggregate's stable order (apply accepted
@@ -199,27 +198,28 @@ state directly — every change goes through `run_loop()`.
 
 ## 8. Train world ownership
 
-`SimulationCore` owns the train aggregates, built at construction time from
-frozen `TrainConfig` dataclasses and rebuilt state on `reset`:
+`SimulationCore` owns one train aggregate, built at construction time from one
+frozen `TrainConfig` and rebuilt state on `reset`:
 
 ```python
-self._trains: dict[str, Train] = {cfg.train_id: Train(cfg) for cfg in train_configs}
-self._train_ids_sorted: tuple[str, ...] = tuple(sorted(self._trains))
+if len(train_configs) != 1:
+  raise ValueError("exactly one train configuration is required")
+self._train = Train(train_configs[0])
 ```
 
-- **Routing.** `_apply_train_control(command)` looks up the train by
-  `train_id` and calls `train.apply_control(command.payload)`. A missing train
-  or an unconfigured cab or an out-of-range demand returns
+- **Routing.** `_apply_train_control(command)` verifies the command's
+  `train_id` against the configured train and calls `self._train.apply_control`.
+  An unknown train, unconfigured cab, or an out-of-range demand returns
   `CommandResult(ok=False)`, which the REST layer maps to HTTP 400; because
   `apply_control` validates before mutating, invalid input leaves state
   unchanged.
-- **Reset.** `_apply_reset` calls `train.reset()` on every train, restoring
-  configured physical state and clearing control/equipment runtime state.
-- **Snapshots.** `_build_snapshot` collects `train.get_snapshot()` for each
-  train in stable train-ID order into `SimulationSnapshot.trains`. The
-  `TrainSnapshot` type lives in `domain.snapshots` (the domain owns it because
-  the aggregate constructs it); `simulation.snapshots` re-exports it so the
-  simulation public API keeps its import path.
+- **Reset.** `_apply_reset` calls `self._train.reset()`, restoring configured
+  physical state and clearing control/equipment runtime state.
+- **Snapshots.** `_build_snapshot` places `self._train.get_snapshot()` in
+  `SimulationSnapshot.trains`. The `TrainSnapshot` type lives in
+  `domain.snapshots` (the domain owns it because the aggregate constructs it);
+  `simulation.snapshots` re-exports it so the simulation public API keeps its
+  import path.
 
 The core never exposes a `Train` object; only frozen snapshots leave the core.
 
@@ -255,9 +255,8 @@ dataclasses (§2.6: never expose a mutable object to a client).
    `_drain_fixed_steps`.
 6. **Immutable snapshots.** Clients receive frozen, read-only views; snapshots
    cannot be used to mutate subsequent simulator state.
-7. **Stable train order.** Trains update in sorted train-ID order every step,
-   so multi-train snapshots are repeatable for the same initial state and
-   command sequence.
+7. **Single train.** The core rejects startup configurations containing zero or
+  more than one train, keeping update and snapshot paths unambiguous.
 
 ## 11. Phase status
 

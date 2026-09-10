@@ -19,7 +19,7 @@ browser-facing HTTP/WebSocket API is a separate contract (`web-api.md`).
 | TCP server     | The**ATP process**. It accepts exactly one connection at a time.                                          |
 | TCP client     | The**simulator**. It dials each configured endpoint and keeps the connection open.                        |
 | Stream content | NDJSON: one JSON object per line,`\n`-terminated, UTF-8.                                                      |
-| Cab identity   | Lives in the endpoint configuration (which host:port is dialed). One endpoint = one`(train_id, cab_id)` pair. |
+| Cab identity   | Lives in the endpoint configuration (which host:port is dialed). One endpoint = one `(train_id, cab_id)` pair on the simulator's single train. |
 
 The channel is live the moment TCP opens, and the simulator starts publishing
 immediately.
@@ -217,7 +217,7 @@ Processing pipeline (manager → core):
    queue; ATP commands interleave with browser commands in arrival order and
    are applied at the same point in the update cycle (immediately, then on
    every fixed step).
-4. If the core rejects a command (e.g. unknown train/cab), the ATP peer gets
+4. If the core rejects a command (e.g. unknown train identity or cab), the ATP peer gets
    `ERROR command_rejected`; the other commands in the same message are
    unaffected.
 
@@ -407,15 +407,16 @@ Endpoints are configured at startup, one per cab
 (`README.md` shows the CLI usage; `config.py` defines validation):
 
 ```bash
-python -m a_train run --atp TRAIN001:1=127.0.0.1:9101 --atp TRAIN001:2=127.0.0.1:9102
+python -m a_train run --atp 1=127.0.0.1:9101 --atp 2=127.0.0.1:9102
 python -m a_train run --atp-config atp.json
-# atp.json: {"atp_endpoints": [{"train_id": "TRAIN001", "cab_id": 1,
+# atp.json: {"atp_endpoints": [{"cab_id": 1,
 #                               "host": "127.0.0.1", "port": 9101}]}
 ```
 
-- `--atp TRAIN_ID:CAB_ID=HOST:PORT` is repeatable; file and flag entries are
-  merged; a duplicate `(train_id, cab_id)` fails startup.
-- Validation: non-empty `train_id`/`host`, `cab_id` ≥ 1, `port` 1-65535.
+- `--atp CAB_ID=HOST:PORT` is repeatable; file and flag entries are merged; a
+  duplicate `cab_id` fails startup.
+- Validation: `cab_id` ≥ 1, non-empty `host`, and `port` 1-65535. The single
+  train identity is added by the simulator to protocol messages.
 - The default configuration (no endpoints) starts the simulator with zero ATP
   connections.
 

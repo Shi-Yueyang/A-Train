@@ -39,9 +39,8 @@ logger = logging.getLogger("a_train.adapters.atp")
 
 @dataclass(frozen=True)
 class AtpEndpoint:
-    """Where to reach the external ATP process serving one train cab (atp-api.md §1.1)."""
+    """Where to reach the external ATP process serving one cab."""
 
-    train_id: str
     cab_id: int
     host: str
     port: int
@@ -87,7 +86,7 @@ class AtpManager:
     async def start(self) -> None:
         for endpoint in self._endpoints:
             client = AtpClient(
-                endpoint.train_id,
+                self._core.train_id,
                 endpoint.cab_id,
                 endpoint.host,
                 endpoint.port,
@@ -99,7 +98,7 @@ class AtpManager:
             self._queues[client] = queue
             self._publisher_tasks[client] = asyncio.create_task(
                 self._publish_loop(client, queue),
-                name=f"atp-publisher {endpoint.train_id} cab {endpoint.cab_id}",
+                name=f"atp-publisher {self._core.train_id} cab {endpoint.cab_id}",
             )
             await client.start()
             self._clients.append(client)

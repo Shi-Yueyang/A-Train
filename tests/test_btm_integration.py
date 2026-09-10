@@ -28,7 +28,7 @@ PAYLOAD = bytes([0x01, 0x23, 0xA4, 0xFF, 0x00, 0x81, 0x72])
 
 
 def _cabs(port: int) -> list[AtpEndpoint]:
-    return [AtpEndpoint("TRAIN001", cab_id, "127.0.0.1", port) for cab_id in (1, 2)]
+    return [AtpEndpoint(cab_id, "127.0.0.1", port) for cab_id in (1, 2)]
 
 
 def _manager(c):  # AtpManager
@@ -130,7 +130,7 @@ async def test_reset_resyncs_without_replaying_old_payload() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]) as c:
+        async with running_app([T1], [AtpEndpoint(1, "127.0.0.1", port)]) as c:
             await _await_ready(server, c)
 
             data = base64.b64encode(b"\x42").decode("ascii")

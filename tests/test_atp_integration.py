@@ -30,11 +30,11 @@ T1 = TrainConfig(
 
 
 def _cabs(port: int) -> list[AtpEndpoint]:
-    return [AtpEndpoint("TRAIN001", cab_id, "127.0.0.1", port) for cab_id in (1, 2)]
+    return [AtpEndpoint(cab_id, "127.0.0.1", port) for cab_id in (1, 2)]
 
 
 def _one_cab(port: int) -> list[AtpEndpoint]:
-    return [AtpEndpoint("TRAIN001", 1, "127.0.0.1", port)]
+    return [AtpEndpoint(1, "127.0.0.1", port)]
 
 
 def _manager(c):  # AtpManager

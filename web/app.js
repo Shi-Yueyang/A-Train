@@ -147,21 +147,7 @@ function renderStatus() {
 }
 
 function renderTrainSelectors() {
-  const trainSel = $("train-select");
   const cabSel = $("cab-select");
-  if (
-    trainSel.children.length !== state.trains.length ||
-    ![...trainSel.options].some((o) => o.value === state.selectedTrainId)
-  ) {
-    trainSel.innerHTML = "";
-    for (const t of state.trains) {
-      const o = document.createElement("option");
-      o.value = t.train_id;
-      o.textContent = t.train_id;
-      trainSel.appendChild(o);
-    }
-  }
-  trainSel.value = state.selectedTrainId || "";
   const sel = selectedTrain();
   if (sel) {
     if (
@@ -633,13 +619,6 @@ function bind() {
   $("btn-step").onclick = () =>
     postCommand("/simulation/step", { delta: parseFloat($("step-delta").value) });
 
-  $("train-select").onchange = (e) => {
-    state.selectedTrainId = e.target.value;
-    const sel = selectedTrain();
-    state.selectedCab = sel ? sel.cabs[0].cab_id : null;
-    state.dirty = {};
-    render();
-  };
   $("cab-select").onchange = (e) => {
     state.selectedCab = Number(e.target.value);
     render();

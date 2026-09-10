@@ -1,9 +1,9 @@
 """ATP endpoint configuration for the ``run`` command (Phase 3.1, atp-api.md §1.1, §6).
 
-The ``run`` command accepts ATP endpoints as ``--atp TRAIN_ID:CAB_ID=HOST:PORT``
+The ``run`` command accepts ATP endpoints as ``--atp CAB_ID=HOST:PORT``
 specifications and/or a JSON ``--atp-config`` file::
 
-    { "atp_endpoints": [ { "train_id": "TRAIN001", "cab_id": 1,
+    { "atp_endpoints": [ { "cab_id": 1,
                            "host": "127.0.0.1", "port": 9101 } ] }
 
 Resolved endpoints are handed to the server through the
@@ -12,8 +12,9 @@ passthrough keeps uvicorn's factory import-string startup intact, and reload
 subprocesses inherit the same configuration. ``bootstrap.create_app`` decodes
 the variable when no endpoints are passed explicitly.
 
-Endpoint dictionaries are plain transport-neutral data: ``train_id`` (str),
-``cab_id`` (positive int), ``host`` (non-empty str), ``port`` (1-65535).
+Endpoint dictionaries are plain transport-neutral data: ``cab_id`` (positive
+int), ``host`` (non-empty str), ``port`` (1-65535). The single train identity
+is supplied by the simulator, not repeated in each endpoint.
 """
 
 from __future__ import annotations
@@ -52,7 +53,6 @@ def validate_endpoint(entry: Mapping[str, Any], where: str = "atp endpoint") -> 
     if not isinstance(entry, Mapping):
         raise ConfigError(f"{where}: expected an object, got {entry!r}")
     return {
-        "train_id": _require_str(entry.get("train_id"), "train_id", where),
         "cab_id": _require_int(entry.get("cab_id"), "cab_id", where, 1, 10_000),
         "host": _require_str(entry.get("host"), "host", where),
         "port": _require_int(entry.get("port"), "port", where, 1, _MAX_PORT),
@@ -60,18 +60,15 @@ def validate_endpoint(entry: Mapping[str, Any], where: str = "atp endpoint") -> 
 
 
 def parse_endpoint_spec(spec: str) -> dict[str, Any]:
-    """Parse one ``--atp`` value: ``TRAIN001:1=127.0.0.1:9001``.
+    """Parse one ``--atp`` value: ``1=127.0.0.1:9001``.
 
-    The host may be bracketed IPv6, e.g. ``TRAIN001:2=[::1]:9102``.
+    The host may be bracketed IPv6, e.g. ``2=[::1]:9102``.
     """
 
     ident, sep, address = spec.partition("=")
     if not sep:
-        raise ConfigError(f"--atp {spec!r}: expected TRAIN_ID:CAB_ID=HOST:PORT")
-    try:
-        train_id, cab_raw = ident.rsplit(":", 1)
-    except ValueError:
-        raise ConfigError(f"--atp {spec!r}: expected TRAIN_ID:CAB_ID=HOST:PORT") from None
+        raise ConfigError(f"--atp {spec!r}: expected CAB_ID=HOST:PORT")
+    cab_raw = ident
     try:
         cab_id = int(cab_raw)
     except ValueError:
@@ -86,7 +83,7 @@ def parse_endpoint_spec(spec: str) -> dict[str, Any]:
     except ValueError:
         raise ConfigError(f"--atp {spec!r}: port {port_raw!r} is not an integer") from None
     return validate_endpoint(
-        {"train_id": train_id, "cab_id": cab_id, "host": host, "port": port},
+        {"cab_id": cab_id, "host": host, "port": port},
         where=f"--atp {spec!r}",
     )
 
@@ -148,10 +145,10 @@ def resolve_endpoints(
         endpoints.extend(load_endpoints_file(config_file))
     for spec in specs:
         endpoints.append(parse_endpoint_spec(spec))
-    seen: set[tuple[str, int]] = set()
+    seen: set[int] = set()
     for endpoint in endpoints:
-        key = (endpoint["train_id"], endpoint["cab_id"])
+        key = endpoint["cab_id"]
         if key in seen:
-            raise ConfigError(f"duplicate ATP endpoint for {key[0]} cab {key[1]}")
+            raise ConfigError(f"duplicate ATP endpoint for cab {key}")
         seen.add(key)
     return endpoints

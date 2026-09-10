@@ -66,20 +66,10 @@ def _signature(snap: dict) -> dict:
     }
 
 
-async def test_multiple_trains_produce_repeatable_snapshots() -> None:
-    async def run_once() -> dict:
-        async with running_app([T1, T2]) as c:
-            await _manual_start(c)
-            await _control(c, "TRAIN001", cab_id=1, drive_demand=1.0)
-            await _control(c, "TRAIN002", cab_id=1, drive_demand=0.5)
-            await _step(c, 0.50)
-            return (await c.get("/api/trains")).json()
-
-    first = _signature(await run_once())
-    second = _signature(await run_once())
-    assert first == second
-    assert first["TRAIN001"][0] == pytest.approx(0.5, abs=1e-9)  # speed
-    assert first["TRAIN002"][1] == pytest.approx(100.125, abs=1e-9)  # position
+async def test_multiple_train_configs_are_rejected() -> None:
+    with pytest.raises(ValueError, match="exactly one train configuration"):
+        async with running_app([T1, T2]):
+            pass
 
 
 async def test_reset_and_repeat_gives_the_same_snapshot() -> None:
