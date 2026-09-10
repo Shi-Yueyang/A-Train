@@ -62,9 +62,9 @@ type-specific `state` object:
     { "type": "driving_system", "key": "driving_2", "state": { "cab_id": 2, "facing": "backward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "stcs_atp", "key": "stcs_atp", "state": {
         "last_command": null,
-        "train_out_signal": "000000000000000000000000000000",
+        "train_out_signal": "110000000000000000000000000000",
         "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
-        "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": false } ]
+        "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": true } ]
     } }
   ]
 }
@@ -302,9 +302,9 @@ by equipment type (§3.5).
     { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "stcs_atp", "key": "stcs_atp", "state": {
         "last_command": null,
-        "train_out_signal": "000000000000000000000000000000",
+        "train_out_signal": "110000000000000000000000000000",
         "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
-        "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": false } ]
+        "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": true } ]
     } }
   ]
 }

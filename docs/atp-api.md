@@ -144,7 +144,7 @@ while the channel is READY.
     { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "stcs_atp", "key": "stcs_atp", "state": {
         "last_command": "0001000",
-        "train_out_signal": "000000000000000000000000000000",
+        "train_out_signal": "110000000000000000000000000000",
         "train_in_states": [ { "name": "ato_enable", "value": true } ],
         "train_out_states": [ { "name": "c2_control_state_2_2", "value": false } ]
     } }
@@ -278,14 +278,17 @@ The raw signal is also retained as `last_command` for diagnostics. An empty or
 other non-binary command is invalid.
 
 The STCS ATP component also maintains a plain internal `train_out_states` map
-for the 30 train-side feedback bits. It is initialized with all values set to
-`false` and is exposed as `train_out_signal` (bit string) and
+for the 30 train-side feedback bits. It is exposed as `train_out_signal` (bit string) and
 `train_out_states` (named entries) in `StcsAtpSnapshot`. The
 following feedback states are derived from ATP command states:
-`emergency_brake_1_inner_feedback` mirrors `emergency_brake_1`,
-`emergency_brake_2_inner_feedback` mirrors `emergency_brake_2`,
-`emergency_brake_feedback` is true when either emergency brake is active, and
-`service_brake_7_feedback` mirrors `maximum_service_brake_7`:
+`emergency_brake_1_inner_feedback` is active-low: it is `false` when
+`emergency_brake_1` is active and `true` otherwise. Likewise,
+`emergency_brake_2_inner_feedback` is `false` when `emergency_brake_2` is
+active and `true` otherwise.
+`emergency_brake_feedback` is active-low: it is `false` when either emergency
+brake is active and `true` when both emergency brakes are clear, and
+`service_brake_7_feedback` is active-low: it is `false` when
+`maximum_service_brake_7` is active and `true` otherwise:
 
 | Bit | Train-out state |
 | ---: | --- |

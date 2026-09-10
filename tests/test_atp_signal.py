@@ -98,11 +98,11 @@ def test_stcs_atp_decodes_binary_command_into_train_in_states() -> None:
     assert equipment.train_in_states["maximum_service_brake_7"] is True
     assert equipment.train_in_states["ato_enable"] is True
     assert equipment.train_in_states["service_brake_1"] is True
-    assert equipment.train_out_states["emergency_brake_1_inner_feedback"] is True
-    assert equipment.train_out_states["emergency_brake_2_inner_feedback"] is False
-    assert equipment.train_out_states["emergency_brake_feedback"] is True
-    assert equipment.train_out_states["service_brake_7_feedback"] is True
-    assert equipment.read_state().train_out_signal == "101100000000000000000000000000"
+    assert equipment.train_out_states["emergency_brake_1_inner_feedback"] is False
+    assert equipment.train_out_states["emergency_brake_2_inner_feedback"] is True
+    assert equipment.train_out_states["emergency_brake_feedback"] is False
+    assert equipment.train_out_states["service_brake_7_feedback"] is False
+    assert equipment.read_state().train_out_signal == "010000000000000000000000000000"
 
 
 def test_stcs_atp_short_command_preserves_unmentioned_states() -> None:
@@ -111,6 +111,7 @@ def test_stcs_atp_short_command_preserves_unmentioned_states() -> None:
     equipment.apply_control(StcsAtpControl("0"))
     assert equipment.train_in_states["service_brake_1"] is True
     assert equipment.train_in_states["emergency_brake_1"] is False
+    assert equipment.train_out_states["emergency_brake_feedback"] is True
 
 
 def test_stcs_atp_maximum_service_brake_requests_train_deceleration() -> None:
@@ -174,10 +175,10 @@ def test_door_state_feedback_tracks_left_and_right_doors() -> None:
     assert signal[20] == "1" and signal[21] == "0"
 
     assert train.set_equipment(EquipmentControlRequest(key="right_door", command="open")).ok
-    assert _atp_state(train).train_out_signal == "0" * 20 + "11" + "0" * 8
+    assert _atp_state(train).train_out_signal == "1111" + "0" * 16 + "11" + "0" * 8
 
     assert train.set_equipment(EquipmentControlRequest(key="left_door", command="close")).ok
-    assert _atp_state(train).train_out_signal == "0" * 20 + "01" + "0" * 8
+    assert _atp_state(train).train_out_signal == "1111" + "0" * 16 + "01" + "0" * 8
 
 
 def test_door_state_feedback_follows_configured_and_reset_door_state() -> None:
@@ -191,12 +192,12 @@ def test_door_state_feedback_follows_configured_and_reset_door_state() -> None:
             initial_door_state="open",
         )
     )
-    assert _atp_state(train).train_out_signal == "0" * 20 + "11" + "0" * 8
+    assert _atp_state(train).train_out_signal == "1111" + "0" * 16 + "11" + "0" * 8
 
     assert train.set_equipment(EquipmentControlRequest(key="left_door", command="close")).ok
     assert _atp_state(train).train_out_signal[20] == "0"
     train.reset()
-    assert _atp_state(train).train_out_signal == "0" * 20 + "11" + "0" * 8
+    assert _atp_state(train).train_out_signal == "1111" + "0" * 16 + "11" + "0" * 8
 
 
 def test_stcs_atp_snapshot_lists_named_states_in_bit_order() -> None:
@@ -213,7 +214,7 @@ def test_stcs_atp_snapshot_lists_named_states_in_bit_order() -> None:
         StcsAtp.TRAIN_TO_ATP_SIGNAL_BY_BIT.values()
     )
     assert state.train_out_states[0].name == "emergency_brake_1_inner_feedback"
-    assert state.train_out_states[0].value is True
+    assert state.train_out_states[0].value is False
 
 
 def test_stcs_atp_has_train_out_state_shape() -> None:
@@ -221,11 +222,23 @@ def test_stcs_atp_has_train_out_state_shape() -> None:
     states = equipment.train_out_states
 
     assert len(states) == 30
-    assert all(value is False for value in states.values())
-    assert states["emergency_brake_1_inner_feedback"] is False
+    assert all(
+        value
+        is (
+            name
+            in {
+                "emergency_brake_1_inner_feedback",
+                "emergency_brake_2_inner_feedback",
+                "emergency_brake_feedback",
+                "service_brake_7_feedback",
+            }
+        )
+        for name, value in states.items()
+    )
+    assert states["emergency_brake_1_inner_feedback"] is True
     assert states["cab_activation"] is False
     assert states["c2_control_state_2_2"] is False
 
     states["cab_activation"] = True
     assert equipment.train_out_states["cab_activation"] is False
-    assert equipment.read_state().train_out_signal == "0" * 30
+    assert equipment.read_state().train_out_signal == "1111" + "0" * 26
