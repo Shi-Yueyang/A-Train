@@ -34,7 +34,7 @@ def _create_btm(key: str, _ctx: EquipmentContext) -> Btm:
 
 
 def _create_stcs_atp(key: str, _ctx: EquipmentContext) -> StcsAtp:
-    return StcsAtp(key)
+    return StcsAtp(key, cab_id=int(key.removeprefix("stcs_atp_")))
 
 
 def _create_driving_system(

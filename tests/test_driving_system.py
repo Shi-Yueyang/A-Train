@@ -49,8 +49,8 @@ def _equipment(snap: dict, key: str) -> dict:
     return next(e for e in snap["equipment"] if e["key"] == key)
 
 
-def _out_bits(snap: dict) -> dict[str, bool]:
-    atp = _equipment(snap, "stcs_atp")
+def _out_bits(snap: dict, cab: int = 1) -> dict[str, bool]:
+    atp = _equipment(snap, f"stcs_atp_{cab}")
     return {s["name"]: s["value"] for s in atp["state"]["train_out_states"]}
 
 
@@ -181,12 +181,12 @@ async def test_driving_handles_feed_stcs_atp_feedback_bits() -> None:
         assert bits["traction_handle_traction"] is True
 
         await _handles(c, 2, mode="brake", direction="backward", acceleration=0.5)
-        bits = _out_bits(await _train(c))
+        bits = _out_bits(await _train(c), cab=2)
         assert bits["direction_handle_backward"] is True
         assert bits["traction_handle_brake"] is True
 
         await _handles(c, 1, mode="off", direction="off")
-        bits = _out_bits(await _train(c))
+        bits = _out_bits(await _train(c), cab=1)
         assert bits["direction_handle_forward_1"] is False
 
 

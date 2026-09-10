@@ -64,8 +64,9 @@ class StcsAtp:
         29: "c2_control_state_2_2",
     }
 
-    def __init__(self, key: str) -> None:
+    def __init__(self, key: str, *, cab_id: int) -> None:
         self._key = key
+        self._cab_id = cab_id
         self._last_command: str | None = None
         self._handles: dict[int, tuple[str, str]] = {}
         self._train_out_states = {name: False for name in self.TRAIN_TO_ATP_SIGNAL_BY_BIT.values()}
@@ -75,6 +76,10 @@ class StcsAtp:
     @property
     def key(self) -> str:
         return self._key
+
+    @property
+    def cab_id(self) -> int:
+        return self._cab_id
 
     def apply_control(self, control: StcsAtpControl) -> None:
         if not isinstance(control, StcsAtpControl):
@@ -100,16 +105,15 @@ class StcsAtp:
         self._update_train_out_states()
 
     def _apply_handle_feedback(self, control: StcsAtpControl) -> None:
-        if control.cab_id is None:
-            raise ValueError("driving-system feedback requires cab_id")
-        current_mode, current_direction = self._handles.get(control.cab_id, ("off", "off"))
+        cab_id = control.cab_id if control.cab_id is not None else self._cab_id
+        current_mode, current_direction = self._handles.get(cab_id, ("off", "off"))
         mode = control.mode if control.mode is not None else current_mode
         direction = control.direction if control.direction is not None else current_direction
         if mode not in ("traction", "off", "brake"):
             raise ValueError(f"invalid driving mode feedback: {mode!r}")
         if direction not in ("forward", "off", "backward"):
             raise ValueError(f"invalid driving direction feedback: {direction!r}")
-        self._handles[control.cab_id] = (mode, direction)
+        self._handles[cab_id] = (mode, direction)
 
     def _update_train_out_states(self) -> None:
         self._train_out_states["emergency_brake_1_inner_feedback"] = not self._train_in_states[
@@ -169,3 +173,4 @@ class StcsAtp:
             self._train_in_states[state_name] = False
         for state_name in self._train_out_states:
             self._train_out_states[state_name] = False
+        self._update_train_out_states()

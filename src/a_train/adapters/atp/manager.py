@@ -30,7 +30,6 @@ from ...domain.train import EquipmentControlRequest, TrainControl
 from ...simulation.commands import EquipmentCommand, TrainControlCommand
 from .client import AtpClient
 from .protocol import make_error, parse_atp_command
-from .signal import decode_atp_signal
 
 if TYPE_CHECKING:
     from ...simulation.core import SimulationCore
@@ -174,7 +173,15 @@ class AtpManager:
                     )
                 )
         if atp_signal is not None:
-            commands.extend(decode_atp_signal(atp_signal, client.train_id, client.cab_id))
+            commands.append(
+                EquipmentCommand(
+                    train_id=client.train_id,
+                    payload=EquipmentControlRequest(
+                        key=f"stcs_atp_{client.cab_id}",
+                        command=atp_signal,
+                    ),
+                )
+            )
 
         for command in commands:
             result = await self._core.submit_command(command)

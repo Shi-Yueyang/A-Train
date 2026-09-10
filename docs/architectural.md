@@ -424,7 +424,8 @@ track facing and asserts the result to the train through a `train`-target
 intent while its mode handle is engaged, overwriting the legacy drive-demand
 lever; a released (off) intent lapses and the lever applies again. Engaged
 systems of several cabs act additively; cabs still carry no authority. Each
-driving system also asserts its raw handle positions to `stcs_atp` as a
+driving system also asserts its raw handle positions to the matching
+`stcs_atp_<cab_id>` instance as a
 feedback intent, the same pattern as door state.
 
 BTM payloads are opaque byte arrays. The train model can receive a BTM
@@ -459,7 +460,7 @@ current batch (state assertions: an absent input lapses, so a released
 protection brake or a returned-to-off driving handle stops affecting the
 next step), and routes equipment-target intents to the target's
 `apply_control()` (e.g. door and driving-system handle feedback into
-`stcs_atp`); it also runs after every accepted equipment
+the matching `stcs_atp_<cab_id>` instance); it also runs after every accepted equipment
 control, after reset, and once at construction. `get_snapshot()` returns a newly constructed immutable train snapshot; it
 never exposes the aggregate or mutable equipment objects.
 

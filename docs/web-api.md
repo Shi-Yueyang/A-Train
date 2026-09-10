@@ -60,7 +60,7 @@ type-specific `state` object:
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
     { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "driving_system", "key": "driving_2", "state": { "cab_id": 2, "facing": "backward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
-    { "type": "stcs_atp", "key": "stcs_atp", "state": {
+    { "type": "stcs_atp", "key": "stcs_atp_1", "state": {
         "last_command": null,
         "train_out_signal": "110000000000000000000000000000",
         "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
@@ -241,7 +241,7 @@ with the component's error message on invalid input.
 
 | Field         | Type               | Used by                    | Notes                                                        |
 | ------------- | ------------------ | -------------------------- | ------------------------------------------------------------ |
-| `command`   | string             | `door`, `stcs_atp`        | `"open"` / `"close"`; STCS ATP command. |
+| `command`   | string             | `door`, `stcs_atp_<cab_id>` | `"open"` / `"close"`; STCS ATP command. |
 | `cab_id`    | integer            | optional consistency check | Target cab, when applicable. |
 | `data`      | string             | `btm_1`, `btm_2` | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400. |
 | `mode`      | string             | `driving_1`, `driving_2`  | Driving-system mode handle: `"traction"` / `"off"` / `"brake"`. |
@@ -254,7 +254,7 @@ with the component's error message on invalid input.
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `left_door`, `right_door` | `command` `"open"` / `"close"` sets the selected door state. |
 | `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
-| `stcs_atp` | `command` is recorded as `last_command` without interpretation. |
+| `stcs_atp_1`, `stcs_atp_2` | `command` is recorded as `last_command` on the addressed cab's STCS instance. |
 | `driving_1`, `driving_2` | Sets any subset of the three driver-room handles (no interlocks; each position is independently settable). While a cab's `mode` is `"traction"` or `"brake"`, that driving system **overwrites** the legacy `drive_demand` lever for every step: traction effort is applied in the direction-handle position mapped through the cab's facing (either travel direction is possible, from standstill too); brake effort opposes the current motion and produces no force at standstill. With `mode` `"off"` the legacy lever applies again. Engaged systems of several cabs act additively (net effort is clamped to the handle range). |
 
 **Example**:
@@ -300,7 +300,7 @@ by equipment type (§3.5).
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
     { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
-    { "type": "stcs_atp", "key": "stcs_atp", "state": {
+    { "type": "stcs_atp", "key": "stcs_atp_1", "state": {
         "last_command": null,
         "train_out_signal": "110000000000000000000000000000",
         "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
@@ -329,8 +329,9 @@ by equipment type (§3.5).
 | `key` | string | Unique equipment instance key. |
 | `state` | object | Type-specific state. |
 
-**`stcs_atp` state**: `last_command` is the raw ATP bit string (null until the
-first `atp_signal`); `train_in_states` and `train_out_states` are every
+**`stcs_atp_<cab_id>` state**: each configured cab has its own STCS instance.
+`last_command` is the raw ATP bit string (null until the first `atp_signal` on
+that cab); `train_in_states` and `train_out_states` are every
 decoded signal as `{name, value}` in bit order (17 train-in, 30 train-out;
 names and meanings in atp-api.md §4.2); `train_out_signal` is the train-out
 state as one bit string. `door_state_1` / `door_state_2` mirror the
@@ -353,7 +354,7 @@ command body has no effect (extra fields are ignored).
 The equipment model is flat in every REST and WebSocket response. `equipment`
 is an array of entries shaped as `{ "type": string, "key": string, "state":
 object }`. The key uniquely identifies one instance, for example
-`left_door`, `right_door`, `btm_1`, `driving_1`, or `stcs_atp`. Equipment
+`left_door`, `right_door`, `btm_1`, `driving_1`, or `stcs_atp_1`. Equipment
 commands address that instance directly through
 `/api/trains/{train_id}/equipment/{key}`; there is no implicit
 type grouping or slot field.

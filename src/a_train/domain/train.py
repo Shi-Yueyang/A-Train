@@ -71,7 +71,7 @@ class EquipmentControlRequest:
 
     - ``door``: ``command`` is ``"open"`` or ``"close"``.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
-    - ``stcs_atp``: ``command`` is recorded as the last received command.
+    - ``stcs_atp_<cab_id>``: ``command`` is recorded on that cab's STCS instance.
     - ``driving_system``: ``mode``/``direction``/``acceleration`` handle
       positions; every combination of fields may be set together.
     """
@@ -175,7 +175,7 @@ class TrainConfig:
                         EquipmentConfig("driving_system", f"driving_{cab_id}")
                         for cab_id in self.cab_ids
                     ]
-                    + [EquipmentConfig("stcs_atp", "stcs_atp")]
+                    + [EquipmentConfig("stcs_atp", f"stcs_atp_{cab_id}") for cab_id in self.cab_ids]
                 ),
             )
         keys = [eq_cfg.key for eq_cfg in self.equipment_configs]
@@ -343,6 +343,10 @@ class Train:
             target = self._equipment.get(intent.target)
             if target is not None:
                 target.apply_control(intent.control)
+            elif intent.target == "stcs_atp":
+                for equipment in self._equipment.values():
+                    if equipment.type == "stcs_atp":
+                        equipment.apply_control(intent.control)
         self._driver_inputs = tuple(driver_inputs)
 
     def _equipment_snapshot(self) -> tuple[EquipmentSnapshot, ...]:

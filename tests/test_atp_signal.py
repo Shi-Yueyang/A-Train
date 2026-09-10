@@ -1,7 +1,7 @@
-"""Unit tests for atp_signal translation and STCS ATP command recording.
+"""Unit tests for atp_signal validation and STCS ATP command recording.
 
-Covers atp-api.md §4.2: bit validation (protocol), pure bit-to-command
-translation (signal.py) and the ``stcs_atp`` equipment (domain).
+Covers atp-api.md §4.2: bit validation (protocol) and the ``stcs_atp``
+equipment (domain).
 """
 
 from __future__ import annotations
@@ -9,7 +9,6 @@ from __future__ import annotations
 import pytest
 
 from a_train.adapters.atp.protocol import parse_atp_command
-from a_train.adapters.atp.signal import decode_atp_signal
 from a_train.domain.controls import StcsAtpControl
 from a_train.domain.equipment import StcsAtp
 from a_train.domain.train import EquipmentControlRequest, Train, TrainConfig
@@ -50,24 +49,6 @@ def test_missing_payload_still_rejected() -> None:
         parse_atp_command({"cab_id": CAB}, TID, CAB)
 
 
-# -- Translation: defined bits assert, undefined positions keep state ------------
-
-
-def test_asserted_bits_produce_commands_in_ascending_order() -> None:
-    commands = decode_atp_signal("0111", TID, CAB)
-    assert [c.payload.command for c in commands] == ["0111"]
-    assert all(c.train_id == TID and c.payload.key == "stcs_atp" for c in commands)
-
-
-def test_explicit_zero_bits_produce_release_commands() -> None:
-    commands = decode_atp_signal("010", TID, CAB)  # idx1 '1', idx2 '0'
-    assert [c.payload.command for c in commands] == ["010"]
-
-
-def test_reserved_and_unbound_positions_are_recorded_unchanged() -> None:
-    assert [c.payload.command for c in decode_atp_signal("0", TID, CAB)] == ["0"]
-
-
 # -- Core-side state machine (domain) ---------------------------------------------
 
 
@@ -85,11 +66,13 @@ def _train(*, initial_speed: float = 0.0) -> Train:
 
 
 def _atp_state(train: Train):
-    return next(entry.state for entry in train.get_snapshot().equipment if entry.key == "stcs_atp")
+    return next(
+        entry.state for entry in train.get_snapshot().equipment if entry.key == "stcs_atp_1"
+    )
 
 
 def test_stcs_atp_decodes_binary_command_into_train_in_states() -> None:
-    equipment = StcsAtp("stcs_atp")
+    equipment = StcsAtp("stcs_atp_1", cab_id=1)
     equipment.apply_control(StcsAtpControl("101100001"))
     state = equipment.read_state()
     assert state.last_command == "101100001"
@@ -106,7 +89,7 @@ def test_stcs_atp_decodes_binary_command_into_train_in_states() -> None:
 
 
 def test_stcs_atp_short_command_preserves_unmentioned_states() -> None:
-    equipment = StcsAtp("stcs_atp")
+    equipment = StcsAtp("stcs_atp_1", cab_id=1)
     equipment.apply_control(StcsAtpControl("000000001"))
     equipment.apply_control(StcsAtpControl("0"))
     assert equipment.train_in_states["service_brake_1"] is True
@@ -117,7 +100,7 @@ def test_stcs_atp_short_command_preserves_unmentioned_states() -> None:
 def test_stcs_atp_maximum_service_brake_requests_train_deceleration() -> None:
     train = _train(initial_speed=1.0)
 
-    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp", command="001")).ok
+    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp_1", command="001")).ok
     train.step(0.05)
     assert train.get_snapshot().acceleration == -2.0
     train.step(0.05)
@@ -125,7 +108,7 @@ def test_stcs_atp_maximum_service_brake_requests_train_deceleration() -> None:
 
     # The protection brake is a state assertion: releasing the bit removes
     # the braking force; the train coasts on its remaining speed.
-    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp", command="000")).ok
+    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp_1", command="000")).ok
     train.step(0.05)
     assert train.get_snapshot().acceleration == 0.0
     assert train.get_snapshot().speed > 0.0
@@ -134,7 +117,7 @@ def test_stcs_atp_maximum_service_brake_requests_train_deceleration() -> None:
 def test_stcs_atp_service_brake_does_not_drive_a_standing_train() -> None:
     train = _train()  # standing still
 
-    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp", command="001")).ok
+    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp_1", command="001")).ok
     train.step(0.05)
     snap = train.get_snapshot()
     assert snap.speed == 0.0
@@ -144,7 +127,7 @@ def test_stcs_atp_service_brake_does_not_drive_a_standing_train() -> None:
 
 @pytest.mark.parametrize("command", ["", "2", "010x", "true"])
 def test_stcs_atp_rejects_non_binary_commands(command: str) -> None:
-    equipment = StcsAtp("stcs_atp")
+    equipment = StcsAtp("stcs_atp_1", cab_id=1)
     with pytest.raises(ValueError, match="0.*1"):
         equipment.apply_control(StcsAtpControl(command))
 
@@ -153,7 +136,7 @@ def test_stcs_atp_command_is_not_changed_by_train_step() -> None:
     train = _train()  # standing still: speed 0.0
 
     assert train.set_equipment(
-        EquipmentControlRequest(key="stcs_atp", command="10000000000000000")
+        EquipmentControlRequest(key="stcs_atp_1", command="10000000000000000")
     ).ok
 
     train.step(0.05)  # no motion demanded, speed stays 0.0
@@ -161,8 +144,18 @@ def test_stcs_atp_command_is_not_changed_by_train_step() -> None:
 
 
 def test_standard_consist_includes_stcs_atp() -> None:
-    state = _atp_state(_train())
-    assert state.last_command is None
+    train = _train()
+    equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
+    assert equipment["stcs_atp_1"].last_command is None
+    assert equipment["stcs_atp_2"].last_command is None
+
+
+def test_stcs_atp_state_is_bound_to_each_cab() -> None:
+    train = _train()
+    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp_1", command="100")).ok
+    equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
+    assert equipment["stcs_atp_1"].last_command == "100"
+    assert equipment["stcs_atp_2"].last_command is None
 
 
 def test_door_state_feedback_tracks_left_and_right_doors() -> None:
@@ -201,7 +194,7 @@ def test_door_state_feedback_follows_configured_and_reset_door_state() -> None:
 
 
 def test_stcs_atp_snapshot_lists_named_states_in_bit_order() -> None:
-    equipment = StcsAtp("stcs_atp")
+    equipment = StcsAtp("stcs_atp_1", cab_id=1)
     equipment.apply_control(StcsAtpControl("100"))
     state = equipment.read_state()
 
@@ -218,7 +211,7 @@ def test_stcs_atp_snapshot_lists_named_states_in_bit_order() -> None:
 
 
 def test_stcs_atp_has_train_out_state_shape() -> None:
-    equipment = StcsAtp("stcs_atp")
+    equipment = StcsAtp("stcs_atp_1", cab_id=1)
     states = equipment.train_out_states
 
     assert len(states) == 30

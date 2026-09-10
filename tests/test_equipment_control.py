@@ -88,9 +88,7 @@ async def test_btm_delivery_through_equipment_endpoint() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
 
-        status, snap = await _equipment(
-            c, "btm_1", data=base64.b64encode(payload).decode("ascii")
-        )
+        status, snap = await _equipment(c, "btm_1", data=base64.b64encode(payload).decode("ascii"))
         assert status == 200
         cab1 = next(e["state"] for e in snap["equipment"] if e["key"] == "btm_1")
         assert cab1["pending"] is True
@@ -113,7 +111,7 @@ async def test_door_state_reflects_in_stcs_atp_train_out_signal() -> None:
 
         status, snap = await _equipment(c, "left_door", command="open")
         assert status == 200
-        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp")
+        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp_1")
         assert atp["state"]["train_out_signal"][20] == "1"  # door_state_1
         assert atp["state"]["train_out_signal"][21] == "0"  # door_state_2
         out = {s["name"]: s["value"] for s in atp["state"]["train_out_states"]}
@@ -122,13 +120,13 @@ async def test_door_state_reflects_in_stcs_atp_train_out_signal() -> None:
         await _equipment(c, "right_door", command="open")
         await _equipment(c, "left_door", command="close")
         snap = await _train(c)
-        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp")
+        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp_1")
         assert atp["state"]["train_out_signal"][20] == "0"
         assert atp["state"]["train_out_signal"][21] == "1"
 
         await c.post("/api/simulation/reset")
         snap = await _train(c)
-        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp")
+        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp_1")
         assert atp["state"]["train_out_signal"][20:22] == "00"
 
 
