@@ -49,6 +49,10 @@ class TrainControlRequest(BaseModel):
         default=None,
         description="Sets the cab's native activation flag; omitted leaves it unchanged.",
     )
+    key: bool | None = Field(
+        default=None,
+        description="Sets whether the key is inserted in this cab; omitted leaves it unchanged.",
+    )
 
 
 class EquipmentSetRequest(BaseModel):
@@ -83,6 +87,7 @@ class EquipmentSetRequest(BaseModel):
 class CabResponse(BaseModel):
     cab_id: int
     active: bool
+    key: bool
     facing: str = Field(
         description="Cab track facing: 'forward' drives toward increasing position."
     )
@@ -135,7 +140,13 @@ def _serialize_equipment(equipment: tuple[object, ...]) -> list[object]:
 
 def _cabs_to_response(snap: TrainSnapshot) -> list[CabResponse]:
     return [
-        CabResponse(cab_id=cab.cab_id, active=cab.active, facing=cab.facing) for cab in snap.cabs
+        CabResponse(
+            cab_id=cab.cab_id,
+            active=cab.active,
+            key=cab.key,
+            facing=cab.facing,
+        )
+        for cab in snap.cabs
     ]
 
 

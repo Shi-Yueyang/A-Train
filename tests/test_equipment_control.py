@@ -183,6 +183,7 @@ async def test_drive_accepted_from_any_configured_cab() -> None:
 
         r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 2, "drive_demand": 1.0})
         assert r.status_code == 200
+
         await _step(c, 0.50)
         assert (await _train(c))["speed"] > 0.0
 
@@ -191,6 +192,31 @@ async def test_drive_accepted_from_any_configured_cab() -> None:
 
         r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 9, "drive_demand": 0.0})
         assert r.status_code == 400  # cab not configured
+
+
+async def test_key_state_is_independent_per_cab_and_resets() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        r = await c.post(
+            "/api/trains/TRAIN001/commands",
+            json={"cab_id": 2, "key": True},
+        )
+        assert r.status_code == 200
+        keys = {entry["cab_id"]: entry["key"] for entry in r.json()["cabs"]}
+        assert keys == {1: False, 2: True}
+
+        r = await c.post(
+            "/api/trains/TRAIN001/commands",
+            json={"cab_id": 2, "key": False},
+        )
+        assert r.status_code == 200
+        assert all(entry["key"] is False for entry in r.json()["cabs"])
+
+        r = await c.post("/api/simulation/reset")
+        assert r.status_code == 200
+        reset_state = await _train(c)
+        assert all(entry["key"] is False for entry in reset_state["cabs"])
 
 
 @pytest.mark.parametrize("command", ["open", "close"])

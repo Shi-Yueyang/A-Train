@@ -39,7 +39,7 @@ browser never touches simulator internals.
 ## Cab representation
 
 Cab activation is native train state, not equipment. Every train exposes
-`cabs`: one `{ "cab_id": int, "active": bool, "facing": string }` entry per
+`cabs`: one `{ "cab_id": int, "active": bool, "key": bool, "facing": string }` entry per
 configured cab, in configured order. `facing` is the cab's immutable track
 facing (`"forward"` drives toward increasing position, `"backward"` toward
 decreasing); the driving system maps its cab-relative direction handle through
@@ -214,7 +214,7 @@ step boundary.
 **Request body** (`TrainControlRequest`):
 
 ```json
-{ "cab_id": 1, "drive_demand": 0.75, "active": true }
+{ "cab_id": 1, "drive_demand": 0.75, "active": true, "key": true }
 ```
 
 | Field            | Type           | Notes                                                                                                                                                             |
@@ -222,6 +222,7 @@ step boundary.
 | `cab_id`       | integer        | Must be one of the train's configured cabs. Cabs carry no authority (§3.3); any configured cab is accepted. Identifies the cab whose native activation flag `active` sets. |
 | `drive_demand` | number or null | Signed lever in `[-1.0, 1.0]`: positive drives (traction limit), negative decelerates toward zero (decel limit) and never moves a standing train rearward. Overwritten while any driving system is engaged. Omitted or null leaves it unchanged. |
 | `active`       | bool or null   | Sets this cab's native activation flag. Omitted or null leaves it unchanged; it never affects control acceptance or dynamics. |
+| `key`          | bool or null   | Sets whether the key is inserted in this cab. Omitted or null leaves it unchanged. |
 
 **Response 200**: `TrainResponse`.
 
@@ -287,8 +288,8 @@ by equipment type (§3.5).
 {
   "train_id": "TRAIN001",
   "cabs": [
-    { "cab_id": 1, "active": true, "facing": "forward" },
-    { "cab_id": 2, "active": false, "facing": "backward" }
+    { "cab_id": 1, "active": true, "key": false, "facing": "forward" },
+    { "cab_id": 2, "active": false, "key": true, "facing": "backward" }
   ],
   "speed": 0.5,
   "acceleration": 1.5,
@@ -313,7 +314,7 @@ by equipment type (§3.5).
 | Field            | Type   | Notes                                                           |
 | ---------------- | ------ | --------------------------------------------------------------- |
 | `train_id`     | string | Stable identifier.                                              |
-| `cabs`         | array  | Native cab state: one `{cab_id, active, facing}` per configured cab, in configured order. |
+| `cabs`         | array  | Native cab state: one `{cab_id, active, key, facing}` per configured cab, in configured order. `key` reports whether that cab's key is inserted. |
 | `speed`        | number | m/s, signed: negative means rearward travel.                    |
 | `acceleration` | number | m/s², the value actually applied during the last step (§3.4). |
 | `position`     | number | m along the linear track; may decrease with rearward motion.   |

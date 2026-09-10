@@ -192,17 +192,24 @@ function renderTrainState() {
     equipmentEl.replaceChildren();
     stcsEl.replaceChildren();
     $("cab-state").textContent = "—";
+    $("key-state").textContent = "—";
     renderEquipmentControls([]);
     return;
   }
   const equipment = sel.equipment || [];
   const cabs = sel.cabs || [];
   const cabText = cabs
-    .map((c) => `${c.cab_id}=${c.active ? "active" : "inactive"} (${c.facing})`)
+    .map(
+      (c) =>
+        `${c.cab_id}=${c.active ? "active" : "inactive"}, key=${c.key ? "inserted" : "removed"} (${c.facing})`
+    )
     .join(", ");
   const selected = cabs.find((c) => c.cab_id === state.selectedCab);
   $("cab-state").textContent = selected
     ? `cab ${selected.cab_id}: ${selected.active ? "active" : "inactive"}`
+    : "—";
+  $("key-state").textContent = selected
+    ? `cab ${selected.cab_id}: ${selected.key ? "inserted" : "removed"}`
     : "—";
   const lines = [
     `train_id        ${sel.train_id}`,
@@ -648,6 +655,16 @@ function bind() {
     postCommand(`/trains/${state.selectedTrainId}/commands`, {
       cab_id: state.selectedCab,
       active: false,
+    });
+  $("btn-key-insert").onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/commands`, {
+      cab_id: state.selectedCab,
+      key: true,
+    });
+  $("btn-key-remove").onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/commands`, {
+      cab_id: state.selectedCab,
+      key: false,
     });
 
   $("btm-payload").oninput = renderBtmEncoding;

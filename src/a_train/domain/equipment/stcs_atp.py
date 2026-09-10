@@ -88,6 +88,10 @@ class StcsAtp:
             self._train_out_states["door_state_1"] = control.left_door_open
         if control.right_door_open is not None:
             self._train_out_states["door_state_2"] = control.right_door_open
+        if control.key_activation is not None:
+            self._train_out_states["key_activation"] = control.key_activation
+        if control.cab_activation is not None:
+            self._train_out_states["cab_activation"] = control.cab_activation
         if control.direction is not None or control.mode is not None:
             self._apply_handle_feedback(control)
         if control.command is not None:

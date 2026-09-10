@@ -109,8 +109,9 @@ These three inbound/outbound message families are the complete protocol; unknown
 
 ## 3. Simulator → ATP Messages
 
-Cab activation and facing are native train state: `TRAIN_STATE.cabs` carries
-one `{cab_id, active, facing}` entry per configured cab.
+Cab key state, activation, and facing are native train state:
+`TRAIN_STATE.cabs` carries one `{cab_id, active, key, facing}` entry per
+configured cab. `key` reports whether that cab's key is inserted.
 `TRAIN_STATE.equipment` is a flat array of independently addressed equipment
 entries. Each entry has `type`, `key`, and `state` fields. For example, the
 BTM state for cab 1 is the entry with `type: "btm"` and `key: "btm_1"`, and
@@ -134,8 +135,8 @@ while the channel is READY.
   "position": 15320.4,
   "direction": "forward",
   "cabs": [
-    { "cab_id": 1, "active": true, "facing": "forward" },
-    { "cab_id": 2, "active": false, "facing": "backward" }
+    { "cab_id": 1, "active": true, "key": false, "facing": "forward" },
+    { "cab_id": 2, "active": false, "key": true, "facing": "backward" }
   ],
   "equipment": [
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
@@ -160,7 +161,7 @@ while the channel is READY.
 | `acceleration` | number | m/s² of the last integrated step.                                                                                                                     |
 | `position`     | number | m along the linear track from the fixed origin; may decrease with rearward motion.                                                                    |
 | `direction`    | string | Derived from the speed sign: `"forward"`, `"backward"`, or `"stopped"`.                                                                              |
-| `cabs`         | array | Native cab state: one `{cab_id, active, facing}` entry per configured cab, in configured order. `facing` is the cab's immutable track facing. |
+| `cabs`         | array | Native cab state: one `{cab_id, active, key, facing}` entry per configured cab, in configured order. `key` reports key insertion and `facing` is the cab's immutable track facing. |
 | `equipment`    | array | Flat canonical equipment entries, each shaped as `{type, key, state}`. |
 
 `TRAIN_STATE` remains a read-only observation: ATP derives its protection decisions from it and acts back on the train only through `ATP_COMMAND` (§4.1; architectural boundary §4.1 of architectural.md). The simulator publishes the full equipment state because ATP peers may need more than the ATP protection flags alone.

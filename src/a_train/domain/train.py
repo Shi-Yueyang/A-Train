@@ -213,9 +213,11 @@ class Train:
         self._cab_active = {
             cab_id: cab_id == config.initial_active_cab for cab_id in config.cab_ids
         }
+        self._cab_key = {cab_id: False for cab_id in config.cab_ids}
         # Sync observer equipment (e.g. door feedback into stcs_atp) with the
         # configured initial state before the first snapshot is taken.
         self._resolve_equipment_intents(self._collect_equipment_intents())
+        self._sync_cab_feedback()
 
     @property
     def train_id(self) -> str:
@@ -237,11 +239,17 @@ class Train:
             return ControlResult(ok=False, error="drive_demand must be in [-1.0, 1.0]")
         if control.active is not None and control.cab_id is None:
             return ControlResult(ok=False, error="cab activation requires cab_id")
+        if control.key is not None and control.cab_id is None:
+            return ControlResult(ok=False, error="cab key state requires cab_id")
 
         if control.drive_demand is not None:
             self._drive_demand = control.drive_demand
         if control.active is not None:
             self._cab_active[control.cab_id] = control.active
+            self._sync_cab_feedback()
+        if control.key is not None:
+            self._cab_key[control.cab_id] = control.key
+            self._sync_cab_feedback()
         return ControlResult()
 
     def set_equipment(self, command: EquipmentControlRequest) -> ControlResult:
@@ -263,7 +271,20 @@ class Train:
         except ValueError as exc:
             return ControlResult(ok=False, error=str(exc))
         self._resolve_equipment_intents(self._collect_equipment_intents())
+        self._sync_cab_feedback()
         return ControlResult()
+
+    def _sync_cab_feedback(self) -> None:
+        for cab_id, key_inserted in self._cab_key.items():
+            equipment = self._equipment.get(f"stcs_atp_{cab_id}")
+            if isinstance(equipment, StcsAtp):
+                equipment.apply_control(
+                    StcsAtpControl(
+                        cab_id=cab_id,
+                        key_activation=key_inserted,
+                        cab_activation=self._cab_active[cab_id],
+                    )
+                )
 
     @staticmethod
     def _equipment_control(equipment: Equipment[Any], command: EquipmentControlRequest):
@@ -371,6 +392,7 @@ class Train:
                 CabSnapshot(
                     cab_id=cab_id,
                     active=active,
+                    key=self._cab_key[cab_id],
                     facing="forward" if facings[cab_id] == 1 else "backward",
                 )
                 for cab_id, active in self._cab_active.items()
@@ -395,6 +417,8 @@ class Train:
         self._cab_active = {
             cab_id: cab_id == self._config.initial_active_cab for cab_id in self._config.cab_ids
         }
+        self._cab_key = {cab_id: False for cab_id in self._config.cab_ids}
         for eq in self._equipment.values():
             eq.reset()
         self._resolve_equipment_intents(self._collect_equipment_intents())
+        self._sync_cab_feedback()

@@ -31,6 +31,8 @@ class StcsAtpControl:
     command: str | None = None
     left_door_open: bool | None = None
     right_door_open: bool | None = None
+    key_activation: bool | None = None
+    cab_activation: bool | None = None
     cab_id: int | None = None
     direction: str | None = None
     mode: str | None = None
@@ -64,6 +66,7 @@ class TrainControl:
     cab_id: int | None = None
     drive_demand: float | None = None
     active: bool | None = None
+    key: bool | None = None
 
 
 EquipmentControl = DoorControl | BtmControl | StcsAtpControl | DrivingSystemControl

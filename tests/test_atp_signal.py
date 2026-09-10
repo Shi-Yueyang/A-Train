@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from a_train.adapters.atp.protocol import parse_atp_command
-from a_train.domain.controls import StcsAtpControl
+from a_train.domain.controls import StcsAtpControl, TrainControl
 from a_train.domain.equipment import StcsAtp
 from a_train.domain.train import EquipmentControlRequest, Train, TrainConfig
 
@@ -158,6 +158,35 @@ def test_stcs_atp_state_is_bound_to_each_cab() -> None:
     assert equipment["stcs_atp_2"].last_command is None
 
 
+def test_cab_key_state_is_reflected_in_matching_stcs_output() -> None:
+    train = _train()
+    equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
+    assert equipment["stcs_atp_1"].train_out_states[17].value is False
+    assert equipment["stcs_atp_2"].train_out_states[17].value is False
+
+    assert train.apply_control(TrainControl(cab_id=2, key=True)).ok
+    equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
+    assert equipment["stcs_atp_1"].train_out_states[17].value is False
+    assert equipment["stcs_atp_2"].train_out_states[17].value is True
+
+
+def test_cab_activation_is_reflected_in_matching_stcs_output() -> None:
+    train = _train()
+    equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
+    assert equipment["stcs_atp_1"].train_out_states[4].value is True
+    assert equipment["stcs_atp_2"].train_out_states[4].value is False
+
+    assert train.apply_control(TrainControl(cab_id=2, active=True)).ok
+    equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
+    assert equipment["stcs_atp_1"].train_out_states[4].value is True
+    assert equipment["stcs_atp_2"].train_out_states[4].value is True
+
+    assert train.apply_control(TrainControl(cab_id=1, active=False)).ok
+    equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
+    assert equipment["stcs_atp_1"].train_out_states[4].value is False
+    assert equipment["stcs_atp_2"].train_out_states[4].value is True
+
+
 def test_door_state_feedback_tracks_left_and_right_doors() -> None:
     train = _train()
     assert _atp_state(train).train_out_signal[20] == "0"
@@ -168,10 +197,10 @@ def test_door_state_feedback_tracks_left_and_right_doors() -> None:
     assert signal[20] == "1" and signal[21] == "0"
 
     assert train.set_equipment(EquipmentControlRequest(key="right_door", command="open")).ok
-    assert _atp_state(train).train_out_signal == "1111" + "0" * 16 + "11" + "0" * 8
+    assert _atp_state(train).train_out_signal == "11111" + "0" * 15 + "11" + "0" * 8
 
     assert train.set_equipment(EquipmentControlRequest(key="left_door", command="close")).ok
-    assert _atp_state(train).train_out_signal == "1111" + "0" * 16 + "01" + "0" * 8
+    assert _atp_state(train).train_out_signal == "11111" + "0" * 15 + "01" + "0" * 8
 
 
 def test_door_state_feedback_follows_configured_and_reset_door_state() -> None:
@@ -185,12 +214,12 @@ def test_door_state_feedback_follows_configured_and_reset_door_state() -> None:
             initial_door_state="open",
         )
     )
-    assert _atp_state(train).train_out_signal == "1111" + "0" * 16 + "11" + "0" * 8
+    assert _atp_state(train).train_out_signal == "11111" + "0" * 15 + "11" + "0" * 8
 
     assert train.set_equipment(EquipmentControlRequest(key="left_door", command="close")).ok
     assert _atp_state(train).train_out_signal[20] == "0"
     train.reset()
-    assert _atp_state(train).train_out_signal == "1111" + "0" * 16 + "11" + "0" * 8
+    assert _atp_state(train).train_out_signal == "11111" + "0" * 15 + "11" + "0" * 8
 
 
 def test_stcs_atp_snapshot_lists_named_states_in_bit_order() -> None:

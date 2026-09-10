@@ -16,10 +16,11 @@ from typing import Any
 
 @dataclass(frozen=True)
 class CabSnapshot:
-    """Read-only view of one cab's native activation state and track facing."""
+    """Read-only view of one cab's key, activation state, and track facing."""
 
     cab_id: int
     active: bool = False
+    key: bool = False
     facing: str = "forward"
 
 

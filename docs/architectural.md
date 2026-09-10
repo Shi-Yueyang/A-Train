@@ -344,10 +344,10 @@ Each train has immutable configuration and mutable runtime state.
 | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Configuration  | Train ID, one or two cab IDs, each cab's track facing (`+1`/`-1`), initial cab activation flags, initial position, maximum traction acceleration, and maximum deceleration. |
 | Physical state | Position in metres, signed speed in metres per second, and signed acceleration in metres per second squared.               |
-| Control state  | Signed drive-demand lever and each cab's activation flag. Door state and driver-room handle state live in equipment (§3.5). |
+| Control state  | Signed drive-demand lever, each cab's activation flag, and each cab's key-inserted flag. Door state and driver-room handle state live in equipment (§3.5). |
 
-Cab activation is native train state owned directly by the train aggregate and
-published as one `{cab_id, active, facing}` entry per configured cab in every
+Cab activation and key insertion are native train state owned directly by the
+train aggregate and published as one `{cab_id, active, key, facing}` entry per configured cab in every
 train snapshot; it is not equipment. Each cab's facing is immutable
 configuration describing which way the driver room looks along the track: the
 default is the first cab facing track-increasing and the second cab facing the
