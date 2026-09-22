@@ -1,0 +1,82 @@
+{
+  "train": {
+    "train_id": "TRAIN001",
+    "cabs": [
+      {
+        "cab_id": 1,
+        "facing": "forward",
+        "active": true
+      },
+      {
+        "cab_id": 2,
+        "facing": "backward",
+        "active": false
+      }
+    ],
+    "physics": {
+      "initial_position": 0.0,
+      "initial_speed": 0.0,
+      "max_traction_accel": 1.5,
+      "max_decel": 2.0,
+      "initial_door_state": "closed"
+    },
+    "equipment": [
+      {
+        "type": "door",
+        "key": "left_door",
+        "params": {
+          "side": "left",
+          "initial_state": "closed"
+        }
+      },
+      {
+        "type": "door",
+        "key": "right_door",
+        "params": {
+          "side": "right",
+          "initial_state": "closed"
+        }
+      },
+      {
+        "type": "btm",
+        "key": "btm_1",
+        "cab_id": 1
+      },
+      {
+        "type": "btm",
+        "key": "btm_2",
+        "cab_id": 2
+      },
+      {
+        "type": "driving_system",
+        "key": "driving_1",
+        "cab_id": 1,
+        "params": {
+          "initial_mode": "off",
+          "initial_direction": "off",
+          "initial_acceleration": 0.0
+        }
+      },
+      {
+        "type": "driving_system",
+        "key": "driving_2",
+        "cab_id": 2,
+        "params": {
+          "initial_mode": "off",
+          "initial_direction": "off",
+          "initial_acceleration": 0.0
+        }
+      },
+      {
+        "type": "stcs_atp",
+        "key": "stcs_atp_1",
+        "cab_id": 1
+      },
+      {
+        "type": "stcs_atp",
+        "key": "stcs_atp_2",
+        "cab_id": 2
+      }
+    ]
+  }
+}

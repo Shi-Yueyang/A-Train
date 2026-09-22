@@ -20,17 +20,31 @@ is supplied by the simulator, not repeated in each endpoint.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 ATP_ENDPOINTS_ENV = "A_TRAIN_ATP_ENDPOINTS"
+TRAIN_CONFIG_ENV = "A_TRAIN_CONFIG"
 
 _MAX_PORT = 65535
 
 
 class ConfigError(ValueError):
     """Invalid ATP configuration; reported at startup before the server runs."""
+
+
+def _require_mapping(value: Any, where: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ConfigError(f"{where}: expected an object, got {value!r}")
+    return value
+
+
+def _require_number(value: Any, field: str, where: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ConfigError(f"{where}: {field!r} must be a finite number, got {value!r}")
+    return float(value)
 
 
 def _require_str(value: Any, field: str, where: str) -> str:
@@ -152,3 +166,148 @@ def resolve_endpoints(
             raise ConfigError(f"duplicate ATP endpoint for cab {key}")
         seen.add(key)
     return endpoints
+
+
+def train_config_from_data(data: Mapping[str, Any]):
+    """Build one domain ``TrainConfig`` from the declarative JSON shape."""
+
+    from .domain.train import EquipmentConfig, TrainConfig
+
+    root = _require_mapping(data, "train config")
+    if "train" in root:
+        root = _require_mapping(root["train"], "train config.train")
+
+    train_id = _require_str(root.get("train_id"), "train_id", "train config")
+    cabs = root.get("cabs")
+    if not isinstance(cabs, list) or not cabs:
+        raise ConfigError("train config: 'cabs' must be a non-empty list")
+    cab_ids: list[int] = []
+    facings: dict[int, int] = {}
+    active_cabs: list[int] = []
+    for index, raw_cab in enumerate(cabs):
+        where = f"train config.cabs[{index}]"
+        cab = _require_mapping(raw_cab, where)
+        cab_id = _require_int(cab.get("cab_id"), "cab_id", where, 1, 10_000)
+        if cab_id in cab_ids:
+            raise ConfigError(f"{where}: duplicate cab_id {cab_id}")
+        facing = cab.get("facing", "forward")
+        if facing not in ("forward", "backward"):
+            raise ConfigError(f"{where}: 'facing' must be 'forward' or 'backward'")
+        cab_ids.append(cab_id)
+        facings[cab_id] = 1 if facing == "forward" else -1
+        if cab.get("active", False):
+            active_cabs.append(cab_id)
+    if len(active_cabs) != 1:
+        raise ConfigError("train config.cabs: exactly one cab must have 'active': true")
+
+    physics = _require_mapping(root.get("physics"), "train config.physics")
+    equipment_data = root.get("equipment")
+    equipment_configs: list[EquipmentConfig] | None = None
+    if equipment_data is not None:
+        if not isinstance(equipment_data, list):
+            raise ConfigError("train config.equipment: expected a list")
+        equipment_configs = []
+        for index, raw_equipment in enumerate(equipment_data):
+            where = f"train config.equipment[{index}]"
+            item = _require_mapping(raw_equipment, where)
+            eq_type = _require_str(item.get("type"), "type", where)
+            key = _require_str(item.get("key"), "key", where)
+            params = item.get("params", {})
+            if not isinstance(params, Mapping):
+                raise ConfigError(f"{where}: 'params' must be an object")
+            params = dict(params)
+            if "cab_id" in item:
+                cab_id = _require_int(item["cab_id"], "cab_id", where, 1, 10_000)
+                if cab_id not in cab_ids:
+                    raise ConfigError(f"{where}: cab_id {cab_id} is not configured")
+                if "cab_id" in params and params["cab_id"] != cab_id:
+                    raise ConfigError(f"{where}: cab_id conflicts with params.cab_id")
+                params["cab_id"] = cab_id
+            equipment_configs.append(EquipmentConfig(eq_type, key, params))
+
+    return TrainConfig(
+        train_id=train_id,
+        cab_ids=tuple(cab_ids),
+        initial_active_cab=active_cabs[0],
+        max_traction_accel=_require_number(
+            physics.get("max_traction_accel"), "max_traction_accel", "train config.physics"
+        ),
+        max_decel=_require_number(physics.get("max_decel"), "max_decel", "train config.physics"),
+        initial_position=_require_number(
+            physics.get("initial_position", 0.0), "initial_position", "train config.physics"
+        ),
+        initial_speed=_require_number(
+            physics.get("initial_speed", 0.0), "initial_speed", "train config.physics"
+        ),
+        initial_door_state=physics.get("initial_door_state", "closed"),
+        cab_facings=facings,
+        equipment_configs=(None if equipment_configs is None else tuple(equipment_configs)),
+    )
+
+
+def load_train_config_file(path: str | Path):
+    """Load and validate one train configuration JSON file."""
+
+    try:
+        raw = Path(path).read_text("utf-8")
+    except OSError as exc:
+        raise ConfigError(f"cannot read train config file {path}: {exc}") from None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"train config file {path} is not valid JSON: {exc}") from None
+    try:
+        return train_config_from_data(data)
+    except (KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, ConfigError):
+            raise
+        raise ConfigError(f"train config file {path}: {exc}") from None
+
+
+def train_config_to_data(config) -> dict[str, Any]:
+    """Serialize a domain train config for the uvicorn factory handoff."""
+
+    equipment = []
+    for item in config.equipment_configs:
+        params = dict(item.params)
+        entry: dict[str, Any] = {"type": item.type, "key": item.key}
+        if "cab_id" in params:
+            entry["cab_id"] = params.pop("cab_id")
+        if params:
+            entry["params"] = params
+        equipment.append(entry)
+    return {
+        "train": {
+            "train_id": config.train_id,
+            "cabs": [
+                {
+                    "cab_id": cab_id,
+                    "facing": "forward" if config.cab_facings[cab_id] == 1 else "backward",
+                    "active": cab_id == config.initial_active_cab,
+                }
+                for cab_id in config.cab_ids
+            ],
+            "physics": {
+                "initial_position": config.initial_position,
+                "initial_speed": config.initial_speed,
+                "max_traction_accel": config.max_traction_accel,
+                "max_decel": config.max_decel,
+                "initial_door_state": config.initial_door_state,
+            },
+            "equipment": equipment,
+        }
+    }
+
+
+def encode_train_config(config) -> str:
+    return json.dumps(train_config_to_data(config))
+
+
+def decode_train_config(value: str):
+    if not value or not value.strip():
+        raise ConfigError(f"{TRAIN_CONFIG_ENV}: value is empty")
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"{TRAIN_CONFIG_ENV} is not valid JSON: {exc}") from None
+    return train_config_from_data(data)

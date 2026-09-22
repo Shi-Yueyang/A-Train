@@ -121,7 +121,7 @@ class TrainConfig:
     initial_speed: float = 0.0
     initial_door_state: str = "closed"
     cab_facings: dict[int, int] | None = None
-    equipment_configs: tuple[EquipmentConfig, ...] = ()
+    equipment_configs: tuple[EquipmentConfig, ...] | None = None
 
     def __post_init__(self) -> None:
         if not self.train_id or not isinstance(self.train_id, str):
@@ -160,7 +160,7 @@ class TrainConfig:
             if any(facing not in (-1, 1) for facing in facings.values()):
                 raise ValueError("cab facings must be +1 or -1")
             object.__setattr__(self, "cab_facings", facings)
-        if not self.equipment_configs:
+        if self.equipment_configs is None:
             # Standard fit: one Btm and one DrivingSystem per cab, two Doors,
             # one StcsAtp.
             object.__setattr__(

@@ -236,6 +236,13 @@ Implement `SimulationCore` as the orchestration module for clock, commands,
 train models, and snapshots. Put physics in `train.py` and protocol parsing
 and transport in `atp.py`; neither module advances simulation time.
 
+Startup may load one declarative JSON train configuration through the CLI. The
+configuration boundary converts the file into the typed `TrainConfig` and
+`EquipmentConfig` objects before `bootstrap.py` creates the application. JSON
+and environment-variable parsing must remain outside the domain and
+simulation layers. The current simulator still supports exactly one train;
+the file's `equipment` array replaces the default equipment set when present.
+
 ### Data Types and Ownership
 
 Define `SimulationState` and `TimeMode` as `Enum` types. Define `Command` and
@@ -773,7 +780,7 @@ train-simulator/
 ├── src/a_train/
 │   ├── __init__.py                 # Public package version and exports only.
 │   ├── __main__.py                 # `python -m a_train` command-line entry point.
-│   ├── config.py                   # ATP endpoint configuration for `run` (atp-api.md §6, Phase 3.1).
+│   ├── config.py                   # JSON startup configuration for trains and ATP endpoints.
 │   ├── bootstrap.py                # Creates the core and adapters; owns process startup and shutdown.
 │   │
 │   ├── simulation/                 # Simulation-time orchestration; no HTTP or TCP handling.

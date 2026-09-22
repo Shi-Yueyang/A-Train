@@ -47,6 +47,11 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help='JSON file: {"atp_endpoints": [{"cab_id", "host", "port"}, ...]}',
     )
+    run_p.add_argument(
+        "--train-config",
+        metavar="FILE",
+        help="JSON file defining the train, cabs, physics, and equipment.",
+    )
 
     return parser
 
@@ -62,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
             reload=args.reload,
             atp_config=args.atp_config,
             atp_specs=args.atp,
+            train_config=args.train_config,
         )
     parser.error(f"unknown command: {args.command!r}")
     return 2
@@ -73,18 +79,23 @@ def _run_server(
     reload: bool,
     atp_config: str | None = None,
     atp_specs: list[str] | None = None,
+    train_config: str | None = None,
 ) -> int:
     import uvicorn
 
     from .config import (
         ATP_ENDPOINTS_ENV,
+        TRAIN_CONFIG_ENV,
         ConfigError,
         encode_env,
+        encode_train_config,
+        load_train_config_file,
         resolve_endpoints,
     )
 
     try:
         endpoints = resolve_endpoints(atp_config, atp_specs or ())
+        configured_train = load_train_config_file(train_config) if train_config else None
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -97,6 +108,10 @@ def _run_server(
         os.environ[ATP_ENDPOINTS_ENV] = encode_env(endpoints)
     else:
         os.environ.pop(ATP_ENDPOINTS_ENV, None)
+    if configured_train is not None:
+        os.environ[TRAIN_CONFIG_ENV] = encode_train_config(configured_train)
+    else:
+        os.environ.pop(TRAIN_CONFIG_ENV, None)
 
     if getattr(sys, "frozen", False):
         # Frozen executables cannot resolve the ``module:attr`` factory string;

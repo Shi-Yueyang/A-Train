@@ -23,7 +23,12 @@ from fastapi import FastAPI
 
 from .adapters.api.app import create_app as build_app
 from .adapters.atp.manager import AtpEndpoint, AtpManager
-from .config import ATP_ENDPOINTS_ENV, decode_env
+from .config import (
+    ATP_ENDPOINTS_ENV,
+    TRAIN_CONFIG_ENV,
+    decode_env,
+    decode_train_config,
+)
 from .domain.train import TrainConfig
 from .simulation.commands import Command
 from .simulation.core import SimulationCore
@@ -59,7 +64,12 @@ async def lifespan(
     command_queue: asyncio.Queue[Command] = asyncio.Queue()
     snapshot_subscribers: list[asyncio.Queue[SimulationSnapshot]] = []
 
-    configs = train_configs if train_configs is not None else DEFAULT_TRAIN_CONFIGS
+    if train_configs is not None:
+        configs = train_configs
+    elif os.environ.get(TRAIN_CONFIG_ENV):
+        configs = (decode_train_config(os.environ[TRAIN_CONFIG_ENV]),)
+    else:
+        configs = DEFAULT_TRAIN_CONFIGS
     core = SimulationCore(
         command_queue=command_queue,
         snapshot_subscribers=snapshot_subscribers,

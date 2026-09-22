@@ -420,6 +420,11 @@ python -m a_train run --atp-config atp.json
 - The default configuration (no endpoints) starts the simulator with zero ATP
   connections.
 
+The train itself may be configured independently with
+`--train-config FILE`. That UTF-8 JSON file defines the single train's cabs,
+physics, and equipment instances; it does not configure TCP endpoints. Both
+options may be supplied to the same `run` command.
+
 ### 6.2 Channel status
 
 `GET /api/atp/status` reports every configured endpoint with its current
