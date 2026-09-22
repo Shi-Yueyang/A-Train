@@ -11,10 +11,25 @@ timing.
 
 ## Setup
 
+Requires Python 3.10+.
+
+With [uv](https://docs.astral.sh/uv/):
+
 ```bash
 uv venv
 uv pip install -e '.[dev]'
 ```
+
+Without uv, using the standard library `venv` and `pip`:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m pip install -e '.[dev]'
+```
+
+Run subsequent commands (`python -m a_train ...`, `pytest`, `ruff`, ...) inside
+the activated virtual environment.
 
 ## Run
 
@@ -54,3 +69,7 @@ ruff format --check .
 
 See [docs/web-api.md](docs/web-api.md) for REST/WebSocket details and
 [docs/architectural.md](docs/architectural.md) for the design.
+[docs/ashley.md](docs/ashley.md) is the superseded process-supervisor
+design; [docs/supervision.md](docs/supervision.md) is the current decision:
+native OS supervisors plus a thin cross-host control/monitoring shim (not
+implemented).
