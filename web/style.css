@@ -148,7 +148,7 @@ pre#train-state-pre {
 
 #train-stcs {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
+  grid-template-columns: 1fr;
   gap: 0.75rem;
   margin-top: 1rem;
 }
@@ -170,7 +170,7 @@ pre#train-state-pre {
 
 .stcs-columns {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 1.5rem;
 }
 
@@ -214,6 +214,13 @@ pre#train-state-pre {
 
 .stcs-columns tr.on td.value {
   color: #43a047;
+}
+
+@media (max-width: 42rem) {
+  .stcs-columns {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
 }
 
 .message {

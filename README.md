@@ -23,9 +23,9 @@ uv pip install -e '.[dev]'
 Without uv, using the standard library `venv` and `pip`:
 
 ```bash
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-python -m pip install -e '.[dev]'
+pip install -e '.[dev]'
 ```
 
 Run subsequent commands (`python -m a_train ...`, `pytest`, `ruff`, ...) inside
@@ -34,7 +34,7 @@ the activated virtual environment.
 ## Run
 
 ```bash
-python -m a_train run --host 127.0.0.1 --port 8000
+python -m a_train run --host 127.0.0.1 --port 8001
 ```
 
 Open http://127.0.0.1:8000/ for the browser demo.
