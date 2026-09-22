@@ -9,7 +9,7 @@ from .base import Equipment, EquipmentContext
 from .btm import Btm
 from .door import Door
 from .driving_system import DrivingSystem
-from .stcs_atp import StcsAtp
+from .stcs_atp import StcsAtpDuo, StcsAtpSolo
 
 EQUIPMENT_FACTORIES: dict[str, Callable[..., Equipment[Any]]] = {}
 
@@ -42,8 +42,16 @@ def _create_btm(key: str, _ctx: EquipmentContext, *, cab_id: int | None = None) 
     return Btm(key, _cab_id_from_key(key, "btm_", cab_id))
 
 
-def _create_stcs_atp(key: str, _ctx: EquipmentContext, *, cab_id: int | None = None) -> StcsAtp:
-    return StcsAtp(key, cab_id=_cab_id_from_key(key, "stcs_atp_", cab_id))
+def _create_stcs_atp_duo(
+    key: str, _ctx: EquipmentContext, *, cab_id: int | None = None
+) -> StcsAtpDuo:
+    return StcsAtpDuo(key, cab_id=_cab_id_from_key(key, "stcs_atp_duo_", cab_id))
+
+
+def _create_stcs_atp_solo(
+    key: str, _ctx: EquipmentContext, *, cab_id: int | None = None
+) -> StcsAtpSolo:
+    return StcsAtpSolo(key, cab_id=_cab_id_from_key(key, "stcs_atp_solo_", cab_id))
 
 
 def _create_driving_system(
@@ -73,7 +81,8 @@ EQUIPMENT_FACTORIES.update(
     {
         "door": _create_door,
         "btm": _create_btm,
-        "stcs_atp": _create_stcs_atp,
+        "stcs_atp_duo": _create_stcs_atp_duo,
+        "stcs_atp_solo": _create_stcs_atp_solo,
         "driving_system": _create_driving_system,
     }
 )

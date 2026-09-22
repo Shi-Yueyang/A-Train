@@ -208,8 +208,10 @@ function renderTrainState() {
   ];
   pre.textContent = lines.join("\n");
 
-  renderStcs(stcsEl, equipment.filter((entry) => entry.type === "stcs_atp"));
-  renderEquipment(equipmentEl, equipment.filter((entry) => entry.type !== "stcs_atp"));
+  const isStcsAtp = (entry) =>
+    entry.type === "stcs_atp_duo" || entry.type === "stcs_atp_solo";
+  renderStcs(stcsEl, equipment.filter(isStcsAtp));
+  renderEquipment(equipmentEl, equipment.filter((entry) => !isStcsAtp(entry)));
   syncSlider("drive", sel.drive_demand);
   renderEquipmentControls(equipment);
 }
@@ -256,8 +258,17 @@ function renderEquipmentControls(equipment) {
   );
   ensurePanels(
     $("stcs-send-buttons"),
-    prefix(byType(equipment, "stcs_atp")),
-    () => byType(equipment, "stcs_atp").map(buildStcsSendButton)
+    prefix(
+      equipment.filter(
+        (entry) => entry.type === "stcs_atp_duo" || entry.type === "stcs_atp_solo"
+      )
+    ),
+    () =>
+      equipment
+        .filter(
+          (entry) => entry.type === "stcs_atp_duo" || entry.type === "stcs_atp_solo"
+        )
+        .map(buildStcsSendButton)
   );
 
   syncDrivingPanels(equipment);
@@ -472,7 +483,7 @@ function buildStcsCard(entry) {
   card.className = "equipment-card stcs-card";
 
   const heading = document.createElement("h3");
-  const cabMatch = /^stcs_atp_(\d+)$/.exec(entry.key);
+  const cabMatch = /^stcs_atp_(?:duo|solo)_(\d+)$/.exec(entry.key);
   const cabLabel = cabMatch ? `Cab ${cabMatch[1]}` : "Cab —";
   heading.textContent = entry.key;
   card.appendChild(heading);

@@ -50,7 +50,7 @@ def _equipment(snap: dict, key: str) -> dict:
 
 
 def _out_bits(snap: dict, cab: int = 1) -> dict[str, bool]:
-    atp = _equipment(snap, f"stcs_atp_{cab}")
+    atp = _equipment(snap, f"stcs_atp_duo_{cab}")
     return {s["name"]: s["value"] for s in atp["state"]["train_out_states"]}
 
 

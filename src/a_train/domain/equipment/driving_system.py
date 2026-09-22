@@ -87,7 +87,7 @@ class DrivingSystem:
         intents: list[EquipmentIntent] = [
             EquipmentIntent(
                 source=self._key,
-                target=f"stcs_atp_{self._cab_id}",
+                target=f"stcs_atp_cab_{self._cab_id}",
                 control=StcsAtpControl(
                     cab_id=self._cab_id, mode=self._mode, direction=self._direction
                 ),

@@ -68,13 +68,13 @@
         }
       },
       {
-        "type": "stcs_atp",
-        "key": "stcs_atp_1",
+        "type": "stcs_atp_duo",
+        "key": "stcs_atp_duo_1",
         "cab_id": 1
       },
       {
-        "type": "stcs_atp",
-        "key": "stcs_atp_2",
+        "type": "stcs_atp_duo",
+        "key": "stcs_atp_duo_2",
         "cab_id": 2
       }
     ]

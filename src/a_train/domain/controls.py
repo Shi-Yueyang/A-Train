@@ -27,7 +27,7 @@ class CabStateControl:
 
 @dataclass(frozen=True)
 class StcsAtpControl:
-    """The complete writable surface of one ``stcs_atp_<cab_id>`` instance.
+    """The complete writable surface of one ``stcs_atp_duo_<cab_id>`` instance.
 
     Every field is optional; ``None`` leaves that state unchanged. ``command``
     is the raw ATP-to-train bit string; the door fields are observed door

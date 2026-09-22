@@ -95,7 +95,7 @@ async def test_manual_step_publishes_train_state_for_each_cab() -> None:
                 assert state["direction"] == "forward"
                 assert "equipment" in state
                 assert "door" not in state
-                assert "stcs_atp" not in state
+                assert "stcs_atp_duo" not in state
     finally:
         await server.stop()
 
@@ -213,7 +213,7 @@ async def _wait_stcs_atp(c, **expected: object) -> dict:
     async def _poll() -> dict:
         while True:
             equipment = (await c.get("/api/trains/TRAIN001")).json()["equipment"]
-            state = next(item["state"] for item in equipment if item["key"] == "stcs_atp_1")
+            state = next(item["state"] for item in equipment if item["key"] == "stcs_atp_duo_1")
             if all(state.get(key) == value for key, value in expected.items()):
                 return state
             await asyncio.sleep(0.02)
@@ -230,7 +230,7 @@ async def _next_train_state_with_stcs(server, expected: dict[str, object]) -> di
             state = next(
                 item["state"]
                 for item in message.get("equipment", [])
-                if item.get("key") == "stcs_atp_1"
+                if item.get("key") == "stcs_atp_duo_1"
             )
             if all(state.get(key) == value for key, value in expected.items()):
                 return message
@@ -259,7 +259,10 @@ async def test_atp_signal_asserts_state_and_shows_in_train_state() -> None:
             r = await c.post("/api/simulation/step", json={"delta": 0.1})
             assert r.status_code == 200
             equipment = (await c.get("/api/trains/TRAIN001")).json()["equipment"]
-            assert next(item["state"] for item in equipment if item["key"] == "stcs_atp_1") == state
+            assert (
+                next(item["state"] for item in equipment if item["key"] == "stcs_atp_duo_1")
+                == state
+            )
     finally:
         await server.stop()
 

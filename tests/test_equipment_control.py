@@ -111,7 +111,7 @@ async def test_door_state_reflects_in_stcs_atp_train_out_signal() -> None:
 
         status, snap = await _equipment(c, "left_door", command="open")
         assert status == 200
-        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp_1")
+        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp_duo_1")
         assert atp["state"]["train_out_signal"][20] == "1"  # door_state_1
         assert atp["state"]["train_out_signal"][21] == "0"  # door_state_2
         out = {s["name"]: s["value"] for s in atp["state"]["train_out_states"]}
@@ -120,13 +120,13 @@ async def test_door_state_reflects_in_stcs_atp_train_out_signal() -> None:
         await _equipment(c, "right_door", command="open")
         await _equipment(c, "left_door", command="close")
         snap = await _train(c)
-        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp_1")
+        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp_duo_1")
         assert atp["state"]["train_out_signal"][20] == "0"
         assert atp["state"]["train_out_signal"][21] == "1"
 
         await c.post("/api/simulation/reset")
         snap = await _train(c)
-        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp_1")
+        atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp_duo_1")
         assert atp["state"]["train_out_signal"][20:22] == "00"
 
 

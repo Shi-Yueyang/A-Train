@@ -34,7 +34,7 @@ def valid_config() -> dict:
             "equipment": [
                 {"type": "door", "key": "left_door", "params": {"side": "left"}},
                 {"type": "btm", "key": "front_balise", "cab_id": 10},
-                {"type": "stcs_atp", "key": "front_atp", "cab_id": 10},
+                {"type": "stcs_atp_duo", "key": "front_atp", "cab_id": 10},
                 {
                     "type": "driving_system",
                     "key": "front_driver",

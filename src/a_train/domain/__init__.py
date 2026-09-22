@@ -12,7 +12,8 @@ from .equipment import (
     Door,
     DrivingSystem,
     EquipmentContext,
-    StcsAtp,
+    StcsAtpDuo,
+    StcsAtpSolo,
 )
 from .physics import (
     integrate,
@@ -42,7 +43,8 @@ __all__ = [
     "DrivingSystemSnapshot",
     "EquipmentContext",
     "EquipmentControlRequest",
-    "StcsAtp",
+    "StcsAtpDuo",
+    "StcsAtpSolo",
     "Train",
     "TrainConfig",
     "TrainControl",

@@ -5,7 +5,7 @@ from .btm import Btm
 from .door import Door
 from .driving_system import DrivingSystem
 from .registry import EQUIPMENT_FACTORIES
-from .stcs_atp import StcsAtp
+from .stcs_atp import SignalDefinition, StcsAtpBase, StcsAtpDuo, StcsAtpSolo
 
 __all__ = [
     "Btm",
@@ -15,5 +15,8 @@ __all__ = [
     "Equipment",
     "EquipmentContext",
     "EquipmentIntent",
-    "StcsAtp",
+    "StcsAtpBase",
+    "StcsAtpDuo",
+    "StcsAtpSolo",
+    "SignalDefinition",
 ]

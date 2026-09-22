@@ -38,7 +38,7 @@ from .equipment import (
     Equipment,
     EquipmentContext,
     EquipmentIntent,
-    StcsAtp,
+    StcsAtpBase,
 )
 from .physics import (
     integrate,
@@ -72,7 +72,7 @@ class EquipmentControlRequest:
 
     - ``door``: ``command`` is ``"open"`` or ``"close"``.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
-    - ``stcs_atp_<cab_id>``: ``command`` is recorded on that cab's STCS instance.
+    - ``stcs_atp_duo_<cab_id>``: ``command`` is recorded on that cab's STCS instance.
     - ``driving_system``: ``mode``/``direction``/``acceleration`` handle
       positions; every combination of fields may be set together.
     """
@@ -163,7 +163,7 @@ class TrainConfig:
             object.__setattr__(self, "cab_facings", facings)
         if self.equipment_configs is None:
             # Standard fit: one Btm and one DrivingSystem per cab, two Doors,
-            # one StcsAtp.
+            # one StcsAtpDuo.
             object.__setattr__(
                 self,
                 "equipment_configs",
@@ -177,7 +177,10 @@ class TrainConfig:
                         EquipmentConfig("driving_system", f"driving_{cab_id}")
                         for cab_id in self.cab_ids
                     ]
-                    + [EquipmentConfig("stcs_atp", f"stcs_atp_{cab_id}") for cab_id in self.cab_ids]
+                    + [
+                        EquipmentConfig("stcs_atp_duo", f"stcs_atp_duo_{cab_id}")
+                        for cab_id in self.cab_ids
+                    ]
                 ),
             )
         keys = [eq_cfg.key for eq_cfg in self.equipment_configs]
@@ -219,7 +222,7 @@ class Train:
             cab_id: cab_id == config.initial_active_cab for cab_id in config.cab_ids
         }
         self._cab_key = {cab_id: False for cab_id in config.cab_ids}
-        # Sync observer equipment (e.g. door feedback into stcs_atp) with the
+        # Sync observer equipment (e.g. door feedback into stcs_atp_duo) with the
         # configured initial state before the first snapshot is taken.
         self._resolve_all_intents()
 
@@ -264,6 +267,16 @@ class Train:
         """
 
         equipment = self._equipment.get(command.key)
+        if equipment is None and command.key.startswith("stcs_atp_cab_"):
+            cab_id = int(command.key.removeprefix("stcs_atp_cab_"))
+            equipment = next(
+                (
+                    candidate
+                    for candidate in self._equipment.values()
+                    if isinstance(candidate, StcsAtpBase) and candidate.cab_id == cab_id
+                ),
+                None,
+            )
         if equipment is None:
             return ControlResult(
                 ok=False,
@@ -306,7 +319,7 @@ class Train:
             if command.data is None:
                 raise ValueError("btm requires data")
             return BtmControl(command.data, command.cab_id)
-        if isinstance(equipment, StcsAtp):
+        if isinstance(equipment, StcsAtpBase):
             if command.command is None:
                 raise ValueError("stcs_atp requires a command")
             return StcsAtpControl(command.command)
@@ -381,7 +394,12 @@ class Train:
                         observe_cab_state(intent.control)
             elif intent.target == "stcs_atp":
                 for equipment in self._equipment.values():
-                    if equipment.type == "stcs_atp":
+                    if isinstance(equipment, StcsAtpBase):
+                        equipment.apply_control(intent.control)
+            elif intent.target.startswith("stcs_atp_cab_"):
+                cab_id = int(intent.target.removeprefix("stcs_atp_cab_"))
+                for equipment in self._equipment.values():
+                    if isinstance(equipment, StcsAtpBase) and equipment.cab_id == cab_id:
                         equipment.apply_control(intent.control)
         self._driver_inputs = tuple(driver_inputs)
 

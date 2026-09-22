@@ -34,7 +34,7 @@ the activated virtual environment.
 ## Run
 
 ```bash
-python -m a_train run --host 127.0.0.1 --port 8001
+python -m a_train run --host 127.0.0.1 --port 8001 --train-config train.json
 ```
 
 Open http://127.0.0.1:8001/ for the browser demo.
@@ -82,7 +82,7 @@ equipment list. For example:
 			{"type": "door", "key": "left_door", "params": {"side": "left"}},
 			{"type": "door", "key": "right_door", "params": {"side": "right"}},
 			{"type": "btm", "key": "btm_front", "cab_id": 1},
-			{"type": "stcs_atp", "key": "stcs_front", "cab_id": 1}
+			{"type": "stcs_atp_duo", "key": "stcs_front", "cab_id": 1}
 		]
 	}
 }

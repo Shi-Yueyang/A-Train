@@ -143,7 +143,7 @@ while the channel is READY.
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
     { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
-    { "type": "stcs_atp", "key": "stcs_atp_1", "state": {
+    { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "state": {
         "last_command": "0001000",
         "train_out_signal": "110000000000000000000000000000",
         "train_in_states": [ { "name": "ato_enable", "value": true } ],
@@ -249,7 +249,7 @@ current flags are derived from the most recent assertion of each position.
 
 The ATP manager performs the transport translation in
 `src/a_train/adapters/atp/manager.py`.
-The addressed cab's `stcs_atp_<cab_id>` component
+The addressed cab's `stcs_atp_duo_<cab_id>` component
 (`domain/equipment/stcs_atp.py`) then applies each bit to a plain internal
 boolean state (the *train-in states*). Both state maps
 are exposed on the wire as `StcsAtpSnapshot.train_in_states` and
@@ -329,7 +329,7 @@ brake is active and `true` when both emergency brakes are clear, and
 `door_state_1` and `door_state_2` (bits 20-21) reflect the physical door
 state: true while `left_door` / `right_door` is open. Each door reports its
 current state as an equipment intent carrying the matching cab's
-`stcs_atp_<cab_id>` control type
+`stcs_atp_duo_<cab_id>` control type
 (`StcsAtpControl` door-feedback fields); the train aggregate resolves the
 feedback whenever equipment changes, steps, resets, or is constructed with a
 configured open door.
@@ -340,11 +340,11 @@ configured open door.
 positions (see §3.1 and architectural.md §3.5): the numbered bits are per-cab,
 the unnumbered ones are true if any cab asserts them. Each `driving_X`
 equipment asserts its full handle state to the matching cab's
-`stcs_atp_<cab_id>` through an
+`stcs_atp_duo_<cab_id>` through an
 `StcsAtpControl` intent resolved by the train aggregate.
 
 Asserting `maximum_service_brake_7` (bit 2) is not merely recorded: the
-The addressed cab's `stcs_atp_<cab_id>` equipment emits a `train`-target intent asserting a full brake
+The addressed cab's `stcs_atp_duo_<cab_id>` equipment emits a `train`-target intent asserting a full brake
 effort, which the train applies as a motion-opposing protection brake on every
 step the bit remains asserted, including rearward braking of a
 track-negative train. The brake clamps to a stop within a step and produces no
@@ -454,6 +454,6 @@ ATP     ──> {"type":"atp_command","door":"open","drive_demand":0.5}
               (two commands: control, then equipment)
 ATP     ──> {"type":"atp_command","atp_signal":"0001000"}
               (emergency brake asserted on bit 3; state lands in the core)
-simulator ──> {"type":"train_state",...,"equipment":[...,{"type":"stcs_atp","key":"stcs_atp_1","state":{"last_command":"0111",...,"train_in_states":[...],"train_out_states":[...]}}]}
+simulator ──> {"type":"train_state",...,"equipment":[...,{"type":"stcs_atp_duo","key":"stcs_atp_duo_1","state":{"last_command":"0111",...,"train_in_states":[...],"train_out_states":[...]}}]}
 simulator ──> {"type":"error","code":"invalid_atp_command",...}  (on a bad request)
 ```
