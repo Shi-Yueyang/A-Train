@@ -1,16 +1,8 @@
-"""Phase 3.1 acceptance tests — ATP endpoint configuration (TODO.md §Phase 3.1).
-
-Endpoints reach the production server through the ``run`` command: CLI specs
-and a JSON config file are resolved into ``A_TRAIN_ATP_ENDPOINTS`` and decoded
-by the uvicorn factory ``create_app()``. Tests drive the same wiring: the CLI
-resolution directly, and the connection through the env-var path (channels go
-READY on TCP connect; there is no handshake).
-"""
+"""Phase 3.1 acceptance tests for repeatable ATP endpoint arguments."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 
 import pytest
@@ -21,9 +13,7 @@ from a_train.config import (
     ConfigError,
     decode_env,
     encode_env,
-    load_endpoints_file,
     parse_endpoint_spec,
-    resolve_endpoints,
 )
 from a_train.domain.train import TrainConfig
 from tests.support.app import running_app
@@ -71,32 +61,6 @@ def test_parse_endpoint_spec_rejects_invalid(bad: str) -> None:
         parse_endpoint_spec(bad)
 
 
-def test_load_endpoints_file(tmp_path) -> None:
-    path = tmp_path / "atp.json"
-    path.write_text(json.dumps({"atp_endpoints": [EP1]}), encoding="utf-8")
-    assert load_endpoints_file(path) == [EP1]
-
-
-def test_load_endpoints_file_rejects_invalid_fields(tmp_path) -> None:
-    path = tmp_path / "atp.json"
-    missing = {"cab_id": 1}
-    path.write_text(json.dumps({"atp_endpoints": [missing]}), encoding="utf-8")
-    with pytest.raises(ConfigError, match="host"):
-        load_endpoints_file(path)
-
-
-def test_resolve_endpoints_merges_file_and_specs(tmp_path) -> None:
-    path = tmp_path / "atp.json"
-    path.write_text(json.dumps([EP1]), encoding="utf-8")
-    spec = {"cab_id": 2, "host": "127.0.0.1", "port": 9102}
-    assert resolve_endpoints(path, ["2=127.0.0.1:9102"]) == [EP1, spec]
-
-
-def test_resolve_endpoints_rejects_duplicate_cab() -> None:
-    with pytest.raises(ConfigError, match="duplicate"):
-        resolve_endpoints(None, ["1=127.0.0.1:9101", "1=127.0.0.1:9102"])
-
-
 def test_env_roundtrip() -> None:
     assert decode_env(encode_env([EP1])) == [EP1]
     assert decode_env("") == []
@@ -112,14 +76,12 @@ def test_env_rejects_malformed() -> None:
 # -- run command wiring ---------------------------------------------------------
 
 
-def test_run_command_configures_endpoints_for_the_server(monkeypatch, tmp_path) -> None:
+def test_run_command_configures_endpoints_for_the_server(monkeypatch) -> None:
     calls: dict = {}
     monkeypatch.setattr("uvicorn.run", lambda app, **kw: calls.update(app=app, **kw))
     monkeypatch.delenv(ATP_ENDPOINTS_ENV, raising=False)
-    path = tmp_path / "atp.json"
-    path.write_text(json.dumps({"atp_endpoints": [EP1]}), encoding="utf-8")
 
-    code = cli.main(["run", "--host", "0.0.0.0", "--port", "8123", "--atp-config", str(path)])
+    code = cli.main(["run", "--host", "0.0.0.0", "--port", "8123", "--atp", "1=127.0.0.1:9101"])
 
     try:
         assert code == 0

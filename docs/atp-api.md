@@ -408,22 +408,18 @@ Endpoints are configured at startup, one per cab
 
 ```bash
 python -m a_train run --atp 1=127.0.0.1:9101 --atp 2=127.0.0.1:9102
-python -m a_train run --atp-config atp.json
-# atp.json: {"atp_endpoints": [{"cab_id": 1,
-#                               "host": "127.0.0.1", "port": 9101}]}
 ```
 
-- `--atp CAB_ID=HOST:PORT` is repeatable; file and flag entries are merged; a
-  duplicate `cab_id` fails startup.
+- `--atp CAB_ID=HOST:PORT` is repeatable; a duplicate `cab_id` fails startup.
 - Validation: `cab_id` ≥ 1, non-empty `host`, and `port` 1-65535. The single
   train identity is added by the simulator to protocol messages.
 - The default configuration (no endpoints) starts the simulator with zero ATP
   connections.
 
-The train itself may be configured independently with
-`--train-config FILE`. That UTF-8 JSON file defines the single train's cabs,
-physics, and equipment instances; it does not configure TCP endpoints. Both
-options may be supplied to the same `run` command.
+The train itself may be configured independently with `--train-config FILE`.
+That UTF-8 JSON file defines the single train's cabs, physics, and equipment
+instances; it does not configure TCP endpoints. Both options may be supplied
+to the same `run` command.
 
 ### 6.2 Channel status
 

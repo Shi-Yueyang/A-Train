@@ -43,11 +43,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_p.add_argument(
-        "--atp-config",
-        metavar="FILE",
-        help='JSON file: {"atp_endpoints": [{"cab_id", "host", "port"}, ...]}',
-    )
-    run_p.add_argument(
         "--train-config",
         metavar="FILE",
         help="JSON file defining the train, cabs, physics, and equipment.",
@@ -65,7 +60,6 @@ def main(argv: list[str] | None = None) -> int:
             host=args.host,
             port=args.port,
             reload=args.reload,
-            atp_config=args.atp_config,
             atp_specs=args.atp,
             train_config=args.train_config,
         )
@@ -77,7 +71,6 @@ def _run_server(
     host: str,
     port: int,
     reload: bool,
-    atp_config: str | None = None,
     atp_specs: list[str] | None = None,
     train_config: str | None = None,
 ) -> int:
@@ -90,11 +83,18 @@ def _run_server(
         encode_env,
         encode_train_config,
         load_train_config_file,
-        resolve_endpoints,
+        parse_endpoint_spec,
     )
 
     try:
-        endpoints = resolve_endpoints(atp_config, atp_specs or ())
+        endpoints = []
+        seen_cabs: set[int] = set()
+        for spec in atp_specs or ():
+            endpoint = parse_endpoint_spec(spec)
+            if endpoint["cab_id"] in seen_cabs:
+                raise ConfigError(f"duplicate ATP endpoint for cab {endpoint['cab_id']}")
+            seen_cabs.add(endpoint["cab_id"])
+            endpoints.append(endpoint)
         configured_train = load_train_config_file(train_config) if train_config else None
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)

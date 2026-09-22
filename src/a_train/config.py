@@ -1,16 +1,10 @@
-"""ATP endpoint configuration for the ``run`` command (Phase 3.1, atp-api.md §1.1, §6).
+"""Startup configuration for ATP endpoints and the declarative train.
 
-The ``run`` command accepts ATP endpoints as ``--atp CAB_ID=HOST:PORT``
-specifications and/or a JSON ``--atp-config`` file::
-
-    { "atp_endpoints": [ { "cab_id": 1,
-                           "host": "127.0.0.1", "port": 9101 } ] }
-
-Resolved endpoints are handed to the server through the
-``A_TRAIN_ATP_ENDPOINTS`` environment variable (a JSON list). The env-var
-passthrough keeps uvicorn's factory import-string startup intact, and reload
-subprocesses inherit the same configuration. ``bootstrap.create_app`` decodes
-the variable when no endpoints are passed explicitly.
+ATP endpoints are supplied as repeatable ``--atp CAB_ID=HOST:PORT`` arguments.
+They are handed to the server through the ``A_TRAIN_ATP_ENDPOINTS``
+environment variable so the uvicorn factory and reload subprocesses receive
+the same values. Train configuration is supplied separately through
+``--train-config``.
 
 Endpoint dictionaries are plain transport-neutral data: ``cab_id`` (positive
 int), ``host`` (non-empty str), ``port`` (1-65535). The single train identity
@@ -32,7 +26,7 @@ _MAX_PORT = 65535
 
 
 class ConfigError(ValueError):
-    """Invalid ATP configuration; reported at startup before the server runs."""
+    """Invalid startup configuration; reported before the server runs."""
 
 
 def _require_mapping(value: Any, where: str) -> Mapping[str, Any]:
@@ -102,29 +96,6 @@ def parse_endpoint_spec(spec: str) -> dict[str, Any]:
     )
 
 
-def load_endpoints_file(path: str | Path) -> list[dict[str, Any]]:
-    """Load endpoints from a JSON file: ``{"atp_endpoints": [...]}`` or a list."""
-
-    try:
-        raw = Path(path).read_text("utf-8")
-    except OSError as exc:
-        raise ConfigError(f"cannot read ATP config file {path}: {exc}") from None
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ConfigError(f"ATP config file {path} is not valid JSON: {exc}") from None
-    if isinstance(data, Mapping):
-        entries = data.get("atp_endpoints")
-    else:
-        entries = data
-    if not isinstance(entries, list):
-        raise ConfigError(f"ATP config file {path}: expected an 'atp_endpoints' list")
-    return [
-        validate_endpoint(entry, where=f"{path} atp_endpoints[{i}]")
-        for i, entry in enumerate(entries)
-    ]
-
-
 def decode_env(value: str) -> list[dict[str, Any]]:
     """Decode the ``A_TRAIN_ATP_ENDPOINTS`` JSON list; empty/missing means []."""
 
@@ -146,26 +117,6 @@ def encode_env(endpoints: Sequence[Mapping[str, Any]]) -> str:
     """Serialise validated endpoints for the environment variable."""
 
     return json.dumps([dict(entry) for entry in endpoints])
-
-
-def resolve_endpoints(
-    config_file: str | Path | None = None,
-    specs: Sequence[str] = (),
-) -> list[dict[str, Any]]:
-    """Merge ``--atp-config`` entries and ``--atp`` specs, rejecting duplicates."""
-
-    endpoints: list[dict[str, Any]] = []
-    if config_file is not None:
-        endpoints.extend(load_endpoints_file(config_file))
-    for spec in specs:
-        endpoints.append(parse_endpoint_spec(spec))
-    seen: set[int] = set()
-    for endpoint in endpoints:
-        key = endpoint["cab_id"]
-        if key in seen:
-            raise ConfigError(f"duplicate ATP endpoint for cab {key}")
-        seen.add(key)
-    return endpoints
 
 
 def train_config_from_data(data: Mapping[str, Any]):
