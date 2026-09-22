@@ -11,13 +11,22 @@ from collections.abc import AsyncIterator
 
 import pytest_asyncio
 
+from a_train.domain.train import TrainConfig
 from tests.support.app import running_app
 from tests.support.atp_server import TestAtpServer
+
+TEST_TRAIN = TrainConfig(
+    train_id="TRAIN001",
+    cab_ids=(1, 2),
+    initial_active_cab=1,
+    max_traction_accel=1.5,
+    max_decel=2.0,
+)
 
 
 @pytest_asyncio.fixture
 async def app_client() -> AsyncIterator:
-    async with running_app() as client:
+    async with running_app([TEST_TRAIN]) as client:
         yield client
 
 

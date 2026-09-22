@@ -29,6 +29,7 @@ T1 = TrainConfig(
 )
 
 EP1 = {"cab_id": 1, "host": "127.0.0.1", "port": 9101}
+TRAIN_CONFIG = "docs/train.json"
 
 
 # -- Endpoint spec / file parsing ----------------------------------------------
@@ -81,7 +82,19 @@ def test_run_command_configures_endpoints_for_the_server(monkeypatch) -> None:
     monkeypatch.setattr("uvicorn.run", lambda app, **kw: calls.update(app=app, **kw))
     monkeypatch.delenv(ATP_ENDPOINTS_ENV, raising=False)
 
-    code = cli.main(["run", "--host", "0.0.0.0", "--port", "8123", "--atp", "1=127.0.0.1:9101"])
+    code = cli.main(
+        [
+            "run",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8123",
+            "--train-config",
+            TRAIN_CONFIG,
+            "--atp",
+            "1=127.0.0.1:9101",
+        ]
+    )
 
     try:
         assert code == 0
@@ -95,7 +108,7 @@ def test_run_command_configures_endpoints_for_the_server(monkeypatch) -> None:
 def test_run_command_clears_stale_env_without_endpoints(monkeypatch) -> None:
     monkeypatch.setattr("uvicorn.run", lambda app, **kw: None)
     monkeypatch.setenv(ATP_ENDPOINTS_ENV, encode_env([EP1]))
-    cli.main(["run"])
+    cli.main(["run", "--train-config", TRAIN_CONFIG])
     assert ATP_ENDPOINTS_ENV not in os.environ
 
 
@@ -104,7 +117,7 @@ def test_run_command_reports_invalid_spec_without_starting(monkeypatch, capsys) 
         raise AssertionError("uvicorn must not start on invalid config")
 
     monkeypatch.setattr("uvicorn.run", boom)
-    code = cli.main(["run", "--atp", "nonsense"])
+    code = cli.main(["run", "--train-config", TRAIN_CONFIG, "--atp", "nonsense"])
     assert code == 2
     assert "CAB_ID=HOST:PORT" in capsys.readouterr().err
 

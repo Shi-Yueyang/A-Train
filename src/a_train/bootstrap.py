@@ -26,6 +26,7 @@ from .adapters.atp.manager import AtpEndpoint, AtpManager
 from .config import (
     ATP_ENDPOINTS_ENV,
     TRAIN_CONFIG_ENV,
+    ConfigError,
     decode_env,
     decode_train_config,
 )
@@ -36,20 +37,6 @@ from .simulation.snapshots import SimulationSnapshot
 
 if TYPE_CHECKING:
     pass
-
-
-# A small default consist so a freshly started server has a world to show. Real
-# deployments pass their own configuration through ``create_app``.
-DEFAULT_TRAIN_CONFIGS: tuple[TrainConfig, ...] = (
-    TrainConfig(
-        train_id="TRAIN001",
-        cab_ids=(1, 2),
-        initial_active_cab=1,
-        max_traction_accel=1.5,
-        max_decel=2.0,
-        initial_position=0.0,
-    ),
-)
 
 
 @asynccontextmanager
@@ -69,7 +56,7 @@ async def lifespan(
     elif os.environ.get(TRAIN_CONFIG_ENV):
         configs = (decode_train_config(os.environ[TRAIN_CONFIG_ENV]),)
     else:
-        configs = DEFAULT_TRAIN_CONFIGS
+        raise ConfigError("train configuration is required; start with --train-config FILE")
     core = SimulationCore(
         command_queue=command_queue,
         snapshot_subscribers=snapshot_subscribers,

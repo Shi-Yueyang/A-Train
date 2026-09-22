@@ -12,6 +12,7 @@ from a_train.config import (
     load_train_config_file,
     train_config_from_data,
 )
+from a_train.domain.train import Train
 from tests.support.app import running_app
 
 
@@ -66,6 +67,21 @@ def test_empty_equipment_list_is_respected() -> None:
     assert train_config_from_data(data).equipment_configs == ()
 
 
+def test_disabled_equipment_is_not_installed() -> None:
+    data = valid_config()
+    data["train"]["equipment"][1]["enabled"] = False
+    config = train_config_from_data(data)
+    snapshot = Train(config).get_snapshot()
+    assert "front_balise" not in {entry.key for entry in snapshot.equipment}
+
+
+def test_enabled_must_be_boolean() -> None:
+    data = valid_config()
+    data["train"]["equipment"][0]["enabled"] = "false"
+    with pytest.raises(ConfigError, match="enabled"):
+        train_config_from_data(data)
+
+
 def test_train_config_file_loads_json(tmp_path) -> None:
     path = tmp_path / "train.json"
     path.write_text(json.dumps(valid_config()), encoding="utf-8")
@@ -78,7 +94,7 @@ async def configured_client(monkeypatch):
         TRAIN_CONFIG_ENV,
         encode_train_config(train_config_from_data(valid_config())),
     )
-    async with running_app() as client:
+    async with running_app(use_environment_train_config=True) as client:
         yield client
 
 

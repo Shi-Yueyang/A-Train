@@ -163,6 +163,9 @@ def train_config_from_data(data: Mapping[str, Any]):
             item = _require_mapping(raw_equipment, where)
             eq_type = _require_str(item.get("type"), "type", where)
             key = _require_str(item.get("key"), "key", where)
+            enabled = item.get("enabled", True)
+            if not isinstance(enabled, bool):
+                raise ConfigError(f"{where}: 'enabled' must be a boolean")
             params = item.get("params", {})
             if not isinstance(params, Mapping):
                 raise ConfigError(f"{where}: 'params' must be an object")
@@ -174,7 +177,7 @@ def train_config_from_data(data: Mapping[str, Any]):
                 if "cab_id" in params and params["cab_id"] != cab_id:
                     raise ConfigError(f"{where}: cab_id conflicts with params.cab_id")
                 params["cab_id"] = cab_id
-            equipment_configs.append(EquipmentConfig(eq_type, key, params))
+            equipment_configs.append(EquipmentConfig(eq_type, key, params, enabled=enabled))
 
     return TrainConfig(
         train_id=train_id,
@@ -222,6 +225,8 @@ def train_config_to_data(config) -> dict[str, Any]:
     for item in config.equipment_configs:
         params = dict(item.params)
         entry: dict[str, Any] = {"type": item.type, "key": item.key}
+        if not item.enabled:
+            entry["enabled"] = False
         if "cab_id" in params:
             entry["cab_id"] = params.pop("cab_id")
         if params:

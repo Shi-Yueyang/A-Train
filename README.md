@@ -45,7 +45,7 @@ curl http://127.0.0.1:8001/api/status
 
 ## ATP
 
-The simulator hosts one train, identified as `TRAIN001` by default. Add one endpoint per cab:
+The simulator hosts one configured train. Add one endpoint per cab:
 
 ```bash
 python -m a_train run --host 127.0.0.1 --port 8001 --atp 1=127.0.0.1:9101 --atp 2=127.0.0.1:9102
@@ -55,8 +55,7 @@ See [docs/atp-api.md](docs/atp-api.md) for the NDJSON protocol.
 
 ## Train configuration
 
-The default train is created in code. To define the train and its equipment
-declaratively, pass a JSON file:
+Define the train and its equipment declaratively with a required JSON file:
 
 ```bash
 python -m a_train run --train-config train.json
@@ -91,6 +90,8 @@ equipment list. For example:
 
 Equipment keys are unique addresses used by the REST API and snapshots. The
 supported equipment types are `door`, `btm`, `driving_system`, and `stcs_atp`.
+Each equipment entry may include `"enabled": false` to leave that equipment
+out of the installed train; omitted `enabled` values default to `true`.
 Equipment configuration is validated before the server starts. ATP endpoint
 configuration remains separate and can be combined with `--train-config`.
 

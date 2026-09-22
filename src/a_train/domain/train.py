@@ -99,6 +99,7 @@ class EquipmentConfig:
     type: str
     key: str
     params: dict[str, Any] = field(default_factory=dict)
+    enabled: bool = True
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -185,6 +186,8 @@ class TrainConfig:
         for eq_cfg in self.equipment_configs:
             if eq_cfg.type not in EQUIPMENT_FACTORIES:
                 raise ValueError(f"unknown equipment type: {eq_cfg.type!r}")
+            if not isinstance(eq_cfg.enabled, bool):
+                raise ValueError(f"equipment {eq_cfg.key!r} enabled must be a boolean")
 
 
 class Train:
@@ -203,6 +206,7 @@ class Train:
         self._equipment: dict[str, Equipment[Any]] = {
             eq_cfg.key: EQUIPMENT_FACTORIES[eq_cfg.type](eq_cfg.key, ctx, **eq_cfg.params)
             for eq_cfg in config.equipment_configs
+            if eq_cfg.enabled
         }
 
         self._position = config.initial_position

@@ -45,6 +45,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--train-config",
         metavar="FILE",
+        required=True,
         help="JSON file defining the train, cabs, physics, and equipment.",
     )
 

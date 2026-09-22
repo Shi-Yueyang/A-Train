@@ -242,6 +242,9 @@ configuration boundary converts the file into the typed `TrainConfig` and
 and environment-variable parsing must remain outside the domain and
 simulation layers. The current simulator still supports exactly one train;
 the file's `equipment` array replaces the default equipment set when present.
+An equipment entry with `enabled: false` is not installed and is absent from
+the train aggregate and published snapshots; omitted `enabled` values default
+to true.
 
 ### Data Types and Ownership
 
