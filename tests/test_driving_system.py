@@ -37,7 +37,7 @@ async def _train(c) -> dict:
 
 
 async def _handles(c, cab: int, **body) -> tuple[int, dict]:
-    r = await c.post(f"/api/trains/TRAIN001/equipment/driving_{cab}", json=body)
+    r = await c.post(f"/api/trains/TRAIN001/equipment/driving_system_{cab}", json=body)
     return r.status_code, r.json()
 
 
@@ -62,12 +62,12 @@ async def test_driving_system_is_standard_fit_and_initially_off() -> None:
         await _manual_start(c)
         snap = await _train(c)
         for cab in (1, 2):
-            d = _equipment(snap, f"driving_{cab}")["state"]
+            d = _equipment(snap, f"driving_system_{cab}")["state"]
             assert d["mode"] == "off"
             assert d["direction"] == "off"
             assert d["acceleration"] == 0.0
-        assert _equipment(snap, "driving_1")["state"]["facing"] == "forward"
-        assert _equipment(snap, "driving_2")["state"]["facing"] == "backward"
+        assert _equipment(snap, "driving_system_1")["state"]["facing"] == "forward"
+        assert _equipment(snap, "driving_system_2")["state"]["facing"] == "backward"
 
 
 # -- Traction mapped through the cab facing ------------------------------------
@@ -201,7 +201,7 @@ async def test_reset_clears_driving_handles_and_feedback() -> None:
 
         await c.post("/api/simulation/reset")
         snap = await _train(c)
-        d = _equipment(snap, "driving_1")["state"]
+        d = _equipment(snap, "driving_system_1")["state"]
         assert (d["mode"], d["direction"], d["acceleration"]) == ("off", "off", 0.0)
         assert _out_bits(snap)["traction_handle_traction"] is False
 
@@ -215,7 +215,7 @@ async def test_invalid_driving_inputs_are_rejected() -> None:
 
         status, _ = await _handles(c, 1, mode="fly")
         assert status == 400
-        assert _equipment(await _train(c), "driving_1")["state"]["mode"] == "off"
+        assert _equipment(await _train(c), "driving_system_1")["state"]["mode"] == "off"
 
         status, _ = await _handles(c, 1, direction="sideways")
         assert status == 400

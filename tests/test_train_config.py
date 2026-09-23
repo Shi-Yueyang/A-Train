@@ -32,12 +32,11 @@ def valid_config() -> dict:
                 "initial_door_state": "closed",
             },
             "equipment": [
-                {"type": "door", "key": "left_door", "params": {"side": "left"}},
-                {"type": "btm", "key": "front_balise", "cab_id": 10},
-                {"type": "stcs_atp_duo", "key": "front_atp", "cab_id": 10},
+                {"type": "door", "params": {"side": "left"}},
+                {"type": "btm", "cab_id": 10},
+                {"type": "stcs_atp_duo", "cab_id": 10},
                 {
                     "type": "driving_system",
-                    "key": "front_driver",
                     "cab_id": 10,
                     "params": {"initial_direction": "forward"},
                 },
@@ -54,9 +53,9 @@ def test_train_config_from_data_supports_explicit_equipment() -> None:
     assert config.cab_facings == {10: 1, 20: -1}
     assert [item.key for item in config.equipment_configs] == [
         "left_door",
-        "front_balise",
-        "front_atp",
-        "front_driver",
+        "btm_10",
+        "stcs_atp_duo_10",
+        "driving_system_10",
     ]
     assert config.equipment_configs[1].params == {"cab_id": 10}
 
@@ -72,7 +71,7 @@ def test_disabled_equipment_is_not_installed() -> None:
     data["train"]["equipment"][1]["enabled"] = False
     config = train_config_from_data(data)
     snapshot = Train(config).get_snapshot()
-    assert "front_balise" not in {entry.key for entry in snapshot.equipment}
+    assert "btm_10" not in {entry.key for entry in snapshot.equipment}
 
 
 def test_enabled_must_be_boolean() -> None:
@@ -106,9 +105,9 @@ async def test_environment_train_config_reaches_public_snapshot(configured_clien
     assert train["position"] == 12.5
     assert {entry["key"] for entry in train["equipment"]} == {
         "left_door",
-        "front_balise",
-        "front_atp",
-        "front_driver",
+        "btm_10",
+        "stcs_atp_duo_10",
+        "driving_system_10",
     }
 
 

@@ -313,33 +313,35 @@ def test_mixed_solo_and_duo_equipment_route_state_by_cab() -> None:
             max_decel=2.0,
             equipment_configs=(
                 EquipmentConfig("door", "left_door", {"side": "left"}),
-                EquipmentConfig("driving_system", "driving_1", {"cab_id": 1}),
-                EquipmentConfig("driving_system", "driving_2", {"cab_id": 2}),
-                EquipmentConfig("stcs_atp_solo", "solo_atp", {"cab_id": 1}),
-                EquipmentConfig("stcs_atp_duo", "duo_atp", {"cab_id": 2}),
+                EquipmentConfig("driving_system", "driving_system_1", {"cab_id": 1}),
+                EquipmentConfig("driving_system", "driving_system_2", {"cab_id": 2}),
+                EquipmentConfig("stcs_atp_solo", "stcs_atp_solo_1", {"cab_id": 1}),
+                EquipmentConfig("stcs_atp_duo", "stcs_atp_duo_2", {"cab_id": 2}),
             ),
         )
     )
 
     equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
-    assert len(equipment["solo_atp"].train_in_states) == 15
-    assert len(equipment["solo_atp"].train_out_states) == 22
-    assert len(equipment["duo_atp"].train_in_states) == 17
-    assert len(equipment["duo_atp"].train_out_states) == 30
+    assert len(equipment["stcs_atp_solo_1"].train_in_states) == 15
+    assert len(equipment["stcs_atp_solo_1"].train_out_states) == 22
+    assert len(equipment["stcs_atp_duo_2"].train_in_states) == 17
+    assert len(equipment["stcs_atp_duo_2"].train_out_states) == 30
 
     assert train.set_equipment(
-        EquipmentControlRequest(key="driving_1", mode="traction", direction="forward")
+        EquipmentControlRequest(key="driving_system_1", mode="traction", direction="forward")
     ).ok
     equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
-    assert equipment["solo_atp"].train_out_states[9].value is True
-    assert equipment["duo_atp"].train_out_states[9].value is False
+    assert equipment["stcs_atp_solo_1"].train_out_states[9].value is True
+    assert equipment["stcs_atp_duo_2"].train_out_states[9].value is False
 
     assert train.set_equipment(EquipmentControlRequest(key="left_door", command="open")).ok
     equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
-    assert equipment["solo_atp"].train_out_states[20].value is True
-    assert equipment["duo_atp"].train_out_states[20].value is True
+    assert equipment["stcs_atp_solo_1"].train_out_states[20].value is True
+    assert equipment["stcs_atp_duo_2"].train_out_states[20].value is True
 
-    assert train.set_equipment(EquipmentControlRequest(key="stcs_atp_cab_1", command="001")).ok
+    assert train.set_equipment(
+        EquipmentControlRequest(equipment_type="stcs_atp", cab_id=1, command="001")
+    ).ok
     equipment = {entry.key: entry.state for entry in train.get_snapshot().equipment}
-    assert equipment["solo_atp"].last_command == "001"
-    assert equipment["duo_atp"].last_command is None
+    assert equipment["stcs_atp_solo_1"].last_command == "001"
+    assert equipment["stcs_atp_duo_2"].last_command is None

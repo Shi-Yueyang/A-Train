@@ -72,12 +72,13 @@ class EquipmentControlRequest:
 
     - ``door``: ``command`` is ``"open"`` or ``"close"``.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
-    - ``stcs_atp_duo_<cab_id>``: ``command`` is recorded on that cab's STCS instance.
+    - ``stcs_atp`` with ``cab_id``: ``command`` is recorded on that cab's STCS instance.
     - ``driving_system``: ``mode``/``direction``/``acceleration`` handle
       positions; every combination of fields may be set together.
     """
 
-    key: str
+    key: str | None = None
+    equipment_type: str | None = None
     command: str | None = None
     cab_id: int | None = None
     data: bytes | None = None
@@ -169,16 +170,23 @@ class TrainConfig:
                 "equipment_configs",
                 tuple(
                     [
-                        EquipmentConfig("door", "left_door"),
-                        EquipmentConfig("door", "right_door"),
+                        EquipmentConfig("door", "left_door", {"side": "left"}),
+                        EquipmentConfig("door", "right_door", {"side": "right"}),
                     ]
-                    + [EquipmentConfig("btm", f"btm_{cab_id}") for cab_id in self.cab_ids]
                     + [
-                        EquipmentConfig("driving_system", f"driving_{cab_id}")
+                        EquipmentConfig("btm", f"btm_{cab_id}", {"cab_id": cab_id})
                         for cab_id in self.cab_ids
                     ]
                     + [
-                        EquipmentConfig("stcs_atp_duo", f"stcs_atp_duo_{cab_id}")
+                        EquipmentConfig(
+                            "driving_system", f"driving_system_{cab_id}", {"cab_id": cab_id}
+                        )
+                        for cab_id in self.cab_ids
+                    ]
+                    + [
+                        EquipmentConfig(
+                            "stcs_atp_duo", f"stcs_atp_duo_{cab_id}", {"cab_id": cab_id}
+                        )
                         for cab_id in self.cab_ids
                     ]
                 ),
@@ -266,21 +274,23 @@ class Train:
         at the aggregate boundary.
         """
 
-        equipment = self._equipment.get(command.key)
-        if equipment is None and command.key.startswith("stcs_atp_cab_"):
-            cab_id = int(command.key.removeprefix("stcs_atp_cab_"))
+        equipment = self._equipment.get(command.key) if command.key is not None else None
+        if equipment is None and command.equipment_type == "stcs_atp":
             equipment = next(
                 (
                     candidate
                     for candidate in self._equipment.values()
-                    if isinstance(candidate, StcsAtpBase) and candidate.cab_id == cab_id
+                    if isinstance(candidate, StcsAtpBase) and candidate.cab_id == command.cab_id
                 ),
                 None,
             )
         if equipment is None:
             return ControlResult(
                 ok=False,
-                error=f"no '{command.key}' equipment on {self._config.train_id}",
+                error=(
+                    f"no '{command.key or command.equipment_type}' equipment "
+                    f"on {self._config.train_id}"
+                ),
             )
 
         try:
@@ -392,14 +402,13 @@ class Train:
                     observe_cab_state = getattr(equipment, "observe_cab_state", None)
                     if observe_cab_state is not None:
                         observe_cab_state(intent.control)
-            elif intent.target == "stcs_atp":
+            elif intent.target == "stcs_atp":  # Broadcast or route shared feedback.
                 for equipment in self._equipment.values():
-                    if isinstance(equipment, StcsAtpBase):
-                        equipment.apply_control(intent.control)
-            elif intent.target.startswith("stcs_atp_cab_"):
-                cab_id = int(intent.target.removeprefix("stcs_atp_cab_"))
-                for equipment in self._equipment.values():
-                    if isinstance(equipment, StcsAtpBase) and equipment.cab_id == cab_id:
+                    if isinstance(equipment, StcsAtpBase) and (
+                        not isinstance(intent.control, StcsAtpControl)
+                        or intent.control.cab_id is None
+                        or equipment.cab_id == intent.control.cab_id
+                    ):
                         equipment.apply_control(intent.control)
         self._driver_inputs = tuple(driver_inputs)
 

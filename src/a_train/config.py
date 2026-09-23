@@ -55,6 +55,22 @@ def _require_int(value: Any, field: str, where: str, minimum: int, maximum: int)
     return value
 
 
+def _generated_equipment_key(equipment_type: str, params: Mapping[str, Any], used: set[str]) -> str:
+    if "cab_id" in params:
+        base = f"{equipment_type}_{params['cab_id']}"
+    elif equipment_type == "door" and "side" in params:
+        base = f"{params['side']}_door"
+    else:
+        base = equipment_type
+    key = base
+    suffix = 2
+    while key in used:
+        key = f"{base}_{suffix}"
+        suffix += 1
+    used.add(key)
+    return key
+
+
 def validate_endpoint(entry: Mapping[str, Any], where: str = "atp endpoint") -> dict[str, Any]:
     """Normalise one endpoint mapping, raising ConfigError on invalid fields."""
 
@@ -158,11 +174,13 @@ def train_config_from_data(data: Mapping[str, Any]):
         if not isinstance(equipment_data, list):
             raise ConfigError("train config.equipment: expected a list")
         equipment_configs = []
+        generated_keys: set[str] = set()
         for index, raw_equipment in enumerate(equipment_data):
             where = f"train config.equipment[{index}]"
             item = _require_mapping(raw_equipment, where)
             eq_type = _require_str(item.get("type"), "type", where)
-            key = _require_str(item.get("key"), "key", where)
+            if "key" in item:
+                raise ConfigError(f"{where}: 'key' is generated and must not be provided")
             enabled = item.get("enabled", True)
             if not isinstance(enabled, bool):
                 raise ConfigError(f"{where}: 'enabled' must be a boolean")
@@ -170,6 +188,10 @@ def train_config_from_data(data: Mapping[str, Any]):
             if not isinstance(params, Mapping):
                 raise ConfigError(f"{where}: 'params' must be an object")
             params = dict(params)
+            if "side" in item:
+                if "side" in params and params["side"] != item["side"]:
+                    raise ConfigError(f"{where}: side conflicts with params.side")
+                params["side"] = item["side"]
             if "cab_id" in item:
                 cab_id = _require_int(item["cab_id"], "cab_id", where, 1, 10_000)
                 if cab_id not in cab_ids:
@@ -177,6 +199,7 @@ def train_config_from_data(data: Mapping[str, Any]):
                 if "cab_id" in params and params["cab_id"] != cab_id:
                     raise ConfigError(f"{where}: cab_id conflicts with params.cab_id")
                 params["cab_id"] = cab_id
+            key = _generated_equipment_key(eq_type, params, generated_keys)
             equipment_configs.append(EquipmentConfig(eq_type, key, params, enabled=enabled))
 
     return TrainConfig(
@@ -224,7 +247,7 @@ def train_config_to_data(config) -> dict[str, Any]:
     equipment = []
     for item in config.equipment_configs:
         params = dict(item.params)
-        entry: dict[str, Any] = {"type": item.type, "key": item.key}
+        entry: dict[str, Any] = {"type": item.type}
         if not item.enabled:
             entry["enabled"] = False
         if "cab_id" in params:

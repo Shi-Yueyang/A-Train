@@ -176,7 +176,8 @@ class AtpManager:
                 EquipmentCommand(
                     train_id=client.train_id,
                     payload=EquipmentControlRequest(
-                        key=f"stcs_atp_cab_{client.cab_id}",
+                        equipment_type="stcs_atp",
+                        cab_id=client.cab_id,
                         command=atp_signal,
                     ),
                 )

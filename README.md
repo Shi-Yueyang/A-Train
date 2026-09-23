@@ -34,7 +34,7 @@ the activated virtual environment.
 ## Run
 
 ```bash
-python -m a_train run --host 127.0.0.1 --port 8001 --train-config train.json
+python -m a_train run --train-config train.json --host 127.0.0.1 --port 8001 
 ```
 
 Open http://127.0.0.1:8001/ for the browser demo.
@@ -48,7 +48,7 @@ curl http://127.0.0.1:8001/api/status
 The simulator hosts one configured train. Add one endpoint per cab:
 
 ```bash
-python -m a_train run --host 127.0.0.1 --port 8001 --atp 1=127.0.0.1:9101 --atp 2=127.0.0.1:9102
+python -m a_train run --train-config train.json --host 127.0.0.1 --port 8001 --atp 1=127.0.0.1:9101 --atp 2=127.0.0.1:9102
 ```
 
 See [docs/atp-api.md](docs/atp-api.md) for the NDJSON protocol.

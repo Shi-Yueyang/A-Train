@@ -23,7 +23,6 @@
     "equipment": [
       {
         "type": "door",
-        "key": "left_door",
         "params": {
           "side": "left",
           "initial_state": "closed"
@@ -31,7 +30,6 @@
       },
       {
         "type": "door",
-        "key": "right_door",
         "params": {
           "side": "right",
           "initial_state": "closed"
@@ -39,17 +37,14 @@
       },
       {
         "type": "btm",
-        "key": "btm_1",
         "cab_id": 1
       },
       {
         "type": "btm",
-        "key": "btm_2",
         "cab_id": 2
       },
       {
         "type": "driving_system",
-        "key": "driving_1",
         "cab_id": 1,
         "params": {
           "initial_mode": "off",
@@ -59,7 +54,6 @@
       },
       {
         "type": "driving_system",
-        "key": "driving_2",
         "cab_id": 2,
         "params": {
           "initial_mode": "off",
@@ -69,12 +63,10 @@
       },
       {
         "type": "stcs_atp_duo",
-        "key": "stcs_atp_duo_1",
         "cab_id": 1
       },
       {
         "type": "stcs_atp_duo",
-        "key": "stcs_atp_duo_2",
         "cab_id": 2
       }
     ]
