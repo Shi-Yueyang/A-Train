@@ -248,7 +248,11 @@ class SimulationCore:
     def _apply_equipment(self, command: EquipmentCommand) -> CommandResult:
         if command.train_id != self._train.train_id:
             return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
-        result = self._train.set_equipment(command.payload)
+        # The core is the only layer that touches clocks. It stamps the
+        # wall-clock time (POSIX seconds) at which the equipment command is
+        # applied so the UI can show real command arrival; this is an
+        # observability field injected into the domain, not a physics input.
+        result = self._train.set_equipment(command.payload, received_at=time.time())
         return CommandResult(ok=result.ok, error=result.error)
 
     # -- Fixed-step update cycle (§2.5) ----------------------------------

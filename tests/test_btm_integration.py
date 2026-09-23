@@ -82,7 +82,9 @@ def _btm_state(message: dict, cab_id: int) -> dict:
     )
 
 
-async def _next_train_state_with_btm(server, cab_id: int, payload_b64: str, timeout: float = 10.0) -> dict:
+async def _next_train_state_with_btm(
+    server, cab_id: int, payload_b64: str, timeout: float = 10.0
+) -> dict:
     async def _poll() -> dict:
         while True:
             message = await server.wait_for_message(timeout=timeout)

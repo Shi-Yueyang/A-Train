@@ -29,6 +29,7 @@ class StcsAtpBase:
         self._key = key
         self._cab_id = cab_id
         self._last_command: str | None = None
+        self._last_command_time: float | None = None
         self._handles: dict[int, tuple[str, str]] = {}
         self._train_out_states = {
             signal.name: signal.default for signal in self.TRAIN_TO_ATP_SIGNALS
@@ -46,7 +47,7 @@ class StcsAtpBase:
     def cab_id(self) -> int:
         return self._cab_id
 
-    def apply_control(self, control: StcsAtpControl) -> None:
+    def apply_control(self, control: StcsAtpControl, *, received_at: float | None = None) -> None:
         if not isinstance(control, StcsAtpControl):
             raise ValueError("stcs_atp control is invalid")
         if control.left_door_open is not None:
@@ -63,6 +64,7 @@ class StcsAtpBase:
             ):
                 raise ValueError("stcs_atp command must be a non-empty string of '0' and '1'")
             self._last_command = control.command
+            self._last_command_time = received_at
             for signal, bit in zip(self.ATP_TO_TRAIN_SIGNALS, control.command):
                 self._train_in_states[signal.name] = bit == "1"
         self._update_train_out_states()
@@ -160,6 +162,7 @@ class StcsAtpBase:
         )
         return StcsAtpSnapshot(
             last_command=self._last_command,
+            last_command_time=self._last_command_time,
             train_out_signal="".join("1" if signal.value else "0" for signal in train_out),
             train_in_states=tuple(
                 SignalState(name=name, value=self._train_in_states[name])
@@ -170,6 +173,7 @@ class StcsAtpBase:
 
     def reset(self) -> None:
         self._last_command = None
+        self._last_command_time = None
         self._handles.clear()
         self._train_in_states = {
             signal.name: signal.default for signal in self.ATP_TO_TRAIN_SIGNALS

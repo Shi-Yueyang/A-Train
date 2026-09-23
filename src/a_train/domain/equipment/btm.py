@@ -27,7 +27,7 @@ class Btm:
     def key(self) -> str:
         return self._key
 
-    def apply_control(self, control: BtmControl) -> None:
+    def apply_control(self, control: BtmControl, *, received_at: float | None = None) -> None:
         if not isinstance(control, BtmControl):
             raise ValueError("btm control is invalid")
         if control.cab_id is not None and control.cab_id != self._cab_id:

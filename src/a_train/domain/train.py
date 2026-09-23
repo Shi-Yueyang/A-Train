@@ -276,11 +276,16 @@ class Train:
             self._resolve_all_intents()
         return ControlResult()
 
-    def set_equipment(self, command: EquipmentControlRequest) -> ControlResult:
+    def set_equipment(
+        self, command: EquipmentControlRequest, *, received_at: float | None = None
+    ) -> ControlResult:
         """Apply an equipment-control request immediately (no time advance).
 
         Every equipment state change is routed to the component and validated
-        at the aggregate boundary.
+        at the aggregate boundary. ``received_at`` is the wall-clock time
+        (POSIX seconds) at which the core applied this external command; it
+        is injected by the simulation layer and passed to every component so
+        equipment can record command arrival.
         """
 
         equipment = self._equipment.get(command.key) if command.key is not None else None
@@ -303,7 +308,9 @@ class Train:
             )
 
         try:
-            equipment.apply_control(self._equipment_control(equipment, command))
+            equipment.apply_control(
+                self._equipment_control(equipment, command), received_at=received_at
+            )
         except ValueError as exc:
             return ControlResult(ok=False, error=str(exc))
         self._resolve_all_intents()

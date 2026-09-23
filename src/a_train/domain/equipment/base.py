@@ -29,7 +29,15 @@ class Equipment(Protocol[EquipmentControlT]):
     @property
     def key(self) -> str: ...
 
-    def apply_control(self, control: EquipmentControlT) -> None: ...
+    def apply_control(
+        self, control: EquipmentControlT, *, received_at: float | None = None
+    ) -> None:
+        """Apply one control. ``received_at`` is the wall-clock time (POSIX
+        seconds) at which the core applied an external command; ``None`` marks
+        internal intent-driven applications, which carry no arrival time.
+        Equipment that records command arrival uses it, e.g. STCS ATP's
+        ``last_command_time``."""
+        ...
 
     def read_state(self) -> Any: ...
 

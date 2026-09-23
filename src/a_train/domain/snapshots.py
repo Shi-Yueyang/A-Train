@@ -76,10 +76,13 @@ class StcsAtpSnapshot:
 
     ``train_in_states`` and ``train_out_states`` list every decoded signal by
     name in bit order; ``train_out_signal`` is the same train-out state as one
-    bit string, and ``last_command`` the raw last ATP assertion.
+    bit string, ``last_command`` the raw last ATP assertion, and
+    ``last_command_time`` the wall-clock time (POSIX seconds) at which the
+    core applied that assertion (``None`` until the first command).
     """
 
     last_command: str | None = None
+    last_command_time: float | None = None
     train_out_signal: str = ""
     train_in_states: tuple[SignalState, ...] = ()
     train_out_states: tuple[SignalState, ...] = ()

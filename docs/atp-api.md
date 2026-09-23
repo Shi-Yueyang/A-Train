@@ -154,7 +154,7 @@ control). All peers receive the same whole-train content.
 | `acceleration` | number | m/s² of the last integrated step.                                                                                                                     |
 | `position`     | number | m along the linear track from the fixed origin; may decrease with rearward motion.                                                                    |
 | `direction`    | string | Derived from the speed sign: `"forward"`, `"backward"`, or `"stopped"`.                                                                              |
-| `equipment`    | array | Whole-train equipment entries, each shaped as `{type, cab_id, state}`: only `btm` and `stcs_atp_duo` / `stcs_atp_solo` instances. An `stcs_atp_*` entry's `state` is only `{train_out_signal}` -- the raw `last_command` and the named state maps stay in REST/WebSocket (§4.2). |
+| `equipment`    | array | Whole-train equipment entries, each shaped as `{type, cab_id, state}`: only `btm` and `stcs_atp_duo` / `stcs_atp_solo` instances. An `stcs_atp_*` entry's `state` is only `{train_out_signal}` -- the raw `last_command`, its `last_command_time`, and the named state maps stay in REST/WebSocket (§4.2). |
 
 `TRAIN_STATE` remains a read-only observation: ATP derives its protection decisions from it and acts back on the train only through `ATP_COMMAND` (§4.1; architectural boundary §4.1 of architectural.md). The simulator filters every other equipment type out of the wire message; the full equipment state remains available through the Web API (`web-api.md`).
 
@@ -276,9 +276,11 @@ unmentioned bit positions unchanged.
 | 15 | `c2_zero_speed` |
 | 16 | `turnback_indicator` |
 
-The raw signal is also retained as `last_command` for diagnostics (REST and
-WebSocket only; it is filtered out of `TRAIN_STATE`, §3.1). An empty or
-other non-binary command is invalid.
+The raw signal is also retained as `last_command` for diagnostics, together
+with `last_command_time` -- the wall-clock time (POSIX seconds, UTC) at which
+the core applied that assertion (both REST and WebSocket only; they are
+filtered out of `TRAIN_STATE`, §3.1). An empty or other non-binary command is
+invalid.
 
 The STCS ATP component also maintains a plain internal `train_out_states` map
 for the 30 train-side feedback bits. It is exposed as `train_out_signal` (bit string) and

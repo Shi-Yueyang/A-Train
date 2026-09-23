@@ -110,6 +110,14 @@ function fmt(n, d = 4) {
   return Number.isFinite(n) ? n.toFixed(d) : String(n);
 }
 
+// Render an epoch-seconds timestamp as local "HH:mm:ss-zzz".
+function formatWallClock(epochSeconds) {
+  const t = new Date(epochSeconds * 1000);
+  const p2 = (n) => String(n).padStart(2, "0");
+  const ms = String(t.getMilliseconds()).padStart(3, "0");
+  return `${p2(t.getHours())}:${p2(t.getMinutes())}:${p2(t.getSeconds())}-${ms}`;
+}
+
 function hexToBase64(value) {
   const hex = value.replace(/\s+/g, "");
   if (!hex || hex.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hex)) {
@@ -493,7 +501,11 @@ function buildStcsCard(entry) {
   const cab = document.createElement("span");
   cab.textContent = `cab: ${cabLabel}`;
   const command = document.createElement("span");
-  command.textContent = `last ATP command: ${state.last_command ?? "—"}`;
+  const commandAt =
+    typeof state.last_command_time === "number"
+      ? ` (received ${formatWallClock(state.last_command_time)})`
+      : "";
+  command.textContent = `last ATP command: ${state.last_command ?? "—"}${commandAt}`;
   const signal = document.createElement("span");
   signal.textContent = `train-out signal: ${state.train_out_signal || "—"}`;
   raw.append(

@@ -48,7 +48,9 @@ class DrivingSystem:
     def cab_id(self) -> int:
         return self._cab_id
 
-    def apply_control(self, control: DrivingSystemControl) -> None:
+    def apply_control(
+        self, control: DrivingSystemControl, *, received_at: float | None = None
+    ) -> None:
         if not isinstance(control, DrivingSystemControl):
             raise ValueError("driving system control is invalid")
         if control.mode is not None and control.mode not in self.MODES:

@@ -30,7 +30,7 @@ class Door:
     def closed(self) -> bool:
         return self._state == "closed"
 
-    def apply_control(self, control: DoorControl) -> None:
+    def apply_control(self, control: DoorControl, *, received_at: float | None = None) -> None:
         if not isinstance(control, DoorControl) or control.command not in ("open", "close"):
             raise ValueError("door control must be 'open' or 'close'")
         self._state = "open" if control.command == "open" else "closed"

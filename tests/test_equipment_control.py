@@ -8,6 +8,7 @@ the public API against the real application (§6.1).
 from __future__ import annotations
 
 import base64
+import time
 
 import pytest
 
@@ -128,6 +129,42 @@ async def test_door_state_reflects_in_stcs_atp_train_out_signal() -> None:
         snap = await _train(c)
         atp = next(e for e in snap["equipment"] if e["key"] == "stcs_atp_duo_1")
         assert atp["state"]["train_out_signal"][20:22] == "00"
+
+
+# -- STCS ATP records the wall-clock time each command was applied ---------------
+
+
+def _stcs_atp(snap: dict) -> dict:
+    return next(e["state"] for e in snap["equipment"] if e["key"] == "stcs_atp_duo_1")
+
+
+async def test_stcs_atp_command_records_arrival_wall_clock_time() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        before = time.time()
+        status, snap = await _equipment(c, "stcs_atp_duo_1", command="100")
+        after = time.time()
+        assert status == 200
+        state = _stcs_atp(snap)
+        assert state["last_command"] == "100"
+        assert before <= state["last_command_time"] <= after
+
+        # The stamp holds until the next command; it does not drift with
+        # simulation time, which is frozen here in MANUAL mode.
+        await _step(c, 1.0)
+        assert _stcs_atp(await _train(c))["last_command_time"] == pytest.approx(
+            state["last_command_time"]
+        )
+
+        before = time.time()
+        await _equipment(c, "stcs_atp_duo_1", command="010")
+        after = time.time()
+        restamped = _stcs_atp(await _train(c))["last_command_time"]
+        assert before <= restamped <= after
+
+        await c.post("/api/simulation/reset")
+        assert _stcs_atp(await _train(c))["last_command_time"] is None
 
 
 # -- Cab activation is native train state, no authority ------------------------

@@ -12,6 +12,7 @@ server (§6.1); no production module is mocked.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -279,9 +280,12 @@ async def test_atp_signal_asserts_state_and_shows_in_train_state() -> None:
             await _await_ready(c)
             await _next(server, "train_state")  # drain the catch-up publish
 
-            # The raw signal is recorded unchanged by STCS ATP.
+            # The raw signal is recorded unchanged by STCS ATP, together with
+            # the wall-clock time at which the core applied it.
+            before = time.time()
             await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "0111"})
             core_state = await _wait_stcs_atp(c, last_command="0111")
+            assert before <= core_state["last_command_time"] <= time.time()
 
             # Only the train-out feedback line rides subsequent TRAIN_STATEs;
             # the raw command and named state maps stay off the wire.
@@ -291,9 +295,12 @@ async def test_atp_signal_asserts_state_and_shows_in_train_state() -> None:
             state = _wire_entry(message, "stcs_atp_duo", 1)
             assert state == {"train_out_signal": core_state["train_out_signal"]}
 
-            # A shorter signal replaces the previous raw signal in the core.
+            # A shorter signal replaces the previous raw signal in the core
+            # and restamps its arrival time with the current wall-clock time.
             await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "010"})
-            await _wait_stcs_atp(c, last_command="010")
+            before = time.time()
+            second_state = await _wait_stcs_atp(c, last_command="010")
+            assert before <= second_state["last_command_time"] <= time.time()
             r = await c.post("/api/simulation/step", json={"delta": 0.1})
             assert r.status_code == 200
     finally:

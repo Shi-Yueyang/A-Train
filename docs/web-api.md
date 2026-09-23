@@ -65,6 +65,7 @@ commands:
     { "type": "driving_system", "key": "driving_2", "cab_id": 2, "state": { "cab_id": 2, "facing": "backward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "cab_id": 1, "state": {
         "last_command": null,
+        "last_command_time": null,
         "train_out_signal": "110000000000000000000000000000",
         "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
         "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": true } ]
@@ -260,7 +261,7 @@ with the component's error message on invalid input.
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `left_door`, `right_door` | `command` `"open"` / `"close"` sets the selected door state. |
 | `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
-| `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance. |
+| `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. |
 | `driving_1`, `driving_2` | Sets any subset of the three driver-room handles (no interlocks; each position is independently settable). While a cab's `mode` is `"traction"` or `"brake"`, that driving system **overwrites** the legacy `drive_demand` lever for every step: traction effort is applied in the direction-handle position mapped through the cab's facing (either travel direction is possible, from standstill too); brake effort opposes the current motion and produces no force at standstill. With `mode` `"off"` the legacy lever applies again. Engaged systems of several cabs act additively (net effort is clamped to the handle range). |
 
 **Example**:
@@ -308,6 +309,7 @@ by equipment type (§3.5).
     { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "state": {
         "last_command": null,
+        "last_command_time": null,
         "train_out_signal": "110000000000000000000000000000",
         "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
         "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": true } ]
@@ -337,7 +339,9 @@ by equipment type (§3.5).
 
 **`stcs_atp_duo_<cab_id>` state**: each configured cab has its own STCS Duo instance.
 `last_command` is the raw ATP bit string (null until the first `atp_signal` on
-that cab); `train_in_states` and `train_out_states` are every
+that cab); `last_command_time` is the wall-clock time in POSIX seconds (UTC)
+at which the core applied that command (null until the first command, cleared
+by reset); `train_in_states` and `train_out_states` are every
 decoded signal as `{name, value}` in bit order (17 train-in, 30 train-out;
 names and meanings in atp-api.md §4.2); `train_out_signal` is the train-out
 state as one bit string. `door_state_1` / `door_state_2` mirror the

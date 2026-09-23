@@ -34,7 +34,7 @@ the activated virtual environment.
 ## Run
 
 ```bash
-python -m a_train run --train-config train.json --host 127.0.0.1 --port 8001 
+python -m a_train run --train-config train.json --host 0.0.0.0 --port 8001 
 ```
 
 Open http://127.0.0.1:8001/ for the browser demo.
