@@ -1,19 +1,18 @@
 """Creates clients and bridges snapshots and ATP commands (atp-api.md, §2.6).
 
-The manager holds one ``AtpClient`` per configured train cab (atp-api.md §1.1:
-each ATP process serves exactly one cab and accepts one connection at a time,
-so no in-band handshake identifies the stream). ``start()`` launches every
-client's connection loop, subscribes one bounded snapshot queue per cab, and
-runs a publisher task per client that turns core snapshots into
-``TRAIN_STATE`` lines (atp-api.md §3.1). Inbound ATP content is validated and
-converted into commands submitted to the core (architectural.md §4.1);
-rejected input is answered with an ``ERROR`` message (atp-api.md §5).
-Publisher and inbound tasks perform all protocol I/O outside ``run_loop()``,
-so a slow or chatty ATP peer cannot delay physics (§2.6).
+The manager holds one ``AtpClient`` per configured ATP peer (atp-api.md §1.1).
+A peer's connection carries no cab binding: ``start()`` launches every
+client's connection loop, subscribes one bounded snapshot queue per peer, and
+runs a publisher task per client that turns core snapshots into identical
+whole-train ``TRAIN_STATE`` lines (atp-api.md §3.1). Inbound ATP content is
+validated (its message-borne ``cab_id`` selects the target) and converted
+into commands submitted to the core, which stamps the domain train identity
+(architectural.md §4.1). Rejected input is answered with an ``ERROR`` message
+(atp-api.md §5). Publisher and inbound tasks perform all protocol I/O outside
+``run_loop()``, so a slow or chatty ATP peer cannot delay physics (§2.6).
 
-With no endpoints configured (the default when the environment variable is
-unset), ``start()`` and ``stop()`` are no-ops and the application behaves
-exactly as before Phase 3.
+With no endpoints configured (the default), ``start()`` and ``stop()`` are
+no-ops and the application runs ATP-free.
 """
 
 from __future__ import annotations
@@ -39,15 +38,14 @@ logger = logging.getLogger("a_train.adapters.atp")
 
 @dataclass(frozen=True)
 class AtpEndpoint:
-    """Where to reach the external ATP process serving one cab."""
+    """Where to reach one external ATP process."""
 
-    cab_id: int
     host: str
     port: int
 
 
 class AtpManager:
-    """Owns the TCP clients, publishers, and inbound handling for all cabs."""
+    """Owns the TCP clients, publishers, and inbound handling for all peers."""
 
     def __init__(
         self,
@@ -70,24 +68,23 @@ class AtpManager:
         return tuple(self._clients)
 
     @property
-    def ready_endpoints(self) -> frozenset[tuple[str, int]]:
-        """(train_id, cab_id) pairs whose channel is currently open (READY)."""
+    def ready_count(self) -> int:
+        """Number of peer channels currently open (READY)."""
 
-        return frozenset((c.train_id, c.cab_id) for c in self._clients if c.ready)
+        return sum(1 for client in self._clients if client.ready)
 
-    def send_message(self, train_id: str, cab_id: int, message: dict[str, Any]) -> bool:
-        """Write one framed message to one cab's ATP process; False if absent/not READY."""
+    def send_message(self, message: dict[str, Any]) -> bool:
+        """Broadcast one framed message to every READY peer; True if any write."""
 
+        sent = False
         for client in self._clients:
-            if client.train_id == train_id and client.cab_id == cab_id:
-                return client.send_message(message)
-        return False
+            if client.send_message(message):
+                sent = True
+        return sent
 
     async def start(self) -> None:
         for endpoint in self._endpoints:
             client = AtpClient(
-                self._core.train_id,
-                endpoint.cab_id,
                 endpoint.host,
                 endpoint.port,
                 retry_delay=self._retry_delay,
@@ -98,7 +95,7 @@ class AtpManager:
             self._queues[client] = queue
             self._publisher_tasks[client] = asyncio.create_task(
                 self._publish_loop(client, queue),
-                name=f"atp-publisher {self._core.train_id} cab {endpoint.cab_id}",
+                name=f"atp-publisher {endpoint.host}:{endpoint.port}",
             )
             await client.start()
             self._clients.append(client)
@@ -131,53 +128,40 @@ class AtpManager:
             logger.warning("%s: ATP reported error: %r", client.ident, message)
         else:
             client.send_message(
-                make_error(
-                    "unknown_message_type",
-                    f"unexpected message type: {mtype!r}",
-                    train_id=client.train_id,
-                    cab_id=client.cab_id,
-                )
+                make_error("unknown_message_type", f"unexpected message type: {mtype!r}")
             )
 
     async def _handle_atp_command(self, client: AtpClient, message: dict[str, Any]) -> None:
+        train_id = self._core.train_id
         try:
-            drive_demand, door, atp_signal = parse_atp_command(
-                message, client.train_id, client.cab_id
-            )
+            cab_id, drive_demand, door, atp_signal = parse_atp_command(message)
         except ValueError as exc:
-            client.send_message(
-                make_error(
-                    "invalid_atp_command",
-                    str(exc),
-                    train_id=client.train_id,
-                    cab_id=client.cab_id,
-                )
-            )
+            client.send_message(make_error("invalid_atp_command", str(exc)))
             return
 
         commands: list[Any] = []
         if drive_demand is not None:
             commands.append(
                 TrainControlCommand(
-                    train_id=client.train_id,
-                    payload=TrainControl(cab_id=client.cab_id, drive_demand=drive_demand),
+                    train_id=train_id,
+                    payload=TrainControl(cab_id=cab_id, drive_demand=drive_demand),
                 )
             )
         if door is not None:
             for door_key in ("left_door", "right_door"):
                 commands.append(
                     EquipmentCommand(
-                        train_id=client.train_id,
+                        train_id=train_id,
                         payload=EquipmentControlRequest(key=door_key, command=door),
                     )
                 )
         if atp_signal is not None:
             commands.append(
                 EquipmentCommand(
-                    train_id=client.train_id,
+                    train_id=train_id,
                     payload=EquipmentControlRequest(
                         equipment_type="stcs_atp",
-                        cab_id=client.cab_id,
+                        cab_id=cab_id,
                         command=atp_signal,
                     ),
                 )
@@ -186,11 +170,4 @@ class AtpManager:
         for command in commands:
             result = await self._core.submit_command(command)
             if not result.ok:
-                client.send_message(
-                    make_error(
-                        "command_rejected",
-                        result.error or "command rejected",
-                        train_id=client.train_id,
-                        cab_id=client.cab_id,
-                    )
-                )
+                client.send_message(make_error("command_rejected", result.error or "rejected"))

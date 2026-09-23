@@ -1,14 +1,15 @@
-"""Startup configuration for ATP endpoints and the declarative train.
+"""Startup configuration for the declarative train and its ATP endpoints.
 
-ATP endpoints are supplied as repeatable ``--atp CAB_ID=HOST:PORT`` arguments.
-They are handed to the server through the ``A_TRAIN_ATP_ENDPOINTS``
+The whole startup configuration lives in the single ``--train-config`` JSON
+file: a ``train`` object describing the train, cabs, physics, and equipment,
+plus an optional ``atp`` array of server endpoints, one per cab. The parsed
+configuration is handed to the server through the ``A_TRAIN_CONFIG``
 environment variable so the uvicorn factory and reload subprocesses receive
-the same values. Train configuration is supplied separately through
-``--train-config``.
+the same values.
 
-Endpoint dictionaries are plain transport-neutral data: ``cab_id`` (positive
-int), ``host`` (non-empty str), ``port`` (1-65535). The single train identity
-is supplied by the simulator, not repeated in each endpoint.
+Endpoint dictionaries are plain transport-neutral data: ``host`` (non-empty
+str) and ``port`` (1-65535). ATP connections carry no cab binding; the train
+identity and cab targets live in the protocol messages.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-ATP_ENDPOINTS_ENV = "A_TRAIN_ATP_ENDPOINTS"
 TRAIN_CONFIG_ENV = "A_TRAIN_CONFIG"
 
 _MAX_PORT = 65535
@@ -76,63 +76,23 @@ def validate_endpoint(entry: Mapping[str, Any], where: str = "atp endpoint") -> 
 
     if not isinstance(entry, Mapping):
         raise ConfigError(f"{where}: expected an object, got {entry!r}")
+    unknown = set(entry) - {"host", "port"}
+    if unknown:
+        raise ConfigError(f"{where}: unknown field(s) {sorted(unknown)}")
     return {
-        "cab_id": _require_int(entry.get("cab_id"), "cab_id", where, 1, 10_000),
         "host": _require_str(entry.get("host"), "host", where),
         "port": _require_int(entry.get("port"), "port", where, 1, _MAX_PORT),
     }
 
 
-def parse_endpoint_spec(spec: str) -> dict[str, Any]:
-    """Parse one ``--atp`` value: ``1=127.0.0.1:9001``.
+def endpoints_from_data(data: Any, where: str = "atp endpoints") -> list[dict[str, Any]]:
+    """Validate the ``atp`` startup array: one ``{host, port}`` peer per entry."""
 
-    The host may be bracketed IPv6, e.g. ``2=[::1]:9102``.
-    """
-
-    ident, sep, address = spec.partition("=")
-    if not sep:
-        raise ConfigError(f"--atp {spec!r}: expected CAB_ID=HOST:PORT")
-    cab_raw = ident
-    try:
-        cab_id = int(cab_raw)
-    except ValueError:
-        raise ConfigError(f"--atp {spec!r}: cab id {cab_raw!r} is not an integer") from None
-    host, sep, port_raw = address.rpartition(":")
-    if not sep or not port_raw:
-        raise ConfigError(f"--atp {spec!r}: address {address!r} is missing HOST:PORT")
-    if host.startswith("[") and host.endswith("]"):
-        host = host[1:-1]
-    try:
-        port = int(port_raw)
-    except ValueError:
-        raise ConfigError(f"--atp {spec!r}: port {port_raw!r} is not an integer") from None
-    return validate_endpoint(
-        {"cab_id": cab_id, "host": host, "port": port},
-        where=f"--atp {spec!r}",
-    )
-
-
-def decode_env(value: str) -> list[dict[str, Any]]:
-    """Decode the ``A_TRAIN_ATP_ENDPOINTS`` JSON list; empty/missing means []."""
-
-    if not value or not value.strip():
+    if data is None:
         return []
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise ConfigError(f"{ATP_ENDPOINTS_ENV} is not valid JSON: {exc}") from None
-    if not isinstance(parsed, list):
-        raise ConfigError(f"{ATP_ENDPOINTS_ENV}: expected a JSON list, got {type(parsed).__name__}")
-    return [
-        validate_endpoint(entry, where=f"{ATP_ENDPOINTS_ENV}[{i}]")
-        for i, entry in enumerate(parsed)
-    ]
-
-
-def encode_env(endpoints: Sequence[Mapping[str, Any]]) -> str:
-    """Serialise validated endpoints for the environment variable."""
-
-    return json.dumps([dict(entry) for entry in endpoints])
+    if not isinstance(data, list):
+        raise ConfigError(f"{where}: expected a list, got {type(data).__name__}")
+    return [validate_endpoint(entry, where=f"{where}[{i}]") for i, entry in enumerate(data)]
 
 
 def train_config_from_data(data: Mapping[str, Any]):
@@ -143,6 +103,14 @@ def train_config_from_data(data: Mapping[str, Any]):
     root = _require_mapping(data, "train config")
     if "train" in root:
         root = _require_mapping(root["train"], "train config.train")
+    unknown = set(root) - {"train_id", "cabs", "physics", "equipment"}
+    if unknown:
+        raise ConfigError(
+            f"train config: unknown key(s) {sorted(unknown)}; ATP "
+            "endpoints belong in the top-level 'atp' array, not in 'train'"
+            if "atp" in unknown
+            else f"train config: unknown key(s) {sorted(unknown)}"
+        )
 
     train_id = _require_str(root.get("train_id"), "train_id", "train config")
     cabs = root.get("cabs")
@@ -202,6 +170,18 @@ def train_config_from_data(data: Mapping[str, Any]):
             key = _generated_equipment_key(eq_type, params, generated_keys)
             equipment_configs.append(EquipmentConfig(eq_type, key, params, enabled=enabled))
 
+        cab_addresses: set[tuple[str, int]] = set()
+        for item in equipment_configs:
+            cab_id = item.params.get("cab_id")
+            if not item.enabled or not isinstance(cab_id, int):
+                continue
+            address = (item.type, cab_id)
+            if address in cab_addresses:
+                raise ConfigError(
+                    f"train config.equipment: duplicate '{item.type}' for cab {cab_id}"
+                )
+            cab_addresses.add(address)
+
     return TrainConfig(
         train_id=train_id,
         cab_ids=tuple(cab_ids),
@@ -222,8 +202,26 @@ def train_config_from_data(data: Mapping[str, Any]):
     )
 
 
-def load_train_config_file(path: str | Path):
-    """Load and validate one train configuration JSON file."""
+def startup_config_from_data(
+    data: Mapping[str, Any],
+) -> tuple[Any | None, list[dict[str, Any]]]:
+    """Parse the full startup file shape: an optional train plus ATP endpoints.
+
+    Accepts the wrapped ``{"train": {...}, "atp": [...]}`` form, a bare train
+    object, or an ``{"atp": [...]}``-only mapping (training is then ``None``).
+    """
+
+    root = _require_mapping(data, "startup config")
+    train = None if ("atp" in root and "train" not in root) else train_config_from_data(root)
+    endpoints = endpoints_from_data(root.get("atp"), where="startup config.atp")
+    return train, endpoints
+
+
+def load_config_file(path: str | Path):
+    """Load and validate one startup configuration JSON file.
+
+    Returns ``(train_config, atp_endpoints)``.
+    """
 
     try:
         raw = Path(path).read_text("utf-8")
@@ -234,15 +232,18 @@ def load_train_config_file(path: str | Path):
     except json.JSONDecodeError as exc:
         raise ConfigError(f"train config file {path} is not valid JSON: {exc}") from None
     try:
-        return train_config_from_data(data)
+        train, endpoints = startup_config_from_data(data)
     except (KeyError, TypeError, ValueError) as exc:
         if isinstance(exc, ConfigError):
             raise
         raise ConfigError(f"train config file {path}: {exc}") from None
+    if train is None:
+        raise ConfigError(f"train config file {path}: 'train' section is required")
+    return train, endpoints
 
 
 def train_config_to_data(config) -> dict[str, Any]:
-    """Serialize a domain train config for the uvicorn factory handoff."""
+    """Serialize a domain train config into the startup file's ``train`` object."""
 
     equipment = []
     for item in config.equipment_configs:
@@ -256,37 +257,60 @@ def train_config_to_data(config) -> dict[str, Any]:
             entry["params"] = params
         equipment.append(entry)
     return {
-        "train": {
-            "train_id": config.train_id,
-            "cabs": [
-                {
-                    "cab_id": cab_id,
-                    "facing": "forward" if config.cab_facings[cab_id] == 1 else "backward",
-                    "active": cab_id == config.initial_active_cab,
-                }
-                for cab_id in config.cab_ids
-            ],
-            "physics": {
-                "initial_position": config.initial_position,
-                "initial_speed": config.initial_speed,
-                "max_traction_accel": config.max_traction_accel,
-                "max_decel": config.max_decel,
-                "initial_door_state": config.initial_door_state,
-            },
-            "equipment": equipment,
-        }
+        "train_id": config.train_id,
+        "cabs": [
+            {
+                "cab_id": cab_id,
+                "facing": "forward" if config.cab_facings[cab_id] == 1 else "backward",
+                "active": cab_id == config.initial_active_cab,
+            }
+            for cab_id in config.cab_ids
+        ],
+        "physics": {
+            "initial_position": config.initial_position,
+            "initial_speed": config.initial_speed,
+            "max_traction_accel": config.max_traction_accel,
+            "max_decel": config.max_decel,
+            "initial_door_state": config.initial_door_state,
+        },
+        "equipment": equipment,
     }
 
 
-def encode_train_config(config) -> str:
-    return json.dumps(train_config_to_data(config))
+def config_to_data(
+    train_config,
+    atp_endpoints: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Serialize parsed startup configuration into the file/env JSON shape."""
+
+    data: dict[str, Any] = {}
+    if train_config is not None:
+        data["train"] = train_config_to_data(train_config)
+    if atp_endpoints:
+        data["atp"] = [dict(entry) for entry in atp_endpoints]
+    return data
 
 
-def decode_train_config(value: str):
+def encode_config(
+    train_config,
+    atp_endpoints: Sequence[Mapping[str, Any]] = (),
+) -> str:
+    """Serialize validated startup configuration for the environment handoff."""
+
+    return json.dumps(config_to_data(train_config, atp_endpoints))
+
+
+def decode_config(value: str):
+    """Decode the ``A_TRAIN_CONFIG`` environment value.
+
+    Returns ``(train_config | None, atp_endpoints)``; either part may be
+    absent so explicit constructor arguments can override just one of them.
+    """
+
     if not value or not value.strip():
         raise ConfigError(f"{TRAIN_CONFIG_ENV}: value is empty")
     try:
         data = json.loads(value)
     except json.JSONDecodeError as exc:
         raise ConfigError(f"{TRAIN_CONFIG_ENV} is not valid JSON: {exc}") from None
-    return train_config_from_data(data)
+    return startup_config_from_data(data)

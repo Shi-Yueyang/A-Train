@@ -45,24 +45,30 @@ curl http://127.0.0.1:8001/api/status
 
 ## ATP
 
-The simulator hosts one configured train. Add one endpoint per cab:
+The simulator hosts one configured train. List the external ATP servers to
+dial in the `atp` array of the train configuration file (see below).
+Connections carry no cab binding: every peer receives the identical
+whole-train `TRAIN_STATE` broadcast, and every peer may command any cab by
+putting `cab_id` in its `ATP_COMMAND` messages.
 
 ```bash
-python -m a_train run --train-config train.json --host 127.0.0.1 --port 8001 --atp 1=127.0.0.1:9101 --atp 2=127.0.0.1:9102
+python -m a_train run --train-config train.json --host 127.0.0.1 --port 8001
 ```
 
 See [docs/atp-api.md](docs/atp-api.md) for the NDJSON protocol.
 
 ## Train configuration
 
-Define the train and its equipment declaratively with a required JSON file:
+Define the train, its equipment, and its ATP endpoints declaratively with a
+required JSON file:
 
 ```bash
 python -m a_train run --train-config train.json
 ```
 
 The file describes the single supported train, its cabs, physics, and a flat
-equipment list. For example:
+equipment list, plus an optional `atp` array of ATP server endpoints. For
+example:
 
 ```json
 {
@@ -79,21 +85,28 @@ equipment list. For example:
 			"initial_speed": 0.0
 		},
 		"equipment": [
-			{"type": "door", "key": "left_door", "params": {"side": "left"}},
-			{"type": "door", "key": "right_door", "params": {"side": "right"}},
-			{"type": "btm", "key": "btm_front", "cab_id": 1},
-			{"type": "stcs_atp_duo", "key": "stcs_front", "cab_id": 1}
+			{"type": "door", "params": {"side": "left"}},
+			{"type": "door", "params": {"side": "right"}},
+			{"type": "btm", "cab_id": 1},
+			{"type": "stcs_atp_duo", "cab_id": 1}
 		]
-	}
+	},
+	"atp": [
+		{"host": "127.0.0.1", "port": 9101},
+		{"host": "127.0.0.1", "port": 9102}
+	]
 }
 ```
 
-Equipment keys are unique addresses used by the REST API and snapshots. The
-supported equipment types are `door`, `btm`, `driving_system`, and `stcs_atp`.
-Each equipment entry may include `"enabled": false` to leave that equipment
-out of the installed train; omitted `enabled` values default to `true`.
-Equipment configuration is validated before the server starts. ATP endpoint
-configuration remains separate and can be combined with `--train-config`.
+Equipment keys are generated internally as unique REST addresses; cab-scoped
+equipment must be unique by `(type, cab_id)`, which is also how ATP wire
+messages address instances. The supported equipment types are `door`, `btm`,
+`driving_system`, `stcs_atp_duo`, and `stcs_atp_solo`. Each equipment entry
+may include `"enabled": false` to leave that equipment out of the installed
+train; omitted `enabled` values default to `true`. Equipment configuration is
+validated before the server starts. The optional `atp` array lists ATP
+servers as `{host, port}` pairs to dial -- peers are not bound to cabs; a
+missing or empty `atp` array runs the simulator with zero ATP connections.
 
 ## Checks
 

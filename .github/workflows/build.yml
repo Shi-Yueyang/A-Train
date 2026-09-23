@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: |
           "${{ matrix.binary }}" run --help > /dev/null
-          "${{ matrix.binary }}" run --port 8790 --atp TRAIN001:1=127.0.0.1:9599 &
+          "${{ matrix.binary }}" run --port 8790 --train-config docs/train.json &
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
           for i in $(seq 1 40); do

@@ -49,18 +49,21 @@ plus `active`.
 ## Equipment representation
 
 The train exposes equipment as a flat array of independently addressed
-instances. Each entry has a behavior `type`, a unique instance `key`, and a
-type-specific `state` object:
+instances. Each entry has a behavior `type`, a unique instance `key`, a
+type-specific `state` object, and `cab_id` -- the owning cab for cab-scoped
+equipment (`null` for train-level instances such as doors). `cab_id` is
+informational in the Web API; `key` remains the address for equipment
+commands:
 
 ```json
 {
   "equipment": [
-    { "type": "door", "key": "left_door", "state": { "state": "closed" } },
-    { "type": "door", "key": "right_door", "state": { "state": "closed" } },
-    { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
-    { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
-    { "type": "driving_system", "key": "driving_2", "state": { "cab_id": 2, "facing": "backward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
-    { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "state": {
+    { "type": "door", "key": "left_door", "cab_id": null, "state": { "state": "closed" } },
+    { "type": "door", "key": "right_door", "cab_id": null, "state": { "state": "closed" } },
+    { "type": "btm", "key": "btm_1", "cab_id": 1, "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "driving_system", "key": "driving_1", "cab_id": 1, "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
+    { "type": "driving_system", "key": "driving_2", "cab_id": 2, "state": { "cab_id": 2, "facing": "backward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
+    { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "cab_id": 1, "state": {
         "last_command": null,
         "train_out_signal": "110000000000000000000000000000",
         "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
@@ -106,8 +109,9 @@ Runs the core. Idempotent while already running. Body: none.
 
 ### GET /api/atp/status
 
-Read-only view of each configured cab's ATP channel (Phase 3.1, atp-api.md §6.2).
-`connections` is empty when no ATP endpoints are configured.
+Read-only view of each configured ATP peer connection (atp-api.md §6.2).
+`connections` is empty when no ATP endpoints are configured. Channels carry
+no cab binding, so entries name only the peer address.
 
 **Response 200**:
 
@@ -115,8 +119,6 @@ Read-only view of each configured cab's ATP channel (Phase 3.1, atp-api.md §6.2
 {
   "connections": [
     {
-      "train_id": "TRAIN001",
-      "cab_id": 1,
       "host": "127.0.0.1",
       "port": 9101,
       "state": "READY",
@@ -128,6 +130,8 @@ Read-only view of each configured cab's ATP channel (Phase 3.1, atp-api.md §6.2
 
 | Field   | Type   | Notes                                                                     |
 | ------- | ------ | ------------------------------------------------------------------------- |
+| `host`  | string | Peer address the simulator dials.                                         |
+| `port`  | int    | Peer address the simulator dials.                                         |
 | `state` | string | `IDLE` / `CONNECTING` / `READY` / `DISCONNECTED` / `STOPPED`. |
 | `ready` | bool   | True while the TCP channel is open (`READY`). |
 

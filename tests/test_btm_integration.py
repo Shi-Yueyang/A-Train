@@ -28,7 +28,7 @@ PAYLOAD = bytes([0x01, 0x23, 0xA4, 0xFF, 0x00, 0x81, 0x72])
 
 
 def _cabs(port: int) -> list[AtpEndpoint]:
-    return [AtpEndpoint(cab_id, "127.0.0.1", port) for cab_id in (1, 2)]
+    return [AtpEndpoint("127.0.0.1", port), AtpEndpoint("127.0.0.1", port)]
 
 
 def _manager(c):  # AtpManager
@@ -69,9 +69,17 @@ async def _no_more(server, mtype: str, within: float = 0.3) -> None:
         assert message.get("type") != mtype, f"unexpected {mtype}: {message}"
 
 
-async def _await_ready(server, c, ready_count: int = 1) -> None:
+async def _await_ready(c, ready_count: int = 1) -> None:
     # No handshake: the channel is READY as soon as TCP opens.
-    await _wait_until(lambda: len(_manager(c).ready_endpoints) == ready_count)
+    await _wait_until(lambda: _manager(c).ready_count == ready_count)
+
+
+def _btm_state(message: dict, cab_id: int) -> dict:
+    return next(
+        item["state"]
+        for item in message.get("equipment", [])
+        if item.get("type") == "btm" and item.get("cab_id") == cab_id
+    )
 
 
 async def _next_train_state_with_btm(server, cab_id: int, payload_b64: str, timeout: float = 10.0) -> dict:
@@ -80,15 +88,12 @@ async def _next_train_state_with_btm(server, cab_id: int, payload_b64: str, time
             message = await server.wait_for_message(timeout=timeout)
             if message.get("type") != "train_state":
                 continue
-            btm = next(
-                (
-                    item["state"]
-                    for item in message.get("equipment", [])
-                    if item.get("key") == f"btm_{cab_id}"
-                ),
-                None,
-            )
-            if btm is not None and btm.get("payload_b64") == payload_b64:
+            entries = [
+                item
+                for item in message.get("equipment", [])
+                if item.get("type") == "btm" and item.get("cab_id") == cab_id
+            ]
+            if entries and entries[0]["state"].get("payload_b64") == payload_b64:
                 return message
 
     return await asyncio.wait_for(_poll(), timeout)
@@ -99,27 +104,26 @@ async def test_btm_delivery_is_embedded_in_train_state() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _cabs(port)) as c:
-            await _await_ready(server, c, ready_count=2)
+            await _await_ready(c, ready_count=2)
 
             data = base64.b64encode(PAYLOAD).decode("ascii")
             r = await c.post("/api/trains/TRAIN001/equipment/btm_1", json={"data": data})
             assert r.status_code == 200
 
             message = await _next_train_state_with_btm(server, 1, data)
-            btm = next(item["state"] for item in message["equipment"] if item["key"] == "btm_1")
+            btm = _btm_state(message, 1)
             assert btm["payload_b64"] == data
             assert btm["received_count"] == 1
+            assert "cab_id" not in btm and "key" not in message["equipment"][0]
             assert base64.b64decode(btm["payload_b64"], validate=True) == PAYLOAD
 
             await _no_more(server, "btm_rx")
 
             other = base64.b64encode(b"\xde\xad\xbe\xef").decode("ascii")
-            r = await c.post(
-                "/api/trains/TRAIN001/equipment/btm_2", json={"data": other}
-            )
+            r = await c.post("/api/trains/TRAIN001/equipment/btm_2", json={"data": other})
             assert r.status_code == 200
             message = await _next_train_state_with_btm(server, 2, other)
-            btm = next(item["state"] for item in message["equipment"] if item["key"] == "btm_2")
+            btm = _btm_state(message, 2)
             assert btm["payload_b64"] == other
             assert base64.b64decode(btm["payload_b64"]) == b"\xde\xad\xbe\xef"
     finally:
@@ -130,8 +134,8 @@ async def test_reset_resyncs_without_replaying_old_payload() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], [AtpEndpoint(1, "127.0.0.1", port)]) as c:
-            await _await_ready(server, c)
+        async with running_app([T1], [AtpEndpoint("127.0.0.1", port)]) as c:
+            await _await_ready(c)
 
             data = base64.b64encode(b"\x42").decode("ascii")
             await c.post("/api/trains/TRAIN001/equipment/btm_1", json={"data": data})
@@ -141,7 +145,7 @@ async def test_reset_resyncs_without_replaying_old_payload() -> None:
             r = await c.post("/api/trains/TRAIN001/equipment/btm_1", json={"data": data})
             assert r.status_code == 200
             message = await _next_train_state_with_btm(server, 1, data)
-            btm = next(item["state"] for item in message["equipment"] if item["key"] == "btm_1")
+            btm = _btm_state(message, 1)
             assert btm["payload_b64"] == data
             await _no_more(server, "btm_rx")
     finally:

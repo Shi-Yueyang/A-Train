@@ -87,11 +87,17 @@ class StcsAtpSnapshot:
 
 @dataclass(frozen=True)
 class EquipmentSnapshot:
-    """Read-only state for one uniquely addressed equipment instance."""
+    """Read-only state for one uniquely addressed equipment instance.
+
+    ``key`` is the transport-neutral REST address; ``cab_id`` carries the
+    owning cab for cab-scoped equipment (BTM, driving systems, STCS ATP) and
+    is ``None`` for train-level instances such as doors.
+    """
 
     type: str
     key: str
     state: Any
+    cab_id: int | None = None
 
 
 @dataclass(frozen=True)

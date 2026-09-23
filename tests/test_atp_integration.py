@@ -1,9 +1,10 @@
 """Phase 3.2 acceptance tests — ATP protocol and content publishing.
 
-Channels are READY the moment TCP opens -- no handshake. Manual steps
-publish ``TRAIN_STATE`` per cab; inbound ``ATP_COMMAND`` messages drive the
-train through the core; malformed and unexpected input is answered with
-``ERROR`` without stopping the simulation or another cab's connection. All
+Channels are READY the moment TCP opens -- no handshake. Every READY peer
+receives identical whole-train ``TRAIN_STATE`` broadcasts; inbound
+``ATP_COMMAND`` messages state their target ``cab_id`` in the message and
+drive the train through the core; malformed and unexpected input is answered
+with ``ERROR`` without stopping the simulation or another connection. All
 observed through the real application and the production-protocol test TCP
 server (§6.1); no production module is mocked.
 """
@@ -29,12 +30,12 @@ T1 = TrainConfig(
 )
 
 
-def _cabs(port: int) -> list[AtpEndpoint]:
-    return [AtpEndpoint(cab_id, "127.0.0.1", port) for cab_id in (1, 2)]
+def _two_peers(port: int) -> list[AtpEndpoint]:
+    return [AtpEndpoint("127.0.0.1", port), AtpEndpoint("127.0.0.1", port)]
 
 
-def _one_cab(port: int) -> list[AtpEndpoint]:
-    return [AtpEndpoint(1, "127.0.0.1", port)]
+def _one_peer(port: int) -> list[AtpEndpoint]:
+    return [AtpEndpoint("127.0.0.1", port)]
 
 
 def _manager(c):  # AtpManager
@@ -61,20 +62,29 @@ async def _next(server, mtype: str, timeout: float = 10.0, **match) -> dict:
     return await asyncio.wait_for(_poll(), timeout)
 
 
-async def _await_ready(server, c, ready_count: int = 1) -> None:
+async def _await_ready(c, ready_count: int = 1) -> None:
     # No handshake: the channel is READY as soon as TCP opens.
-    await _wait_until(lambda: len(_manager(c).ready_endpoints) == ready_count)
+    await _wait_until(lambda: _manager(c).ready_count == ready_count)
 
 
-# -- Criterion: a manual step produces correctly framed TRAIN_STATE per cab -----
+def _wire_entry(message: dict, eq_type: str, cab_id: int) -> dict:
+    entry = next(
+        item
+        for item in message.get("equipment", [])
+        if item.get("type") == eq_type and item.get("cab_id") == cab_id
+    )
+    return entry["state"]
 
 
-async def test_manual_step_publishes_train_state_for_each_cab() -> None:
+# -- Criterion: each READY peer receives the identical whole-train broadcast -----
+
+
+async def test_manual_step_publishes_identical_train_state_to_both_peers() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], _cabs(port)) as c:
-            await _await_ready(server, c, ready_count=2)
+        async with running_app([T1], _two_peers(port)) as c:
+            await _await_ready(c, ready_count=2)
 
             await c.post("/api/simulation/time-mode", json={"mode": "MANUAL"})
             await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 1.0})
@@ -82,20 +92,38 @@ async def test_manual_step_publishes_train_state_for_each_cab() -> None:
             assert r.status_code == 200
 
             # v = 1.5 * 0.5 = 0.75 m/s; x = 0.5 * 1.5 * 0.5^2 = 0.1875 m
-            for cab_id in (1, 2):
-                state = await _next(
-                    server,
-                    "train_state",
-                    train_id="TRAIN001",
-                    cab_id=cab_id,
-                    position=pytest.approx(0.1875),
-                )
-                assert state["speed"] == pytest.approx(0.75)
-                assert state["acceleration"] == pytest.approx(1.5)
-                assert state["direction"] == "forward"
-                assert "equipment" in state
-                assert "door" not in state
-                assert "stcs_atp_duo" not in state
+            # One per-cab copy each: byte-identical broadcast on every peer.
+            first = await _next(server, "train_state", position=pytest.approx(0.1875))
+            second = await _next(server, "train_state", position=pytest.approx(0.1875))
+            assert first == second
+
+            state = first
+            assert state["speed"] == pytest.approx(0.75)
+            assert state["acceleration"] == pytest.approx(1.5)
+            assert state["direction"] == "forward"
+            assert set(state) == {
+                "type",
+                "speed",
+                "acceleration",
+                "position",
+                "direction",
+                "equipment",
+            }
+            equipment = state["equipment"]
+            assert {(item["type"], item["cab_id"]) for item in equipment} == {
+                ("btm", 1),
+                ("btm", 2),
+                ("stcs_atp_duo", 1),
+                ("stcs_atp_duo", 2),
+            }
+            assert all(set(item) == {"type", "cab_id", "state"} for item in equipment)
+            assert all("cab_id" not in item["state"] for item in equipment)
+            assert all(
+                set(item["state"]) == {"train_out_signal"}
+                for item in equipment
+                if item["type"].startswith("stcs_atp")
+            )
+            assert "door" not in state
     finally:
         await server.stop()
 
@@ -107,8 +135,8 @@ async def test_atp_atp_command_is_applied_by_the_core() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], _one_cab(port)) as c:
-            await _await_ready(server, c)
+        async with running_app([T1], _one_peer(port)) as c:
+            await _await_ready(c)
 
             await c.post("/api/simulation/time-mode", json={"mode": "MANUAL"})
             await server.send({"type": "atp_command", "cab_id": 1, "drive_demand": 0.5})
@@ -140,21 +168,30 @@ async def test_invalid_atp_command_answers_error() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], _one_cab(port)) as c:
-            await _await_ready(server, c)
+        async with running_app([T1], _one_peer(port)) as c:
+            await _await_ready(c)
 
             # Out-of-range demand.
             await server.send({"type": "atp_command", "cab_id": 1, "drive_demand": 5.0})
             err = await _next(server, "error", code="invalid_atp_command")
             assert "[-1.0, 1.0]" in err["detail"]
 
-            # Identity mismatch: cab 2 on the cab 1 channel.
-            await server.send({"type": "atp_command", "cab_id": 2, "drive_demand": 0.5})
+            # cab_id is required: the channel carries no cab binding.
+            await server.send({"type": "atp_command", "drive_demand": 0.5})
             err = await _next(server, "error", code="invalid_atp_command")
-            assert "cab_id" in err["detail"]
+            assert "cab_id is required" in err["detail"]
 
-            # Empty command.
-            await server.send({"type": "atp_command"})
+            # train_id is no longer part of the protocol.
+            await server.send({"type": "atp_command", "train_id": "TRAIN001", "cab_id": 1})
+            err = await _next(server, "error", code="invalid_atp_command")
+            assert "train_id" in err["detail"]
+
+            # An unconfigured cab is rejected by the core, not the session.
+            await server.send({"type": "atp_command", "cab_id": 99, "drive_demand": 0.5})
+            await _next(server, "error", code="command_rejected")
+
+            # No action at all.
+            await server.send({"type": "atp_command", "cab_id": 1})
             await _next(server, "error", code="invalid_atp_command")
 
             # Nothing was applied and the simulation still runs.
@@ -166,22 +203,22 @@ async def test_invalid_atp_command_answers_error() -> None:
         await server.stop()
 
 
-# -- Criterion: malformed data is reported without stopping sim or other cabs ---
+# -- Criterion: malformed data is reported without stopping sim or peers ---------
 
 
 async def test_malformed_line_reported_without_stopping_anything() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], _cabs(port)) as c:
-            await _await_ready(server, c, ready_count=2)
+        async with running_app([T1], _two_peers(port)) as c:
+            await _await_ready(c, ready_count=2)
 
             await server.send_raw("this is not json\n")
             errors = [await _next(server, "error"), await _next(server, "error")]
             assert {e["code"] for e in errors} == {"malformed_message"}
 
             # Both channels stay READY and the simulation is unaffected.
-            assert len(_manager(c).ready_endpoints) == 2
+            assert _manager(c).ready_count == 2
             await c.post("/api/simulation/time-mode", json={"mode": "MANUAL"})
             r = await c.post("/api/simulation/step", json={"delta": 0.1})
             assert r.status_code == 200
@@ -194,12 +231,12 @@ async def test_unknown_message_type_answered_with_error() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], _one_cab(port)) as c:
-            await _await_ready(server, c)
+        async with running_app([T1], _one_peer(port)) as c:
+            await _await_ready(c)
 
             await server.send({"type": "totally_unknown", "cab_id": 1})
             await _next(server, "error", code="unknown_message_type")
-            assert _manager(c).ready_endpoints == frozenset({("TRAIN001", 1)})
+            assert _manager(c).ready_count == 1
     finally:
         await server.stop()
 
@@ -227,11 +264,7 @@ async def _next_train_state_with_stcs(server, expected: dict[str, object]) -> di
             message = await server.wait_for_message(timeout=10.0)
             if message.get("type") != "train_state":
                 continue
-            state = next(
-                item["state"]
-                for item in message.get("equipment", [])
-                if item.get("key") == "stcs_atp_duo_1"
-            )
+            state = _wire_entry(message, "stcs_atp_duo", 1)
             if all(state.get(key) == value for key, value in expected.items()):
                 return message
 
@@ -242,27 +275,27 @@ async def test_atp_signal_asserts_state_and_shows_in_train_state() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], _one_cab(port)) as c:
-            await _await_ready(server, c)
+        async with running_app([T1], _one_peer(port)) as c:
+            await _await_ready(c)
             await _next(server, "train_state")  # drain the catch-up publish
 
             # The raw signal is recorded unchanged by STCS ATP.
             await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "0111"})
-            await _wait_stcs_atp(c, last_command="0111")
+            core_state = await _wait_stcs_atp(c, last_command="0111")
 
-            # The protection line rides every subsequent TRAIN_STATE.
-            await _next_train_state_with_stcs(server, {"last_command": "0111"})
+            # Only the train-out feedback line rides subsequent TRAIN_STATEs;
+            # the raw command and named state maps stay off the wire.
+            message = await _next_train_state_with_stcs(
+                server, {"train_out_signal": core_state["train_out_signal"]}
+            )
+            state = _wire_entry(message, "stcs_atp_duo", 1)
+            assert state == {"train_out_signal": core_state["train_out_signal"]}
 
-            # A shorter signal replaces the previous raw signal.
+            # A shorter signal replaces the previous raw signal in the core.
             await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "010"})
-            state = await _wait_stcs_atp(c, last_command="010")
+            await _wait_stcs_atp(c, last_command="010")
             r = await c.post("/api/simulation/step", json={"delta": 0.1})
             assert r.status_code == 200
-            equipment = (await c.get("/api/trains/TRAIN001")).json()["equipment"]
-            assert (
-                next(item["state"] for item in equipment if item["key"] == "stcs_atp_duo_1")
-                == state
-            )
     finally:
         await server.stop()
 
@@ -271,8 +304,8 @@ async def test_invalid_atp_signal_answers_error() -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
-        async with running_app([T1], _one_cab(port)) as c:
-            await _await_ready(server, c)
+        async with running_app([T1], _one_peer(port)) as c:
+            await _await_ready(c)
 
             await server.send({"type": "atp_command", "cab_id": 1, "atp_signal": "00120"})
             err = await _next(server, "error", code="invalid_atp_command")
@@ -282,6 +315,28 @@ async def test_invalid_atp_signal_answers_error() -> None:
             err = await _next(server, "error", code="invalid_atp_command")
             assert "atp_signal" in err["detail"]
 
-            assert _manager(c).ready_endpoints == frozenset({("TRAIN001", 1)})
+            assert _manager(c).ready_count == 1
+    finally:
+        await server.stop()
+
+
+# -- Criterion: any peer may act for any cab; the train enforces cabs ------------
+
+
+async def test_peer_can_command_the_other_cab() -> None:
+    server = TestAtpServer()
+    port = await server.start()
+    try:
+        async with running_app([T1], _one_peer(port)) as c:
+            await _await_ready(c)
+            await c.post("/api/simulation/time-mode", json={"mode": "MANUAL"})
+
+            await server.send({"type": "atp_command", "cab_id": 2, "atp_signal": "1"})
+            r = await c.post("/api/simulation/step", json={"delta": 0.1})
+            assert r.status_code == 200
+            equipment = (await c.get("/api/trains/TRAIN001")).json()["equipment"]
+            states = {item["key"]: item["state"] for item in equipment}
+            assert states["stcs_atp_duo_2"]["last_command"] == "1"
+            assert states["stcs_atp_duo_1"]["last_command"] is None
     finally:
         await server.stop()

@@ -1,7 +1,9 @@
 """One reconnecting TCP client for one external ATP process (atp-api.md §1).
 
 The simulator acts as the TCP client; ATP acts as the TCP server. Each client
-owns exactly one cab's connection and runs a connection loop:
+owns exactly one TCP connection and carries no cab or train binding: every
+READY peer receives the same whole-train ``TRAIN_STATE`` lines, and inbound
+commands state their cab in the message. The client runs a connection loop:
 
     CONNECTING --TCP open--> READY
         ^                       |
@@ -9,12 +11,11 @@ owns exactly one cab's connection and runs a connection loop:
               peer closed / stream error
 
 There is no application-level handshake: the channel is READY the moment TCP
-opens, and snapshot publishing starts immediately. The cab identity lives in
-the endpoint configuration (one ATP server per cab), not in a ``HELLO``
-message. Any failure (connection refused, stream error, unexpected close)
-returns to ``CONNECTING`` after an exponential backoff capped at
-``max_retry_delay``; a session that reached READY resets the backoff so
-recovery from a dropped link is fast (atp-api.md §1.4).
+opens, and snapshot publishing starts immediately. Any failure (connection
+refused, stream error, unexpected close) returns to ``CONNECTING`` after an
+exponential backoff capped at ``max_retry_delay``; a session that reached
+READY resets the backoff so recovery from a dropped link is fast
+(atp-api.md §1.4).
 
 ``publish`` converts core snapshots into cyclic ``TRAIN_STATE`` lines;
 inbound content is validated, answered with ``ERROR`` on malformed lines
@@ -58,8 +59,6 @@ class AtpClient:
 
     def __init__(
         self,
-        train_id: str,
-        cab_id: int,
         host: str,
         port: int,
         *,
@@ -67,8 +66,6 @@ class AtpClient:
         max_retry_delay: float = 30.0,
         on_message: InboundHandler | None = None,
     ) -> None:
-        self._train_id = train_id
-        self._cab_id = cab_id
         self._host = host
         self._port = port
         self._retry_delay = retry_delay
@@ -79,14 +76,6 @@ class AtpClient:
         self._task: asyncio.Task[None] | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._latest_snapshot: SimulationSnapshot | None = None
-
-    @property
-    def train_id(self) -> str:
-        return self._train_id
-
-    @property
-    def cab_id(self) -> int:
-        return self._cab_id
 
     @property
     def host(self) -> str:
@@ -106,7 +95,7 @@ class AtpClient:
 
     @property
     def ident(self) -> str:
-        return f"ATP {self._train_id} cab {self._cab_id} ({self._host}:{self._port})"
+        return f"ATP {self._host}:{self._port}"
 
     def set_inbound_handler(self, handler: InboundHandler) -> None:
         """Attach the manager callback for inbound action messages (atp-api.md §4)."""
@@ -118,7 +107,7 @@ class AtpClient:
 
         if self._task is None:
             self._task = asyncio.create_task(
-                self._run(), name=f"atp-client {self._train_id} cab {self._cab_id}"
+                self._run(), name=f"atp-client {self._host}:{self._port}"
             )
 
     async def stop(self) -> None:
@@ -151,10 +140,10 @@ class AtpClient:
         return True
 
     def publish(self, snapshot: SimulationSnapshot) -> None:
-        """Publish one core snapshot as this cab's protocol content (atp-api.md §3.1).
+        """Publish one core snapshot as a whole-train ``TRAIN_STATE`` (atp-api.md §3.1).
 
-        Writes ``TRAIN_STATE`` for every READY snapshot; the current BTM payload is
-        included in the snapshot's nested equipment state.
+        Every READY peer receives identical bytes; BTM payloads ride inside the
+        equipment entries.
         """
 
         self._latest_snapshot = snapshot
@@ -162,10 +151,9 @@ class AtpClient:
             self._publish_now(snapshot)
 
     def _publish_now(self, snapshot: SimulationSnapshot) -> None:
-        train = next((t for t in snapshot.trains if t.train_id == self._train_id), None)
-        if train is None:
+        if not snapshot.trains:
             return
-        self.send_message(make_train_state(self._train_id, self._cab_id, train))
+        self.send_message(make_train_state(snapshot.trains[0]))
 
     # -- Connection loop -------------------------------------------------------
 
@@ -217,14 +205,7 @@ class AtpClient:
             except ValueError as exc:
                 # A framing-valid but invalid line is reported, not fatal (atp-api.md §5.1).
                 logger.warning("%s: %s", self.ident, exc)
-                self.send_message(
-                    make_error(
-                        "malformed_message",
-                        str(exc),
-                        train_id=self._train_id,
-                        cab_id=self._cab_id,
-                    )
-                )
+                self.send_message(make_error("malformed_message", str(exc)))
                 continue
             if self._on_message is not None:
                 await self._on_message(message)

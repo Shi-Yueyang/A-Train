@@ -23,20 +23,14 @@ from fastapi import FastAPI
 
 from .adapters.api.app import create_app as build_app
 from .adapters.atp.manager import AtpEndpoint, AtpManager
-from .config import (
-    ATP_ENDPOINTS_ENV,
-    TRAIN_CONFIG_ENV,
-    ConfigError,
-    decode_env,
-    decode_train_config,
-)
+from .config import TRAIN_CONFIG_ENV, ConfigError, decode_config
 from .domain.train import TrainConfig
 from .simulation.commands import Command
 from .simulation.core import SimulationCore
 from .simulation.snapshots import SimulationSnapshot
 
 if TYPE_CHECKING:
-    pass
+    from typing import Any
 
 
 @asynccontextmanager
@@ -51,10 +45,14 @@ async def lifespan(
     command_queue: asyncio.Queue[Command] = asyncio.Queue()
     snapshot_subscribers: list[asyncio.Queue[SimulationSnapshot]] = []
 
+    env_config: tuple[TrainConfig | None, list[dict[str, Any]]] | None = None
+    if train_configs is None or atp_endpoints is None:
+        env_config = _config_from_environment()
+
     if train_configs is not None:
         configs = train_configs
-    elif os.environ.get(TRAIN_CONFIG_ENV):
-        configs = (decode_train_config(os.environ[TRAIN_CONFIG_ENV]),)
+    elif env_config is not None and env_config[0] is not None:
+        configs = (env_config[0],)
     else:
         raise ConfigError("train configuration is required; start with --train-config FILE")
     core = SimulationCore(
@@ -64,7 +62,11 @@ async def lifespan(
     )
     core_task = asyncio.create_task(core.run_loop(), name="simulation-core")
 
-    endpoints = _endpoints_from_environment() if atp_endpoints is None else tuple(atp_endpoints)
+    if atp_endpoints is None:
+        env_endpoints = env_config[1] if env_config is not None else []
+        endpoints = tuple(AtpEndpoint(entry["host"], entry["port"]) for entry in env_endpoints)
+    else:
+        endpoints = tuple(atp_endpoints)
     atp_manager = AtpManager(
         core,
         endpoints=endpoints,
@@ -89,11 +91,17 @@ async def lifespan(
             pass
 
 
-def _endpoints_from_environment() -> tuple[AtpEndpoint, ...]:
-    """Decode ATP endpoints set by the ``run`` command (atp-api.md §6, config.py)."""
+def _config_from_environment() -> tuple[TrainConfig | None, list[dict[str, Any]]]:
+    """Decode the startup configuration set by the ``run`` command.
 
-    entries = decode_env(os.environ.get(ATP_ENDPOINTS_ENV, ""))
-    return tuple(AtpEndpoint(e["cab_id"], e["host"], e["port"]) for e in entries)
+    Returns ``(train_config | None, atp_endpoints)``; ``(None, [])`` when the
+    environment variable is unset (atp-api.md §6, config.py).
+    """
+
+    value = os.environ.get(TRAIN_CONFIG_ENV, "")
+    if not value.strip():
+        return None, []
+    return decode_config(value)
 
 
 def create_app(
@@ -104,9 +112,11 @@ def create_app(
 ) -> FastAPI:
     """Build the FastAPI application with the production lifespan wired in.
 
-    ``atp_endpoints=None`` (the uvicorn factory default) loads the endpoints
-    from the ``A_TRAIN_ATP_ENDPOINTS`` environment variable; pass a sequence
-    (including the empty tuple) to configure them explicitly.
+    ``train_configs=None``/``atp_endpoints=None`` (the uvicorn factory
+    defaults) load the corresponding part from the ``A_TRAIN_CONFIG``
+    environment variable set by the ``run`` command; pass a sequence
+    (including the empty tuple for ``atp_endpoints``) to configure it
+    explicitly.
     """
 
     configs = train_configs

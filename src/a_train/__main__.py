@@ -33,20 +33,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--reload", action="store_true", help="Enable uvicorn auto-reload (development)."
     )
     run_p.add_argument(
-        "--atp",
-        action="append",
-        default=[],
-        metavar="CAB_ID=HOST:PORT",
-        help=(
-            "Connect to an external ATP process; repeatable, one per cab, "
-            "e.g. --atp 1=127.0.0.1:9101"
-        ),
-    )
-    run_p.add_argument(
         "--train-config",
         metavar="FILE",
         required=True,
-        help="JSON file defining the train, cabs, physics, and equipment.",
+        help=(
+            "JSON file defining the train, cabs, physics, equipment, and the "
+            "optional ATP server endpoints (one per cab)."
+        ),
     )
 
     return parser
@@ -61,7 +54,6 @@ def main(argv: list[str] | None = None) -> int:
             host=args.host,
             port=args.port,
             reload=args.reload,
-            atp_specs=args.atp,
             train_config=args.train_config,
         )
     parser.error(f"unknown command: {args.command!r}")
@@ -72,31 +64,19 @@ def _run_server(
     host: str,
     port: int,
     reload: bool,
-    atp_specs: list[str] | None = None,
-    train_config: str | None = None,
+    train_config: str,
 ) -> int:
     import uvicorn
 
     from .config import (
-        ATP_ENDPOINTS_ENV,
         TRAIN_CONFIG_ENV,
         ConfigError,
-        encode_env,
-        encode_train_config,
-        load_train_config_file,
-        parse_endpoint_spec,
+        encode_config,
+        load_config_file,
     )
 
     try:
-        endpoints = []
-        seen_cabs: set[int] = set()
-        for spec in atp_specs or ():
-            endpoint = parse_endpoint_spec(spec)
-            if endpoint["cab_id"] in seen_cabs:
-                raise ConfigError(f"duplicate ATP endpoint for cab {endpoint['cab_id']}")
-            seen_cabs.add(endpoint["cab_id"])
-            endpoints.append(endpoint)
-        configured_train = load_train_config_file(train_config) if train_config else None
+        configured_train, atp_endpoints = load_config_file(train_config)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -105,14 +85,7 @@ def _run_server(
     # ATP "channel established" line) a matching INFO-level root handler.
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:\t%(message)s")
 
-    if endpoints:
-        os.environ[ATP_ENDPOINTS_ENV] = encode_env(endpoints)
-    else:
-        os.environ.pop(ATP_ENDPOINTS_ENV, None)
-    if configured_train is not None:
-        os.environ[TRAIN_CONFIG_ENV] = encode_train_config(configured_train)
-    else:
-        os.environ.pop(TRAIN_CONFIG_ENV, None)
+    os.environ[TRAIN_CONFIG_ENV] = encode_config(configured_train, atp_endpoints)
 
     if getattr(sys, "frozen", False):
         # Frozen executables cannot resolve the ``module:attr`` factory string;

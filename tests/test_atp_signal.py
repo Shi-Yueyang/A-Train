@@ -20,33 +20,47 @@ TID, CAB = "TRAIN001", 1
 
 
 def test_atp_signal_parses_as_bit_string() -> None:
-    drive, door, bits = parse_atp_command({"atp_signal": "0001000"}, TID, CAB)
-    assert (drive, door, bits) == (None, None, "0001000")
+    cab, drive, door, bits = parse_atp_command({"cab_id": 1, "atp_signal": "0001000"})
+    assert (cab, drive, door, bits) == (1, None, None, "0001000")
 
 
 def test_atp_signal_alone_satisfies_the_payload_requirement() -> None:
     # No drive_demand and no door: a bare atp_signal is a valid command.
-    assert parse_atp_command({"atp_signal": "0"}, TID, CAB)[2] == "0"
+    assert parse_atp_command({"cab_id": 1, "atp_signal": "0"})[3] == "0"
 
 
 def test_atp_signal_allows_underscore_separators() -> None:
-    assert parse_atp_command({"atp_signal": "0_1_0"}, TID, CAB)[2] == "010"
+    assert parse_atp_command({"cab_id": 1, "atp_signal": "0_1_0"})[3] == "010"
+
+
+@pytest.mark.parametrize("cab_id", [None, 0, -1, "1", 1.0, True])
+def test_missing_or_invalid_cab_id_rejected(cab_id: object) -> None:
+    message = {"atp_signal": "1"}
+    if cab_id is not None:
+        message["cab_id"] = cab_id
+    with pytest.raises(ValueError, match="cab_id"):
+        parse_atp_command(message)
+
+
+def test_train_id_is_not_part_of_the_protocol() -> None:
+    with pytest.raises(ValueError, match="train_id"):
+        parse_atp_command({"cab_id": 1, "train_id": TID, "atp_signal": "1"})
 
 
 @pytest.mark.parametrize("value", ["01x", "1 1", "true", 1, 0.1, ["01"]])
 def test_invalid_atp_signal_rejected(value: object) -> None:
     with pytest.raises(ValueError, match="atp_signal"):
-        parse_atp_command({"atp_signal": value}, TID, CAB)
+        parse_atp_command({"cab_id": 1, "atp_signal": value})
 
 
 def test_empty_atp_signal_rejected() -> None:
     with pytest.raises(ValueError, match="atp_signal"):
-        parse_atp_command({"atp_signal": ""}, TID, CAB)
+        parse_atp_command({"cab_id": 1, "atp_signal": ""})
 
 
 def test_missing_payload_still_rejected() -> None:
-    with pytest.raises(ValueError, match="atp_signal"):
-        parse_atp_command({"cab_id": CAB}, TID, CAB)
+    with pytest.raises(ValueError, match="drive_demand"):
+        parse_atp_command({"cab_id": 1})
 
 
 # -- Core-side state machine (domain) ---------------------------------------------

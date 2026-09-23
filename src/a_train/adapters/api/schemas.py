@@ -109,10 +109,8 @@ class TrainsResponse(BaseModel):
 
 
 class AtpConnectionResponse(BaseModel):
-    """One cab's ATP channel state (Phase 3.1 observability, atp-api.md §6.2)."""
+    """One ATP peer connection state (atp-api.md §6.2)."""
 
-    train_id: str
-    cab_id: int
     host: str
     port: int
     state: str = Field(description="IDLE / CONNECTING / READY / DISCONNECTED / STOPPED.")

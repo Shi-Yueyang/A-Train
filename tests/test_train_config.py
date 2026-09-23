@@ -8,11 +8,11 @@ import pytest_asyncio
 from a_train.config import (
     TRAIN_CONFIG_ENV,
     ConfigError,
-    encode_train_config,
-    load_train_config_file,
+    encode_config,
+    load_config_file,
     train_config_from_data,
 )
-from a_train.domain.train import Train
+from a_train.domain.train import EquipmentConfig, Train, TrainConfig
 from tests.support.app import running_app
 
 
@@ -81,17 +81,52 @@ def test_enabled_must_be_boolean() -> None:
         train_config_from_data(data)
 
 
-def test_train_config_file_loads_json(tmp_path) -> None:
+def test_config_file_loads_train_and_endpoints(tmp_path) -> None:
+    data = valid_config()
+    data["atp"] = [{"host": "127.0.0.1", "port": 9101}]
     path = tmp_path / "train.json"
-    path.write_text(json.dumps(valid_config()), encoding="utf-8")
-    assert load_train_config_file(path).train_id == "CUSTOM001"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    train, endpoints = load_config_file(path)
+    assert train.train_id == "CUSTOM001"
+    assert endpoints == [{"host": "127.0.0.1", "port": 9101}]
+
+
+def test_config_file_requires_train_section(tmp_path) -> None:
+    path = tmp_path / "train.json"
+    path.write_text(json.dumps({"atp": []}), encoding="utf-8")
+    with pytest.raises(ConfigError, match="train"):
+        load_config_file(path)
+
+
+def test_duplicate_equipment_for_same_cab_is_rejected() -> None:
+    with pytest.raises(ValueError, match="duplicate 'btm' equipment for cab 1"):
+        Train(
+            TrainConfig(
+                train_id="TRAIN001",
+                cab_ids=(1,),
+                initial_active_cab=1,
+                max_traction_accel=1.0,
+                max_decel=1.0,
+                equipment_configs=(
+                    EquipmentConfig("btm", "btm_a", {"cab_id": 1}),
+                    EquipmentConfig("btm", "btm_b", {"cab_id": 1}),
+                ),
+            )
+        )
+
+
+def test_duplicate_equipment_for_same_cab_rejected_at_config() -> None:
+    data = valid_config()
+    data["train"]["equipment"].append({"type": "btm", "cab_id": 10})
+    with pytest.raises(ConfigError, match="duplicate 'btm' for cab 10"):
+        train_config_from_data(data)
 
 
 @pytest_asyncio.fixture
 async def configured_client(monkeypatch):
     monkeypatch.setenv(
         TRAIN_CONFIG_ENV,
-        encode_train_config(train_config_from_data(valid_config())),
+        encode_config(train_config_from_data(valid_config())),
     )
     async with running_app(use_environment_train_config=True) as client:
         yield client
@@ -109,6 +144,13 @@ async def test_environment_train_config_reaches_public_snapshot(configured_clien
         "stcs_atp_duo_10",
         "driving_system_10",
     }
+
+
+def test_train_section_rejects_nested_atp_key() -> None:
+    data = valid_config()
+    data["train"]["atp"] = [{"cab_id": 10, "host": "127.0.0.1", "port": 9101}]
+    with pytest.raises(ConfigError, match="top-level 'atp'"):
+        train_config_from_data(data)
 
 
 @pytest.mark.parametrize(

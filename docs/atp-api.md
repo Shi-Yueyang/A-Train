@@ -15,14 +15,15 @@ browser-facing HTTP/WebSocket API is a separate contract (`web-api.md`).
 
 | Aspect         | Rule                                                                                                            |
 | -------------- | --------------------------------------------------------------------------------------------------------------- |
-| Transport      | TCP, one persistent connection per cab.                                                                         |
+| Transport      | TCP, one persistent connection per ATP peer.                                                                    |
 | TCP server     | The**ATP process**. It accepts exactly one connection at a time.                                          |
 | TCP client     | The**simulator**. It dials each configured endpoint and keeps the connection open.                        |
 | Stream content | NDJSON: one JSON object per line,`\n`-terminated, UTF-8.                                                      |
-| Cab identity   | Lives in the endpoint configuration (which host:port is dialed). One endpoint = one `(train_id, cab_id)` pair on the simulator's single train. |
+| Channel identity | **None.** Connections carry no cab or train binding; the endpoint list is pure network addressing. Equipment addressing and command targets live entirely in the message payloads. |
 
 The channel is live the moment TCP opens, and the simulator starts publishing
-immediately.
+immediately. Every READY peer receives the **same** whole-train broadcast:
+all channels carry byte-identical messages.
 
 ### 1.2 Framing rules
 
@@ -80,10 +81,13 @@ Unrecognized `type` values on either side are answered with `ERROR`
 
 ### 2.2 Identity fields
 
-Outbound simulator messages always carry the channel's own `train_id` /
-`cab_id` where the message type defines them. Inbound ATP messages may carry
-`train_id` / `cab_id`; if present they **must match the channel**, otherwise
-the whole message is rejected (`invalid_atp_command`, §5.1).
+The wire protocol carries no train identity: the simulator hosts exactly one
+train and the ATP_COMMAND `cab_id` names the train implicitly. `cab_id` is
+**required** on every inbound `ATP_COMMAND` and is the sole routing selector
+for cab-scoped actions. Outbound `TRAIN_STATE` equipment entries carry
+`cab_id` so each peer can pick the instances it cares out of the identical
+broadcast. An inbound message carrying `train_id`, or missing/invalid
+`cab_id`, is rejected (`invalid_atp_command`, §5.1).
 
 ### 2.3 Units
 
@@ -109,45 +113,36 @@ These three inbound/outbound message families are the complete protocol; unknown
 
 ## 3. Simulator → ATP Messages
 
-Cab key state, activation, and facing are native train state:
-`TRAIN_STATE.cabs` carries one `{cab_id, active, key, facing}` entry per
-configured cab. `key` reports whether that cab's key is inserted.
-`TRAIN_STATE.equipment` is a flat array of independently addressed equipment
-entries. Each entry has `type`, `key`, and `state` fields. For example, the
-BTM state for cab 1 is the entry with `type: "btm"` and `key: "btm_1"`, and
-the cab 1 driver room is the entry with `type: "driving_system"` and
-`key: "driving_1"`; ATP must not look for a type-grouped `equipment.btm`
-object; select the entry whose key is the target instance instead.
+Cab key state, activation, and facing are native train state and are **not
+sent** on the ATP channel; they remain observable through REST and WebSocket
+(`web-api.md`). `TRAIN_STATE.equipment` is a flat array carrying **only the
+ATP-relevant equipment instances**: those whose `type` is `btm` or
+`stcs_atp_duo` / `stcs_atp_solo`. All other equipment (doors, driving
+systems, ...) is filtered out before sending. Each entry has `type`,
+`cab_id`, and `state` fields, and peers address instances by the
+`(type, cab_id)` pair: the BTM for cab 1 is the entry with
+`type: "btm"` and `cab_id: 1`. Internal instance keys are never sent. ATP
+must not look for type-grouped `equipment.btm` objects; select the entry by
+type and cab. Each `(type, cab_id)` pair is unique on the train, enforced at
+configuration time.
 
 ### 3.1 TRAIN_STATE — cyclic world observation
 
-Sent once per channel for every snapshot the core publishes (after each fixed
-simulation step while running, and after each immediately-applied control),
-while the channel is READY.
+Sent once per READY peer for every snapshot the core publishes (after each
+fixed simulation step while running, and after each immediately-applied
+control). All peers receive the same whole-train content.
 
 ```json
 {
   "type": "train_state",
-  "train_id": "TRAIN001",
-  "cab_id": 1,
   "speed": 22.31,
   "acceleration": -0.15,
-  "position": 15320.4,
+  "position": 15320.40,
   "direction": "forward",
-  "cabs": [
-    { "cab_id": 1, "active": true, "key": false, "facing": "forward" },
-    { "cab_id": 2, "active": false, "key": true, "facing": "backward" }
-  ],
   "equipment": [
-    { "type": "door", "key": "left_door", "state": { "state": "closed" } },
-    { "type": "door", "key": "right_door", "state": { "state": "closed" } },
-    { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
-    { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
-    { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "state": {
-        "last_command": "0001000",
-        "train_out_signal": "110000000000000000000000000000",
-        "train_in_states": [ { "name": "ato_enable", "value": true } ],
-        "train_out_states": [ { "name": "c2_control_state_2_2", "value": false } ]
+    { "type": "btm", "cab_id": 1, "state": { "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "stcs_atp_duo", "cab_id": 1, "state": {
+        "train_out_signal": "110000000000000000000000000000"
     } }
   ]
 }
@@ -155,25 +150,23 @@ while the channel is READY.
 
 | Field            | Type   | Notes                                                                                                                                                  |
 | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `train_id`     | string | The channel's train.                                                                                                                                   |
-| `cab_id`       | int    | The channel's cab; both cabs of one train get identical physical values, differing only in`cab_id`.                                                  |
 | `speed`        | number | m/s, signed: negative means rearward travel.                                                                                                           |
 | `acceleration` | number | m/s² of the last integrated step.                                                                                                                     |
 | `position`     | number | m along the linear track from the fixed origin; may decrease with rearward motion.                                                                    |
 | `direction`    | string | Derived from the speed sign: `"forward"`, `"backward"`, or `"stopped"`.                                                                              |
-| `cabs`         | array | Native cab state: one `{cab_id, active, key, facing}` entry per configured cab, in configured order. `key` reports key insertion and `facing` is the cab's immutable track facing. |
-| `equipment`    | array | Flat canonical equipment entries, each shaped as `{type, key, state}`. |
+| `equipment`    | array | Whole-train equipment entries, each shaped as `{type, cab_id, state}`: only `btm` and `stcs_atp_duo` / `stcs_atp_solo` instances. An `stcs_atp_*` entry's `state` is only `{train_out_signal}` -- the raw `last_command` and the named state maps stay in REST/WebSocket (§4.2). |
 
-`TRAIN_STATE` remains a read-only observation: ATP derives its protection decisions from it and acts back on the train only through `ATP_COMMAND` (§4.1; architectural boundary §4.1 of architectural.md). The simulator publishes the full equipment state because ATP peers may need more than the ATP protection flags alone.
+`TRAIN_STATE` remains a read-only observation: ATP derives its protection decisions from it and acts back on the train only through `ATP_COMMAND` (§4.1; architectural boundary §4.1 of architectural.md). The simulator filters every other equipment type out of the wire message; the full equipment state remains available through the Web API (`web-api.md`).
 
 BTM payloads are carried as part of the train snapshot itself under the
-entry whose `key` identifies the BTM instance, such as `btm_1`, in `TRAIN_STATE`. The simulator models the BTM antenna,
-delivers the bytes, and treats the payload as opaque (design principle "BTM is
-opaque", architectural.md §7.3); interpretation belongs entirely to ATP.
+entry whose `(type, cab_id)` pair is `("btm", N)`, in `TRAIN_STATE`. The
+simulator models the BTM antenna and delivers the bytes but treats the
+payload as opaque (design principle "BTM is opaque", architectural.md §7.3);
+interpretation belongs entirely to ATP.
 
 A BTM delivery is made through the simulator's REST equipment endpoint
 (`web-api.md`, `POST /api/trains/{id}/equipment/btm_1`), and the latest BTM
-state appears in the next published `TRAIN_STATE` for that cab.
+state appears in the next published `TRAIN_STATE`.
 
 ---
 
@@ -181,13 +174,13 @@ state appears in the next published `TRAIN_STATE` for that cab.
 
 ### 4.1 ATP_COMMAND — the only inbound action
 
-ATP requests a normalized train action on its own cab's channel. ATP asks;
-the physics decides the result.
+ATP requests a normalized train action and names the acting cab in the
+message; the connection carries no cab binding. ATP asks; the physics decides
+the result.
 
 ```json
 {
   "type": "atp_command",
-  "train_id": "TRAIN001",
   "cab_id": 1,
   "drive_demand": -1.0,
   "door": "close",
@@ -197,27 +190,31 @@ the physics decides the result.
 
 | Field            | Type   | Required                                                                | Validation                                                  |
 | ---------------- | ------ | ----------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `train_id`     | string | no                                                                      | If present, must equal the channel's train.                 |
-| `cab_id`       | int    | no                                                                      | If present, must equal the channel's cab.                   |
+| `cab_id`       | int    | **yes**                                                                 | Positive integer. Must match one of the train's cabs; an unconfigured cab is rejected by the core (§4.1 step 4). |
 | `drive_demand` | number | at least one of`drive_demand` / `door` / `atp_signal` is required | Finite,`-1.0 ≤ v ≤ 1.0`, JSON number (not bool/string). |
 | `door`         | string | see above                                                               | Exactly`"open"` or `"close"`.                           |
 | `atp_signal`   | string | see above                                                               | Non-empty, every character`"0"` or `"1"` (§4.2).       |
+
+A `train_id` field is **not part of the protocol** and makes the whole
+message invalid.
 
 Processing pipeline (manager → core):
 
 1. Validate framing and fields (fail → `ERROR invalid_atp_command`, nothing
    applied).
-2. Map to the transport-neutral commands the REST API uses:
-   - `drive_demand` → `TrainControlCommand(train_id, TrainControl(cab_id, drive_demand))`
-  - `door` → two `EquipmentCommand` values targeting `left_door` and `right_door` with the same command
-  - `atp_signal` → one STCS ATP command containing the raw signal (§4.2)
-     A message may carry several fields; each contributes its commands in the
-     order listed above.
+2. Map to the transport-neutral commands the REST API uses, stamping the
+   domain train identity from the core:
+   - `drive_demand` → `TrainControlCommand(train, TrainControl(cab_id, drive_demand))`
+   - `door` → two `EquipmentCommand` values targeting `left_door` and `right_door` with the same command
+   - `atp_signal` → one STCS ATP command targeting the named `cab_id`, containing the raw signal (§4.2)
+      A message may carry several fields; each contributes its commands in the
+      order listed above.
 3. Submit to `SimulationCore`'s command queue. Only `run_loop()` consumes the
    queue; ATP commands interleave with browser commands in arrival order and
    are applied at the same point in the update cycle (immediately, then on
    every fixed step).
-4. If the core rejects a command (e.g. unknown train identity or cab), the ATP peer gets
+4. If the core rejects a command (e.g. a cab that is not configured on the
+   train, or has no STCS ATP instance), the ATP peer gets
    `ERROR command_rejected`; the other commands in the same message are
    unaffected.
 
@@ -232,8 +229,9 @@ Semantics of the two controls:
 - `door`: flips the train-level door equipment state immediately; door state
   and movement are independent in this version.
 
-All cabs carry equal authority: the same request from cab 1 or cab 2 has the
-same effect; cabs are identity (§3.3 architectural).
+All cabs carry equal authority: any peer may command any configured cab --
+the `cab_id` in the message is a routing selector, not an
+authorization check; cabs are identity (§3.3 architectural).
 
 ### 4.2 atp_signal — binary protection signals
 
@@ -251,11 +249,12 @@ The ATP manager performs the transport translation in
 `src/a_train/adapters/atp/manager.py`.
 The addressed cab's `stcs_atp_duo_<cab_id>` component
 (`domain/equipment/stcs_atp.py`) then applies each bit to a plain internal
-boolean state (the *train-in states*). Both state maps
-are exposed on the wire as `StcsAtpSnapshot.train_in_states` and
-`train_out_states`: `{name, value}` entries in bit order, visible in
-`TRAIN_STATE`, REST, and WebSocket. The train-in states are reset to `false`
-by `reset`, and a shorter signal leaves unmentioned bit positions unchanged.
+boolean state (the *train-in states*). Both state maps are exposed as
+`StcsAtpSnapshot.train_in_states` and `train_out_states`: `{name, value}`
+entries in bit order, visible in REST and WebSocket. The ATP wire format
+carries only the compact `train_out_signal` bit string (§3.1). The train-in
+states are reset to `false` by `reset`, and a shorter signal leaves
+unmentioned bit positions unchanged.
 
 | Bit index | Train-in state |
 | --------- | -------------- |
@@ -277,7 +276,8 @@ by `reset`, and a shorter signal leaves unmentioned bit positions unchanged.
 | 15 | `c2_zero_speed` |
 | 16 | `turnback_indicator` |
 
-The raw signal is also retained as `last_command` for diagnostics. An empty or
+The raw signal is also retained as `last_command` for diagnostics (REST and
+WebSocket only; it is filtered out of `TRAIN_STATE`, §3.1). An empty or
 other non-binary command is invalid.
 
 The STCS ATP component also maintains a plain internal `train_out_states` map
@@ -370,23 +370,23 @@ The simulator logs the message (`WARNING`) and the session continues.
 ## 5. ERROR (simulator → ATP)
 
 Any rejected inbound message is answered -- where the framing survives --
-without stopping the simulation or any other cab's connection.
+without stopping the simulation or any other connection.
 
 ```json
 {
   "type": "error",
   "code": "invalid_atp_command",
-  "detail": "drive_demand must be a finite value in [-1.0, 1.0]",
-  "train_id": "TRAIN001",
-  "cab_id": 1
+  "detail": "drive_demand must be a finite value in [-1.0, 1.0]"
 }
 ```
 
-| Field                     | Type         | Notes                                   |
-| ------------------------- | ------------ | --------------------------------------- |
-| `code`                  | string       | Machine-readable category, table below. |
-| `detail`                | string       | Human-readable explanation.             |
-| `train_id` / `cab_id` | string / int | Always included on a live channel.      |
+| Field      | Type   | Notes                                   |
+| ---------- | ------ | --------------------------------------- |
+| `code`   | string | Machine-readable category, table below. |
+| `detail` | string | Human-readable explanation.             |
+
+The envelope carries no identity fields: the session that asked is the
+session that is answered.
 
 ### 5.1 Code table
 
@@ -394,7 +394,7 @@ without stopping the simulation or any other cab's connection.
 | ------------------------ | ----------------------------------------------------------------- | ---------------------------------------------------- |
 | `malformed_message`    | Line is not valid JSON / not an object / has no`type`.          | Session continues.                                   |
 | `unknown_message_type` | `type` is not in the catalog (§2.4).                           | Session continues.                                   |
-| `invalid_atp_command`  | Identity mismatch or field validation failure (§4.1 step 1).     | Nothing applied; session continues.                  |
+| `invalid_atp_command`  | Missing/invalid `cab_id`, a forbidden `train_id` field, or a field validation failure (§4.1 step 1). | Nothing applied; session continues.                  |
 | `command_rejected`     | The simulation core refused the resulting command (§4.1 step 4). | The other command of the same message still applies. |
 
 ---
@@ -403,29 +403,42 @@ without stopping the simulation or any other cab's connection.
 
 ### 6.1 Configuring endpoints
 
-Endpoints are configured at startup, one per cab
+Endpoints are configured in the train configuration file passed to
+`--train-config`, as the top-level `atp` array of ATP peers to dial
 (`README.md` shows the CLI usage; `config.py` defines validation):
 
-```bash
-python -m a_train run --atp 1=127.0.0.1:9101 --atp 2=127.0.0.1:9102
+```json
+{
+  "train": { "train_id": "TRAIN001", "cabs": [ ... ], "physics": { ... } },
+  "atp": [
+    { "host": "127.0.0.1", "port": 9101 },
+    { "host": "127.0.0.1", "port": 9102 }
+  ]
+}
 ```
 
-- `--atp CAB_ID=HOST:PORT` is repeatable; a duplicate `cab_id` fails startup.
-- Validation: `cab_id` ≥ 1, non-empty `host`, and `port` 1-65535. The single
-  train identity is added by the simulator to protocol messages.
-- The default configuration (no endpoints) starts the simulator with zero ATP
+```bash
+python -m a_train run --train-config train.json
+```
+
+- Each entry has exactly `host` and `port`; unknown fields (such as a legacy
+  `cab_id`) fail startup. The whole file is validated before the server
+  starts.
+- Validation: non-empty `host` and `port` 1-65535. A peer is never bound to a
+  cab: every READY peer receives the same broadcast and every peer may
+  command any cab. Any number of peers may be configured.
+- A missing or empty `atp` array starts the simulator with zero ATP
   connections.
 
-The train itself may be configured independently with `--train-config FILE`.
-That UTF-8 JSON file defines the single train's cabs, physics, and equipment
-instances; it does not configure TCP endpoints. Both options may be supplied
-to the same `run` command.
+The `train` object in the same file defines the single train's cabs, physics,
+and equipment instances; it is unrelated to the ATP endpoints and required in
+every configuration file.
 
 ### 6.2 Channel status
 
-`GET /api/atp/status` reports every configured endpoint with its current
-lifecycle state (IDLE / CONNECTING / READY / DISCONNECTED / STOPPED) and a
-`ready` boolean; see `web-api.md`.
+`GET /api/atp/status` reports every configured endpoint (`host`, `port`)
+with its current lifecycle state (IDLE / CONNECTING / READY / DISCONNECTED /
+STOPPED) and a `ready` boolean; see `web-api.md`.
 
 ---
 
@@ -447,13 +460,13 @@ lifecycle state (IDLE / CONNECTING / READY / DISCONNECTED / STOPPED) and a
 ATP process starts (TCP server)          simulator connects, channel READY
 simulator ──> {"type":"train_state",...}          (every published snapshot)
 simulator ──> {"type":"train_state",...}
-ATP     ──> {"type":"atp_command","drive_demand":-1.0}
+ATP     ──> {"type":"atp_command","cab_id":1,"drive_demand":-1.0}
 simulator ──> {"type":"train_state","acceleration":-2.0,...}  (deceleration applied)
-simulator ──> {"type":"train_state",...,"equipment":[...,{"type":"btm","key":"btm_1","state":{"cab_id":1,"pending":true,"payload_b64":"ASOk/wCBcg==","received_count":1}}]}
-ATP     ──> {"type":"atp_command","door":"open","drive_demand":0.5}
+simulator ──> {"type":"train_state",...,"equipment":[...,{"type":"btm","cab_id":1,"state":{"pending":true,"payload_b64":"ASOk/wCBcg==","received_count":1}}]}
+ATP     ──> {"type":"atp_command","cab_id":1,"door":"open","drive_demand":0.5}
               (two commands: control, then equipment)
-ATP     ──> {"type":"atp_command","atp_signal":"0001000"}
-              (emergency brake asserted on bit 3; state lands in the core)
-simulator ──> {"type":"train_state",...,"equipment":[...,{"type":"stcs_atp_duo","key":"stcs_atp_duo_1","state":{"last_command":"0111",...,"train_in_states":[...],"train_out_states":[...]}}]}
+ATP     ──> {"type":"atp_command","cab_id":1,"atp_signal":"0001000"}
+              (protection bits asserted; state lands in the core)
+simulator ──> {"type":"train_state",...,"equipment":[...,{"type":"stcs_atp_duo","cab_id":1,"state":{"train_out_signal":"0110001111..."}}]}
 simulator ──> {"type":"error","code":"invalid_atp_command",...}  (on a bad request)
 ```

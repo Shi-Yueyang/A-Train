@@ -37,11 +37,17 @@ def encode_message(message: Mapping[str, Any]) -> bytes:
 # -- Outbound message builders (atp-api.md §3, §5) -------------------------------
 
 
+_ATP_EQUIPMENT_TYPES = ("btm", "stcs_atp")
+
+
 def _serialize_equipment_state(value: object) -> object:
     """Convert frozen equipment snapshot values to JSON-safe Python objects."""
 
     if dataclasses.is_dataclass(value):
-        return {field.name: _serialize_equipment_state(getattr(value, field.name)) for field in dataclasses.fields(value)}
+        return {
+            field.name: _serialize_equipment_state(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
     if isinstance(value, tuple):
         return [_serialize_equipment_state(item) for item in value]
     if isinstance(value, list):
@@ -49,40 +55,48 @@ def _serialize_equipment_state(value: object) -> object:
     return value
 
 
-def make_train_state(train_id: str, cab_id: int, train: Any) -> dict[str, Any]:
-    """One ``TRAIN_STATE`` line from a train snapshot (atp-api.md §3.1)."""
+def _is_atp_equipment(entry: Any) -> bool:
+    """ATP sees only BTM and STCS ATP equipment (atp-api.md §3)."""
+
+    eq_type = getattr(entry, "type", None)
+    return isinstance(eq_type, str) and eq_type.startswith(_ATP_EQUIPMENT_TYPES)
+
+
+def _atp_equipment_entry(entry: Any) -> dict[str, Any]:
+    """One wire entry addressed by ``(type, cab_id)``; internal keys stay home."""
+
+    state = _serialize_equipment_state(entry.state)
+    if isinstance(state, dict):
+        state.pop("cab_id", None)
+        if entry.type.startswith("stcs_atp"):
+            # ATP receives only the feedback line; the raw command and named
+            # state maps stay in REST/WebSocket (atp-api.md §3.1).
+            state = {"train_out_signal": state["train_out_signal"]}
+    return {"type": entry.type, "cab_id": entry.cab_id, "state": state}
+
+
+def make_train_state(train: Any) -> dict[str, Any]:
+    """One whole-train ``TRAIN_STATE`` line from a train snapshot (atp-api.md §3.1)."""
 
     message: dict[str, Any] = {
         "type": "train_state",
-        "train_id": train_id,
-        "cab_id": cab_id,
         "speed": train.speed,
         "acceleration": train.acceleration,
         "position": train.position,
         "direction": train.direction,
     }
-    cabs = getattr(train, "cabs", ())
-    if cabs:
-        message["cabs"] = [_serialize_equipment_state(value) for value in cabs]
-    equipment = getattr(train, "equipment", ())
+    equipment = [
+        _atp_equipment_entry(item)
+        for item in getattr(train, "equipment", ())
+        if _is_atp_equipment(item)
+    ]
     if equipment:
-        message["equipment"] = [_serialize_equipment_state(value) for value in equipment]
+        message["equipment"] = equipment
     return message
 
 
-def make_error(
-    code: str,
-    detail: str,
-    *,
-    train_id: str | None = None,
-    cab_id: int | None = None,
-) -> dict[str, Any]:
-    message: dict[str, Any] = {"type": "error", "code": code, "detail": detail}
-    if train_id is not None:
-        message["train_id"] = train_id
-    if cab_id is not None:
-        message["cab_id"] = cab_id
-    return message
+def make_error(code: str, detail: str) -> dict[str, Any]:
+    return {"type": "error", "code": code, "detail": detail}
 
 
 # -- Inbound validation ---------------------------------------------------------
@@ -90,22 +104,21 @@ def make_error(
 
 def parse_atp_command(
     message: Mapping[str, Any],
-    train_id: str,
-    cab_id: int,
-) -> tuple[float | None, str | None, str | None]:
-    """Validate a ``ATP_COMMAND`` on a channel bound to (train_id, cab_id).
+) -> tuple[int, float | None, str | None, str | None]:
+    """Validate one ``ATP_COMMAND`` line (atp-api.md §4.1).
 
-    Returns ``(drive_demand, door, atp_signal)``; at least one is always set.
-    Raises ValueError (reported as ``ERROR`` by the caller, atp-api.md §5) on
-    identity mismatch or an invalid or missing payload.
+    Returns ``(cab_id, drive_demand, door, atp_signal)``; ``cab_id`` is
+    always set and at least one action is always present. Raises ValueError
+    (reported as ``ERROR`` by the caller, atp-api.md §5) on an invalid or
+    missing payload.
     """
 
-    msg_train = message.get("train_id")
-    if msg_train is not None and msg_train != train_id:
-        raise ValueError(f"message train_id {msg_train!r} does not match channel {train_id!r}")
-    msg_cab = message.get("cab_id")
-    if msg_cab is not None and msg_cab != cab_id:
-        raise ValueError(f"message cab_id {msg_cab!r} does not match channel cab {cab_id}")
+    if "train_id" in message:
+        raise ValueError("train_id is not part of the ATP protocol")
+
+    cab_id = message.get("cab_id")
+    if isinstance(cab_id, bool) or not isinstance(cab_id, int) or cab_id < 1:
+        raise ValueError(f"cab_id is required and must be a positive integer, got {cab_id!r}")
 
     drive_demand = message.get("drive_demand")
     if drive_demand is not None:
@@ -125,7 +138,10 @@ def parse_atp_command(
             raise ValueError(f"atp_signal must be a non-empty string, got {atp_signal!r}")
         normalized = atp_signal.replace("_", "")
         if not normalized:
-            raise ValueError(f"atp_signal must contain at least one '0' or '1' after removing separators, got {atp_signal!r}")
+            raise ValueError(
+                "atp_signal must contain at least one '0' or '1' "
+                f"after removing separators, got {atp_signal!r}"
+            )
         if not all(c in "01" for c in normalized):
             raise ValueError(
                 f"atp_signal must consist of '0' and '1' characters, got {atp_signal!r}"
@@ -134,4 +150,4 @@ def parse_atp_command(
 
     if drive_demand is None and door is None and atp_signal is None:
         raise ValueError("atp_command requires drive_demand, door or atp_signal")
-    return drive_demand, door, atp_signal
+    return cab_id, drive_demand, door, atp_signal

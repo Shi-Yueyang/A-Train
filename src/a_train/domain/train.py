@@ -219,6 +219,15 @@ class Train:
             for eq_cfg in config.equipment_configs
             if eq_cfg.enabled
         }
+        cab_scoped: set[tuple[str, int]] = set()
+        for equipment in self._equipment.values():
+            cab_id = getattr(equipment, "cab_id", None)
+            if cab_id is None:
+                continue
+            address = (equipment.type, cab_id)
+            if address in cab_scoped:
+                raise ValueError(f"duplicate '{equipment.type}' equipment for cab {cab_id}")
+            cab_scoped.add(address)
 
         self._position = config.initial_position
         self._speed = config.initial_speed
@@ -421,7 +430,12 @@ class Train:
         """
 
         return tuple(
-            EquipmentSnapshot(type=equipment.type, key=key, state=equipment.read_state())
+            EquipmentSnapshot(
+                type=equipment.type,
+                key=key,
+                state=equipment.read_state(),
+                cab_id=getattr(equipment, "cab_id", None),
+            )
             for key, equipment in self._equipment.items()
         )
 
