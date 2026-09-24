@@ -142,3 +142,88 @@ async def test_reset_restores_the_box_default_position() -> None:
         snap = (await c.get("/api/trains/TRAIN001")).json()
         assert _state(snap, "switch_box_1")["position"] == "c2"
         assert _switch_bits(snap)["system_switch_c2"] is True
+
+
+async def _train(c) -> dict:
+    return (await c.get("/api/trains/TRAIN001")).json()
+
+
+def _out_bits(snap: dict, key: str = "stcs_atp_duo_1") -> dict[str, dict]:
+    return {s["name"]: s for s in _state(snap, key)["train_out_states"]}
+
+
+C2_STATES = (
+    "c2_control_state_1_1",
+    "c2_control_state_1_2",
+    "c2_control_state_2_1",
+    "c2_control_state_2_2",
+)
+
+
+async def _set_box(c, position: str) -> None:
+    r = await c.post(
+        "/api/trains/TRAIN001/equipment/switch_box_1", json={"system_switch": position}
+    )
+    assert r.status_code == 200
+
+
+def _c2_values(snap: dict) -> dict[str, bool]:
+    bits = _out_bits(snap)
+    return {name: bits[name]["value"] for name in C2_STATES}
+
+
+async def test_control_state_bits_follow_the_system_switch() -> None:
+    async with running_app([T2]) as c:
+        await _manual_start(c)
+
+        # The default C2 position drives group 1 high; these rows are STCS
+        # internal derivations, so they are blockable.
+        assert _c2_values(await _train(c)) == {
+            "c2_control_state_1_1": True,
+            "c2_control_state_1_2": True,
+            "c2_control_state_2_1": False,
+            "c2_control_state_2_2": False,
+        }
+        assert _out_bits(await _train(c))["c2_control_state_1_1"]["blockable"] is True
+
+        await _set_box(c, "cbtc")
+        assert _c2_values(await _train(c)) == {
+            "c2_control_state_1_1": False,
+            "c2_control_state_1_2": False,
+            "c2_control_state_2_1": True,
+            "c2_control_state_2_2": True,
+        }
+
+        await _set_box(c, "auto")
+        assert not any(_c2_values(await _train(c)).values())
+
+        await _set_box(c, "c2")
+
+        # A block freezes its row mid-signal: switching to CBTC flips the
+        # unblocked partner rows while the frozen row keeps its settled 1.
+        r = await c.post(
+            "/api/trains/TRAIN001/equipment/stcs_atp_duo_1",
+            json={"block": ["c2_control_state_1_1"]},
+        )
+        assert r.status_code == 200
+        await _set_box(c, "cbtc")
+        bits = _out_bits(await _train(c))
+        assert bits["c2_control_state_1_1"]["value"] is True
+        assert bits["c2_control_state_1_1"]["blocked"] is True
+        assert bits["c2_control_state_1_2"]["value"] is False
+
+        # Unblock: the fold re-catches the switch on the same application.
+        r = await c.post(
+            "/api/trains/TRAIN001/equipment/stcs_atp_duo_1",
+            json={"unblock": ["c2_control_state_1_1"]},
+        )
+        healed = _out_bits(r.json())["c2_control_state_1_1"]
+        assert healed["value"] is False and healed["blocked"] is False
+
+        await c.post("/api/simulation/reset")
+        assert _c2_values(await _train(c)) == {
+            "c2_control_state_1_1": True,
+            "c2_control_state_1_2": True,
+            "c2_control_state_2_1": False,
+            "c2_control_state_2_2": False,
+        }
