@@ -142,7 +142,7 @@ control). All peers receive the same whole-train content.
   "equipment": [
     { "type": "btm", "cab_id": 1, "state": { "pending": false, "payload_b64": null, "received_count": 0 } },
     { "type": "stcs_atp_duo", "cab_id": 1, "state": {
-        "train_out_signal": "110000000000000000000000000000"
+        "train_out_signal": "110110000000000000000000000000"
     } }
   ]
 }
@@ -299,8 +299,8 @@ following feedback states are derived from ATP command states:
 `emergency_brake_1` is active and `true` otherwise. Likewise,
 `emergency_brake_2_inner_feedback` is `false` when `emergency_brake_2` is
 active and `true` otherwise.
-`emergency_brake_feedback` is active-low: it is `false` when either emergency
-brake is active and `true` when both emergency brakes are clear, and
+`emergency_brake_feedback` aggregates the pair: it is `true` when either
+emergency brake is active and `false` when both are clear, and
 `service_brake_7_feedback` is active-low: it is `false` when
 `maximum_service_brake_7` is active and `true` otherwise:
 

@@ -542,7 +542,7 @@ Do not add protocol-specific behavior to an equipment component; adapters
 translate protocol data into equipment commands and publish snapshot data.
 
 When an equipment protocol derives its own output signals from state it holds
-(the STCS ATP inverted brake feedbacks and sleep), express the
+(the STCS ATP brake feedbacks and sleep), express the
 derivations as declarative rows on the equipment's signal table and evaluate
 them in one generic read-time fold over the asserted store; do not special-case
 variants in code and leave mutation paths with no recompute obligation. Each

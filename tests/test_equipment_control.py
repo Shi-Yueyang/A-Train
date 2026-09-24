@@ -351,7 +351,7 @@ async def test_block_freezes_feedback_while_the_protection_brake_still_bites() -
         # are still re-established against the operator's override.
         status, snap = await _equipment(c, "stcs_atp_duo_1", train_out_signal="0000")
         assert status == 200
-        assert _atp_state(snap)["train_out_signal"][:4] == "1110"
+        assert _atp_state(snap)["train_out_signal"][:4] == "1100"  # ebfb: 0|0
 
         # Unblocking self-heals immediately (brake is still commanded).
         status, snap = await _equipment(c, "stcs_atp_duo_1", unblock=["service_brake_7_feedback"])
@@ -362,6 +362,26 @@ async def test_block_freezes_feedback_while_the_protection_brake_still_bites() -
         await c.post("/api/simulation/reset")
         after_reset = _out_bits(await _train(c))["service_brake_7_feedback"]
         assert after_reset["value"] is True and after_reset["blocked"] is False
+
+
+async def test_emergency_brake_feedback_aggregates_both_brake_inputs() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        async def eb_feedback() -> bool:
+            return _out_bits(await _train(c))["emergency_brake_feedback"]["value"]
+
+        assert await eb_feedback() is False  # both clear
+        await _equipment(c, "stcs_atp_duo_1", command="100")  # emergency_brake_1 active
+        assert await eb_feedback() is True
+        await _equipment(c, "stcs_atp_duo_1", command="010")  # only emergency_brake_2 active
+        assert await eb_feedback() is True
+        bits = _out_bits(await _train(c))
+        # The inner feedbacks remain active-low per-brake inversions.
+        assert bits["emergency_brake_1_inner_feedback"]["value"] is True
+        assert bits["emergency_brake_2_inner_feedback"]["value"] is False
+        await _equipment(c, "stcs_atp_duo_1", command="000")
+        assert await eb_feedback() is False
 
 
 async def test_block_validation_is_all_or_nothing_and_scoped_to_derived_signals() -> None:
@@ -462,7 +482,7 @@ async def test_blocking_settles_the_derived_value_over_stale_assertions() -> Non
         # settles the live derived value, not the stale write.
         status, snap = await _equipment(c, "stcs_atp_duo_1", train_out_signal="0000")
         assert status == 200
-        assert _atp_state(snap)["train_out_signal"][:4] == "1111"  # shadowed
+        assert _atp_state(snap)["train_out_signal"][:4] == "1101"  # shadowed
 
         status, snap = await _equipment(c, "stcs_atp_duo_1", block=["service_brake_7_feedback"])
         assert status == 200

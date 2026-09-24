@@ -33,8 +33,8 @@ class Invert:
 
 
 @dataclass(frozen=True)
-class Nor:
-    """Derived train-out signal: ``not`` any of the named signals."""
+class Or:
+    """Derived train-out signal: ``any of`` the named signals."""
 
     sources: tuple[str, ...]
 
@@ -56,7 +56,7 @@ class SignalDefinition:
 
     name: str
     default: bool = False
-    derive: Invert | Nor | Follows | None = None
+    derive: Invert | Or | Follows | None = None
 
     @property
     def blockable(self) -> bool:
@@ -72,10 +72,10 @@ _EB2_FEEDBACK = SignalDefinition(
     "emergency_brake_2_inner_feedback", derive=Invert("emergency_brake_2")
 )
 _EB_FEEDBACK = SignalDefinition(
-    "emergency_brake_feedback", derive=Nor(("emergency_brake_1", "emergency_brake_2"))
+    "emergency_brake_feedback", derive=Or(("emergency_brake_1", "emergency_brake_2"))
 )
 _SB7_FEEDBACK = SignalDefinition(
-    "service_brake_7_feedback", derive=Invert("maximum_service_brake_7")
+    "service_brake_7_feedback", derive=Follows("maximum_service_brake_7")
 )
 _SLEEP = SignalDefinition("sleep_signal", derive=Invert("cab_activation"))
 
@@ -236,12 +236,12 @@ class StcsAtpBase:
                 out[definition.name] = self._evaluate(definition.derive, out)
         return out
 
-    def _evaluate(self, rule: Invert | Nor | Follows, out: dict[str, bool]) -> bool:
+    def _evaluate(self, rule: Invert | Or | Follows, out: dict[str, bool]) -> bool:
         if isinstance(rule, Follows):
             return self._bit(rule.source, out)
         if isinstance(rule, Invert):
             return not self._bit(rule.source, out)
-        return not any(self._bit(source, out) for source in rule.sources)
+        return any(self._bit(source, out) for source in rule.sources)
 
     def _bit(self, name: str, out: dict[str, bool]) -> bool:
         if name in self._train_in_states:

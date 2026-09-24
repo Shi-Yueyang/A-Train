@@ -67,7 +67,7 @@ commands:
     { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "cab_id": 1, "state": {
         "last_command": null,
         "last_command_time": null,
-        "train_out_signal": "110000000000000000000000000000",
+        "train_out_signal": "110110000000000000000000000000",
         "train_in_states": [ { "name": "emergency_brake_1", "value": false, "blockable": false, "blocked": false } ],
         "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": true, "blockable": true, "blocked": false } ]
     } }
@@ -354,7 +354,7 @@ by equipment type (§3.5).
     { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "state": {
         "last_command": null,
         "last_command_time": null,
-        "train_out_signal": "110000000000000000000000000000",
+        "train_out_signal": "110110000000000000000000000000",
         "train_in_states": [ { "name": "emergency_brake_1", "value": false, "blockable": false, "blocked": false } ],
         "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": true, "blockable": true, "blocked": false } ]
     } }
