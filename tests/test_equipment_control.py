@@ -425,6 +425,33 @@ async def test_block_freezes_handle_mirror_bits_per_instance() -> None:
         assert healed["value"] is False and healed["blocked"] is False
 
 
+async def test_blocking_settles_the_derived_value_over_stale_assertions() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        # An assertion onto a still-unblocked derived bit is shadowed by the
+        # rule and must not resurface when the bit later freezes: blocking
+        # settles the live derived value, not the stale write.
+        status, snap = await _equipment(c, "stcs_atp_duo_1", train_out_signal="0000")
+        assert status == 200
+        assert _atp_state(snap)["train_out_signal"][:4] == "1111"  # shadowed
+
+        status, snap = await _equipment(c, "stcs_atp_duo_1", block=["service_brake_7_feedback"])
+        assert status == 200
+        assert _out_bits(snap)["service_brake_7_feedback"]["value"] is True
+
+        # Assertions taken while blocked are the settled value's replacement.
+        status, snap = await _equipment(
+            c, "stcs_atp_duo_1", train_out_signal="000" + "1" + "0" * 26
+        )
+        assert _atp_state(snap)["train_out_signal"][3] == "1"
+
+        # Re-blocking an already-blocked row does not disturb its manual value.
+        await _equipment(c, "stcs_atp_duo_1", command="001")
+        status, snap = await _equipment(c, "stcs_atp_duo_1", block=["service_brake_7_feedback"])
+        assert _out_bits(snap)["service_brake_7_feedback"]["value"] is True
+
+
 async def test_block_freezes_sleep_derivation_from_cab_activation() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)

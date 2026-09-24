@@ -543,13 +543,16 @@ translate protocol data into equipment commands and publish snapshot data.
 
 When an equipment protocol derives its own output signals from state it holds
 (the STCS ATP inverted brake feedbacks, sleep, and handle mirrors), express the
-derivations as declarative rows on the equipment's signal table and apply them
-in one generic recompute pass; do not special-case variants in code. Each
-derivation is individually blockable through the control surface: a blocked
-derivation leaves its bit stale — manual assertions stick and unblock self-heals
-— mirroring the stale-not-zeroed wire doctrine of §3.7. Block state is ordinary
-equipment control state: it arrives only through typed controls on the command
-queue, is cleared by `reset()`, and is reported in signal snapshots.
+derivations as declarative rows on the equipment's signal table and evaluate
+them in one generic read-time fold over the asserted store; do not special-case
+variants in code and leave mutation paths with no recompute obligation. Each
+derivation is individually blockable through the control surface: blocking
+settles the current derived value into the asserted store — the component's one
+timing decision — so manual assertions then stick while the rule is shielded,
+and unblocking lets the rule shine through again immediately, mirroring the
+stale-not-zeroed wire doctrine of §3.7. Block state is ordinary equipment
+control state: it arrives only through typed controls on the command queue, is
+cleared by `reset()`, and is reported in signal snapshots.
 
 Keep snapshot extensions backward-compatible: add an optional frozen nested
 snapshot for new equipment rather than changing existing physical-state field

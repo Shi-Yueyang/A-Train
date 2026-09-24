@@ -1,16 +1,16 @@
 """STCS ATP protection state and train-output feedback.
 
-The component maintains the two protocol bit maps. Train-in bits are asserted
-verbatim by the ATP ``command`` string; train-out bits are either asserted by
-train-side state (doors, cabs, handles, operator panels) or *derived* by this
-component. Derived bits are declared as data on ``SignalDefinition`` rows, so
-duo and solo variants differ only by their protocol tables and the recompute
-pass is a generic interpreter over one table.
+The component maintains two protocol bit maps. Train-in bits are asserted
+verbatim by the ATP ``command`` string. The train-out map stores only what has
+been *asserted* into it (real-state mirrors, operator panels, and settled
+blocks); declared ``SignalDefinition`` rules are evaluated as a pure fold over
+that store at read time, so mutation paths carry no recompute obligation.
+Duo and solo variants differ only by their tables.
 
-A derived row is *blockable*: while blocked through the equipment API, the
-recompute pass leaves the bit at its stale value, so operator
-``train_out_signal`` assertions stick; unblocking self-heals the value on the
-next recompute pass.
+A derived row is *blockable*: blocking settles its current derived value into
+the store (the one timing decision in the component) and takes it out of the
+read-time fold, so operator ``train_out_signal`` assertions stick; unblocking
+lets the rule shine through again immediately.
 """
 
 from __future__ import annotations
@@ -59,8 +59,8 @@ _AXIS_INDEX = {"mode": 0, "direction": 1}
 class SignalDefinition:
     """One named boolean signal at a protocol-defined bit position.
 
-    ``derive`` declares the internal logic that writes this bit; rows without
-    a rule are plain asserted signals the operator already owns.
+    ``derive`` declares the rule that derives this bit's value at read time;
+    rows without a rule are plain asserted signals the operator owns.
     """
 
     name: str
@@ -122,7 +122,6 @@ class StcsAtpBase:
         self._train_in_states = {
             signal.name: signal.default for signal in self.ATP_TO_TRAIN_SIGNALS
         }
-        self._update_train_out_states()
 
     @property
     def key(self) -> str:
@@ -162,7 +161,6 @@ class StcsAtpBase:
                 )
             for signal, bit in zip(self.TRAIN_TO_ATP_SIGNALS, bits):
                 self._train_out_states[signal.name] = bit == "1"
-        self._update_train_out_states()
 
     def _apply_blocks(self, block: tuple[str, ...] | None, unblock: tuple[str, ...] | None) -> None:
         block_names = tuple(block or ())
@@ -170,6 +168,13 @@ class StcsAtpBase:
         for name in block_names + unblock_names:
             if not self._train_out_definition(name).blockable:
                 raise ValueError(f"stcs_atp signal is not blockable: {name}")
+        if block_names:
+            settled = self._effective_train_out_states()
+            for name in block_names:
+                # Only a newly blocked row settles: re-blocking keeps an
+                # already-frozen (possibly manual) value untouched.
+                if name not in self._blocked:
+                    self._train_out_states[name] = settled[name]
         self._blocked.update(block_names)
         self._blocked.difference_update(unblock_names)
 
@@ -188,7 +193,6 @@ class StcsAtpBase:
             return
         self._set_train_out_state("cab_activation", state.active)
         self._set_train_out_state("key_activation", state.key_inserted)
-        self._update_train_out_states()
 
     def _apply_handle_feedback(self, control: StcsAtpControl) -> None:
         cab_id = control.cab_id if control.cab_id is not None else self._cab_id
@@ -201,28 +205,35 @@ class StcsAtpBase:
             raise ValueError(f"invalid driving direction feedback: {direction!r}")
         self._handles[cab_id] = (mode, direction)
 
-    def _update_train_out_states(self) -> None:
-        """Re-derive every unblocked declared train-out signal, in table order."""
-        for definition in self.TRAIN_TO_ATP_SIGNALS:
-            if definition.derive is None or definition.name in self._blocked:
-                continue
-            self._train_out_states[definition.name] = self._evaluate(definition.derive)
+    def _effective_train_out_states(self) -> dict[str, bool]:
+        """The train-out map as seen by every reader.
 
-    def _evaluate(self, rule: Invert | Nor | HandleMirror) -> bool:
+        The store keeps asserted values; unblocked derived rows are folded
+        over it in table (declaration) order, so a rule may reference an
+        earlier output row as well as any train-in bit. Pure: derives on
+        read, mutates nothing.
+        """
+        out = dict(self._train_out_states)
+        for definition in self.TRAIN_TO_ATP_SIGNALS:
+            if definition.derive is not None and definition.name not in self._blocked:
+                out[definition.name] = self._evaluate(definition.derive, out)
+        return out
+
+    def _evaluate(self, rule: Invert | Nor | HandleMirror, out: dict[str, bool]) -> bool:
         if isinstance(rule, Invert):
-            return not self._bit(rule.source)
+            return not self._bit(rule.source, out)
         if isinstance(rule, Nor):
-            return not any(self._bit(source) for source in rule.sources)
+            return not any(self._bit(source, out) for source in rule.sources)
         index = _AXIS_INDEX[rule.axis]
         if rule.cab is not None:
             handle = self._handles.get(rule.cab)
             return handle is not None and handle[index] == rule.value
         return any(handle[index] == rule.value for handle in self._handles.values())
 
-    def _bit(self, name: str) -> bool:
+    def _bit(self, name: str, out: dict[str, bool]) -> bool:
         if name in self._train_in_states:
             return self._train_in_states[name]
-        return self._train_out_states.get(name, False)
+        return out.get(name, False)
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
         intents: list[EquipmentIntent] = []
@@ -247,13 +258,14 @@ class StcsAtpBase:
 
     @property
     def train_out_states(self) -> dict[str, bool]:
-        return self._train_out_states.copy()
+        return self._effective_train_out_states()
 
     def read_state(self) -> StcsAtpSnapshot:
+        effective = self._effective_train_out_states()
         train_out = tuple(
             SignalState(
                 name=definition.name,
-                value=self._train_out_states[definition.name],
+                value=effective[definition.name],
                 blockable=definition.blockable,
                 blocked=definition.name in self._blocked,
             )
@@ -281,7 +293,6 @@ class StcsAtpBase:
         self._train_out_states = {
             signal.name: signal.default for signal in self.TRAIN_TO_ATP_SIGNALS
         }
-        self._update_train_out_states()
 
 
 class StcsAtpDuo(StcsAtpBase):
