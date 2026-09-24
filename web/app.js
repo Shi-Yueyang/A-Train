@@ -260,6 +260,11 @@ function renderEquipmentControls(equipment) {
     () => byType(equipment, "door").map(buildDoorCard)
   );
   ensurePanels(
+    $("switch-box-panels"),
+    prefix(byType(equipment, "switch_box")),
+    () => byType(equipment, "switch_box").map(buildSwitchBoxCard)
+  );
+  ensurePanels(
     $("btm-send-buttons"),
     prefix(byType(equipment, "btm")),
     () => byType(equipment, "btm").map(buildBtmSendButton)
@@ -295,6 +300,7 @@ function renderEquipmentControls(equipment) {
 
   syncDrivingPanels(equipment);
   syncDoorCards(equipment);
+  syncSwitchBoxes(equipment);
 }
 
 function dirtyKey(key) {
@@ -425,6 +431,44 @@ function syncDoorCards(equipment) {
     const entry = equipment.find((e) => e.key === card.dataset.key);
     if (!entry || !card.widgets) continue;
     card.widgets.readout.textContent = `state: ${entry.state.state}`;
+  }
+}
+
+function buildSwitchBoxCard(entry) {
+  const key = entry.key;
+  const card = document.createElement("article");
+  card.className = "equipment-card switch-box-card";
+  card.dataset.key = key;
+
+  const heading = document.createElement("h3");
+  heading.textContent = key;
+  card.appendChild(heading);
+
+  const readout = document.createElement("p");
+  readout.className = "stcs-raw";
+  card.appendChild(readout);
+
+  const row = document.createElement("div");
+  row.className = "controls";
+  const position = selectEl(["c2", "auto", "cbtc"], ["C2", "Auto", "CBTC"]);
+  position.onchange = () =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
+      system_switch: position.value,
+    });
+  row.append(position);
+  card.appendChild(row);
+
+  card.widgets = { readout, position };
+  return card;
+}
+
+function syncSwitchBoxes(equipment) {
+  for (const card of $("switch-box-panels") ? $("switch-box-panels").children : []) {
+    const entry = equipment.find((e) => e.key === card.dataset.key);
+    if (!entry || !card.widgets) continue;
+    const s = entry.state;
+    card.widgets.readout.textContent = `cab ${s.cab_id} - position ${s.position}`;
+    card.widgets.position.value = s.position;
   }
 }
 

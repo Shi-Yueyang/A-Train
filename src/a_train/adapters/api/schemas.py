@@ -87,6 +87,10 @@ class EquipmentSetRequest(BaseModel):
         description="STCS ATP train-to-ATP bit assertion ('0'/'1' string); unblocked "
         "derived feedback bits are re-established from real train state.",
     )
+    system_switch: str | None = Field(
+        default=None,
+        description="Switch box position: 'c2', 'auto', or 'cbtc'.",
+    )
     block: list[str] | None = Field(
         default=None,
         description="STCS ATP: freeze the simulator's derivation of these derived "

@@ -196,6 +196,7 @@ async def set_equipment(
         direction=body.direction,
         acceleration=body.acceleration,
         train_out_signal=body.train_out_signal,
+        system_switch=body.system_switch,
         block=tuple(body.block) if body.block is not None else None,
         unblock=tuple(body.unblock) if body.unblock is not None else None,
     )

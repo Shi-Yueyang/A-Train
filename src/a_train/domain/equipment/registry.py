@@ -10,6 +10,7 @@ from .btm import Btm
 from .door import Door
 from .driving_system import DrivingSystem
 from .stcs_atp import StcsAtpDuo, StcsAtpSolo
+from .switch_box import SwitchBox
 
 EQUIPMENT_FACTORIES: dict[str, Callable[..., Equipment[Any]]] = {}
 
@@ -54,6 +55,20 @@ def _create_stcs_atp_solo(
     return StcsAtpSolo(key, cab_id=_cab_id_from_key(key, "stcs_atp_solo_", cab_id))
 
 
+def _create_switch_box(
+    key: str,
+    _ctx: EquipmentContext,
+    *,
+    cab_id: int | None = None,
+    initial_position: str = "c2",
+) -> SwitchBox:
+    return SwitchBox(
+        key,
+        cab_id=_cab_id_from_key(key, "switch_box_", cab_id),
+        initial_position=initial_position,
+    )
+
+
 def _create_driving_system(
     key: str,
     ctx: EquipmentContext,
@@ -84,5 +99,6 @@ EQUIPMENT_FACTORIES.update(
         "stcs_atp_duo": _create_stcs_atp_duo,
         "stcs_atp_solo": _create_stcs_atp_solo,
         "driving_system": _create_driving_system,
+        "switch_box": _create_switch_box,
     }
 )

@@ -63,6 +63,14 @@ class DrivingSystemSnapshot:
 
 
 @dataclass(frozen=True)
+class SwitchBoxSnapshot:
+    """Read-only view of one cab's system-selection switch box position."""
+
+    cab_id: int
+    position: str
+
+
+@dataclass(frozen=True)
 class SignalState:
     """One named boolean signal, ordered by bit index in its snapshot list.
 

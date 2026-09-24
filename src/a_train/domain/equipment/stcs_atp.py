@@ -2,9 +2,11 @@
 
 The component maintains two protocol bit maps. Train-in bits are asserted
 verbatim by the ATP ``command`` string. The train-out map stores only what has
-been *asserted* into it (real-state mirrors, operator panels, and settled
-blocks); declared ``SignalDefinition`` rules are evaluated as a pure fold over
-that store at read time, so mutation paths carry no recompute obligation.
+been *asserted* into it (door, cab, driving-handle, and switch-box mirrors,
+operator panels, and settled blocks); ``derive`` declares STCS's own internal
+logic -- boolean operations over signals the component already holds -- and is
+evaluated as a pure fold over the store at read time, so mutation paths carry
+no recompute obligation.
 Duo and solo variants differ only by their tables.
 
 A derived row is *blockable*: blocking settles its current derived value into
@@ -38,24 +40,6 @@ class Nor:
 
 
 @dataclass(frozen=True)
-class HandleMirror:
-    """Derived train-out signal mirroring driving-system handle feedback.
-
-    ``axis`` selects the handle (``"mode"`` or ``"direction"``) and ``value``
-    the position to report. With ``cab`` set the bit mirrors that single cab;
-    ``cab=None`` aggregates any cab whose handle feedback reached this
-    instance.
-    """
-
-    axis: str
-    value: str
-    cab: int | None = None
-
-
-_AXIS_INDEX = {"mode": 0, "direction": 1}
-
-
-@dataclass(frozen=True)
 class SignalDefinition:
     """One named boolean signal at a protocol-defined bit position.
 
@@ -65,7 +49,7 @@ class SignalDefinition:
 
     name: str
     default: bool = False
-    derive: Invert | Nor | HandleMirror | None = None
+    derive: Invert | Nor | None = None
 
     @property
     def blockable(self) -> bool:
@@ -86,20 +70,19 @@ _EB_FEEDBACK = SignalDefinition(
 _SB7_FEEDBACK = SignalDefinition(
     "service_brake_7_feedback", derive=Invert("maximum_service_brake_7")
 )
-_DIRECTION_FORWARD_1 = SignalDefinition(
-    "direction_handle_forward_1", derive=HandleMirror("direction", "forward", cab=1)
-)
-_DIRECTION_FORWARD_2 = SignalDefinition(
-    "direction_handle_forward_2", derive=HandleMirror("direction", "forward", cab=2)
-)
-_DIRECTION_BACKWARD = SignalDefinition(
-    "direction_handle_backward", derive=HandleMirror("direction", "backward")
-)
 _SLEEP = SignalDefinition("sleep_signal", derive=Invert("cab_activation"))
-_HANDLE_TRACTION = SignalDefinition(
-    "traction_handle_traction", derive=HandleMirror("mode", "traction")
-)
-_HANDLE_BRAKE = SignalDefinition("traction_handle_brake", derive=HandleMirror("mode", "brake"))
+
+# Handle-mirror rows are asserted at ingest from the driving system's feedback
+# intent (see ``_apply_handle_feedback``), not derived from STCS's own signal
+# maps: plain signals, ``blockable`` false, and the freeze lever is the
+# physical wire cut ``driving_system_<cab> -> stcs_atp_duo_<cab>`` (§3.7).
+# The forward pair are duplicate bit wires of a single signal — both rows
+# always carry one value; the ``_1``/``_2`` suffix is not a cab index.
+_DIRECTION_FORWARD_1 = SignalDefinition("direction_handle_forward_1")
+_DIRECTION_FORWARD_2 = SignalDefinition("direction_handle_forward_2")
+_DIRECTION_BACKWARD = SignalDefinition("direction_handle_backward")
+_HANDLE_TRACTION = SignalDefinition("traction_handle_traction")
+_HANDLE_BRAKE = SignalDefinition("traction_handle_brake")
 
 
 class StcsAtpBase:
@@ -142,6 +125,8 @@ class StcsAtpBase:
             self._set_train_out_state("door_state_2", control.right_door_open)
         if control.direction is not None or control.mode is not None:
             self._apply_handle_feedback(control)
+        if control.system_switch is not None:
+            self._apply_system_switch(control.system_switch)
         if control.command is not None:
             if (
                 not isinstance(control.command, str)
@@ -205,6 +190,21 @@ class StcsAtpBase:
             raise ValueError(f"invalid driving direction feedback: {direction!r}")
         self._handles[cab_id] = (mode, direction)
 
+        self._set_train_out_state("direction_handle_forward_1", direction == "forward")
+        self._set_train_out_state("direction_handle_forward_2", direction == "forward")
+        self._set_train_out_state("direction_handle_backward", direction == "backward")
+        self._set_train_out_state("traction_handle_traction", mode == "traction")
+        self._set_train_out_state("traction_handle_brake", mode == "brake")
+
+    def _apply_system_switch(self, position: str) -> None:
+        if position not in ("c2", "auto", "cbtc"):
+            raise ValueError(f"invalid system switch position feedback: {position!r}")
+        # One-hot mirror of a fitted cab box; a layout without the rows
+        # (solo) silently ignores the asserts via the store guard.
+        self._set_train_out_state("system_switch_c2", position == "c2")
+        self._set_train_out_state("system_switch_auto", position == "auto")
+        self._set_train_out_state("system_switch_cbtc", position == "cbtc")
+
     def _effective_train_out_states(self) -> dict[str, bool]:
         """The train-out map as seen by every reader.
 
@@ -219,16 +219,10 @@ class StcsAtpBase:
                 out[definition.name] = self._evaluate(definition.derive, out)
         return out
 
-    def _evaluate(self, rule: Invert | Nor | HandleMirror, out: dict[str, bool]) -> bool:
+    def _evaluate(self, rule: Invert | Nor, out: dict[str, bool]) -> bool:
         if isinstance(rule, Invert):
             return not self._bit(rule.source, out)
-        if isinstance(rule, Nor):
-            return not any(self._bit(source, out) for source in rule.sources)
-        index = _AXIS_INDEX[rule.axis]
-        if rule.cab is not None:
-            handle = self._handles.get(rule.cab)
-            return handle is not None and handle[index] == rule.value
-        return any(handle[index] == rule.value for handle in self._handles.values())
+        return not any(self._bit(source, out) for source in rule.sources)
 
     def _bit(self, name: str, out: dict[str, bool]) -> bool:
         if name in self._train_in_states:

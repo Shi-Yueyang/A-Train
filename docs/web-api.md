@@ -63,6 +63,7 @@ commands:
     { "type": "btm", "key": "btm_1", "cab_id": 1, "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
     { "type": "driving_system", "key": "driving_1", "cab_id": 1, "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "driving_system", "key": "driving_2", "cab_id": 2, "state": { "cab_id": 2, "facing": "backward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
+    { "type": "switch_box", "key": "switch_box_1", "cab_id": 1, "state": { "cab_id": 1, "position": "c2" } },
     { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "cab_id": 1, "state": {
         "last_command": null,
         "last_command_time": null,
@@ -253,6 +254,7 @@ with the component's error message on invalid input.
 | `train_out_signal` | string      | `stcs_atp_duo_<cab_id>` | train→ATP bit assertion (`"0"`/`"1"` string, bit meanings in atp-api.md §4.2); positions beyond the string keep their value. |
 | `block`           | array of string | `stcs_atp_duo_<cab_id>` | Freeze this instance's internal derivation of the named derived train-out signals; while blocked a bit keeps its last value and a `train_out_signal` assertion on it sticks. Unknown or non-derived names → 400, all-or-nothing. |
 | `unblock`         | array of string | `stcs_atp_duo_<cab_id>` | Resume derivation of the named signals; the bit self-heals to derived state on the same application. |
+| `system_switch`   | string          | `switch_box_<cab_id>` | Box position `"c2"` / `"auto"` / `"cbtc"`; mirrored one-hot into that cab's STCS ATP `system_switch_*` bits. |
 | `cab_id`    | integer            | optional consistency check | Target cab, when applicable. |
 | `data`      | string             | `btm_1`, `btm_2` | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400. |
 | `mode`      | string             | `driving_1`, `driving_2`  | Driving-system mode handle: `"traction"` / `"off"` / `"brake"`. |
@@ -265,8 +267,9 @@ with the component's error message on invalid input.
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `left_door`, `right_door` | `command` `"open"` / `"close"` sets the selected door state. |
 | `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
-| `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. `train_out_signal` asserts train→ATP bits; bits the simulator writes itself — the derived feedbacks (brake feedbacks, handle mirrors, sleep) and the real-state mirrors (cab/key activation, door states) — are re-established and reject the override, while train-originated signals (buttons, system switches, panel states) persist as asserted. `block` freezes the simulator's derivation of named *derived* signals (snapshot rows with `blockable: true`): while blocked such a bit keeps its last value, a `train_out_signal` assertion on it sticks, and ATP-side reactions to input bits are unaffected. `unblock` resumes derivation; the bit self-heals on the same application. Unknown or non-blockable names are rejected 400, all-or-nothing. |
+| `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. `train_out_signal` asserts train→ATP bits; bits the simulator writes itself — the derived feedbacks (brake feedbacks, sleep) and the real-state mirrors (cab/key activation, door, driving-handle, and switch-box states) — are re-established and reject the override, while signals the simulator only stores (operator buttons and panel states, and any mirror row whose feeder is absent or wire-cut) take manual assertions as given. `block` freezes the simulator's derivation of named *derived* signals (snapshot rows with `blockable: true`): while blocked such a bit keeps its last value, a `train_out_signal` assertion on it sticks, and ATP-side reactions to input bits are unaffected. `unblock` resumes derivation; the bit self-heals on the same application. Unknown or non-blockable names are rejected 400, all-or-nothing. |
 | `driving_1`, `driving_2` | Sets any subset of the three driver-room handles (no interlocks; each position is independently settable). While a cab's `mode` is `"traction"` or `"brake"`, that driving system **overwrites** the legacy `drive_demand` lever for every step: traction effort is applied in the direction-handle position mapped through the cab's facing (either travel direction is possible, from standstill too); brake effort opposes the current motion and produces no force at standstill. With `mode` `"off"` the legacy lever applies again. Engaged systems of several cabs act additively (net effort is clamped to the handle range). |
+| `switch_box_<cab>` | `system_switch` sets the cab's system-selection box to `"c2"`, `"auto"`, or `"cbtc"` (reset returns it to `"c2"`). Every collect pass the box asserts its position into the matching cab's STCS ATP instance: `system_switch_c2` / `system_switch_auto` / `system_switch_cbtc` read one-hot as installed hardware, overriding operator assertions on those three bits. On a cab with no fitted box they remain plain operator-asserted panel bits; cutting the `switch_box_<cab> -> stcs_atp_duo_<cab>` wire freezes the mirror so the bits can be driven manually again. |
 
 **Example**:
 
@@ -388,21 +391,25 @@ at which the core applied that command (null until the first command, cleared
 by reset); `train_in_states` and `train_out_states` are every
 decoded signal as `{name, value, blockable, blocked}` in bit order (17 train-in, 30 train-out;
 names and meanings in atp-api.md §4.2); `train_out_signal` is the train-out
-state as one bit string. Each signal row's `blockable` is true exactly for the
-ten train-out signals whose value the simulator *derives* internally —
+state as one bit string. Each signal row's `blockable` is true exactly for the five train-out
+signals whose value STCS derives from other signals it holds —
 `emergency_brake_1_inner_feedback`, `emergency_brake_2_inner_feedback`,
-`emergency_brake_feedback`, `service_brake_7_feedback`, `sleep_signal`,
-`direction_handle_forward_1`, `direction_handle_forward_2`,
-`direction_handle_backward`, `traction_handle_traction`, and
-`traction_handle_brake` — and `blocked` reports the active freeze set through
-`block`/`unblock` (cleared by `simulation/reset`). Every other row — train-in
-bits, asserted real-state mirrors, and operator-owned panel signals — is
-`blockable: false`. `door_state_1` / `door_state_2` mirror the
-`left_door` / `right_door` open state. `direction_handle_forward_1` /
-`direction_handle_forward_2` / `direction_handle_backward` and
-`traction_handle_traction` / `traction_handle_brake` mirror the driving
-systems' raw handle positions (per-cab where the name is numbered;
-"any cab" for `direction_handle_backward` and the traction bits).
+`emergency_brake_feedback`, `service_brake_7_feedback`, and `sleep_signal` —
+and `blocked` reports the active freeze set through `block`/`unblock`
+(cleared by `simulation/reset`). Every other row — train-in bits, asserted
+real-state mirrors (door, cab/key, driving-handle, switch-box), and
+operator-owned panel signals — is `blockable: false`; freeze an asserted
+mirror with its `source -> stcs_atp_duo_<cab>` link cut (stale, not zeroed)
+rather than with `block`. `door_state_1` / `door_state_2` mirror the
+`left_door` / `right_door` open state. `direction_handle_forward_1` and
+`direction_handle_forward_2` are duplicate bit wires of one
+'direction handle forward' signal and always read identically (the
+`_1`/`_2` suffix is not a cab index); `direction_handle_backward`,
+`traction_handle_traction`, and `traction_handle_brake` mirror the cab's
+remaining handle positions. All five are projected onto these rows at
+ingest by that cab's own `driving_system_<cab>` feedback intent; a cut on
+that wire leaves them stale and manually assertable until a delivery
+after restore self-heals them. `system_switch_c2` / `system_switch_auto` / `system_switch_cbtc` mirror the fitted `switch_box_<cab>` one-hot; unfitted cabs keep them operator-owned.
 
 Future addons add entries without changing existing physical fields; a train
 without an equipment instance simply omits that entry.

@@ -285,8 +285,8 @@ invalid.
 The STCS ATP component also maintains a plain internal `train_out_states` map
 for the 30 train-side feedback bits. It is exposed as `train_out_signal` (bit string) and
 `train_out_states` (named entries) in `StcsAtpSnapshot`. The remaining
-train-originated bits (buttons, system switches, panel states) have no
-simulator-side source and are asserted through the Web API equipment endpoint
+train-originated bits (buttons, panel states, and -- on a cab without a fitted
+switch box -- the `system_switch_*` bits) have no simulator-side source and are asserted through the Web API equipment endpoint
 (`web-api.md` §3.5, `POST .../equipment/stcs_atp_duo_<cab_id>` with
 `train_out_signal`); the derived feedback bits below always reflect real
 train state, unless that signal's derivation has been blocked through the Web
@@ -348,8 +348,13 @@ configured open door.
 `direction_handle_forward_1` / `direction_handle_forward_2` (bits 5-6),
 `direction_handle_backward` (bit 7), `traction_handle_traction` (bit 9), and
 `traction_handle_brake` (bit 10) mirror the driving systems' raw handle
-positions (see §3.1 and architectural.md §3.5): the numbered bits are per-cab,
-the unnumbered ones are true if any cab asserts them. Each `driving_X`
+positions of the driving system feeding this instance (see §3.1 and
+architectural.md §3.5). `direction_handle_forward_1` and
+`direction_handle_forward_2` are duplicate wires of one
+'direction handle forward' signal and always read identically (the
+`_1`/`_2` suffix carries no cab meaning); `direction_handle_backward`,
+`traction_handle_traction`, and `traction_handle_brake` mirror the other
+handle positions. Each `driving_X`
 equipment asserts its full handle state to the matching cab's
 `stcs_atp_duo_<cab_id>` through an
 `StcsAtpControl` intent resolved by the train aggregate.

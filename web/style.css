@@ -233,6 +233,10 @@ pre#train-state-pre {
   }
 }
 
+.switch-box-card select {
+  margin-left: 0.35rem;
+}
+
 .message {
   min-height: 1.2rem;
   font-weight: 600;

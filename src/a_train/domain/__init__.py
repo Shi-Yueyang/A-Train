@@ -14,6 +14,7 @@ from .equipment import (
     EquipmentContext,
     StcsAtpDuo,
     StcsAtpSolo,
+    SwitchBox,
 )
 from .physics import (
     integrate,
@@ -28,6 +29,7 @@ from .snapshots import (
     CabSnapshot,
     DoorSnapshot,
     DrivingSystemSnapshot,
+    SwitchBoxSnapshot,
     TrainSnapshot,
 )
 from .train import ControlResult, EquipmentControlRequest, Train, TrainConfig, TrainControl
@@ -45,6 +47,8 @@ __all__ = [
     "EquipmentControlRequest",
     "StcsAtpDuo",
     "StcsAtpSolo",
+    "SwitchBox",
+    "SwitchBoxSnapshot",
     "Train",
     "TrainConfig",
     "TrainControl",

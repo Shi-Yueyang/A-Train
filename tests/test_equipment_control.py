@@ -375,6 +375,10 @@ async def test_block_validation_is_all_or_nothing_and_scoped_to_derived_signals(
         status, body = await _equipment(c, "stcs_atp_duo_1", block=["door_state_1"])
         assert status == 400
         assert "not blockable" in body["detail"]
+        # The handle mirrors are asserted intents, not internal derivation.
+        status, body = await _equipment(c, "stcs_atp_duo_1", block=["traction_handle_traction"])
+        assert status == 400
+        assert "not blockable" in body["detail"]
 
         # Train-in bits have no simulator-side derivation to freeze.
         status, _ = await _equipment(c, "stcs_atp_duo_1", block=["emergency_brake_1"])
@@ -392,7 +396,7 @@ async def test_block_validation_is_all_or_nothing_and_scoped_to_derived_signals(
         assert status == 200
 
 
-async def test_block_freezes_handle_mirror_bits_per_instance() -> None:
+async def test_handle_bits_are_asserted_mirrors_frozen_by_wire_cut() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
 
@@ -402,27 +406,51 @@ async def test_block_freezes_handle_mirror_bits_per_instance() -> None:
         assert status == 200
         bits = _out_bits(snap)
         assert bits["traction_handle_traction"]["value"] is True
+        assert bits["traction_handle_traction"]["blockable"] is False
         assert bits["direction_handle_forward_1"]["value"] is True
-
-        status, _ = await _equipment(c, "stcs_atp_duo_1", block=["traction_handle_traction"])
-        assert status == 200
-
-        # Releasing the handles re-derives the unblocked mirror; the frozen
-        # bit keeps claiming traction, and the other cab's instance is
-        # untouched.
-        status, snap = await _equipment(c, "driving_system_1", mode="off", direction="off")
-        assert status == 200
-        bits = _out_bits(snap)
-        assert bits["traction_handle_traction"]["value"] is True
-        assert bits["traction_handle_traction"]["blocked"] is True
-        assert bits["direction_handle_forward_1"]["value"] is False
+        assert bits["direction_handle_forward_2"]["value"] is True  # duplicate wire
         other = _out_bits(snap, "stcs_atp_duo_2")
         assert other["traction_handle_traction"]["value"] is False
+        assert other["direction_handle_forward_1"]["value"] is False
 
-        status, snap = await _equipment(c, "stcs_atp_duo_1", unblock=["traction_handle_traction"])
+        # Mirror rows are plain asserts, not STCS derivations: the block
+        # surface rejects them.
+        status, body = await _equipment(c, "stcs_atp_duo_1", block=["traction_handle_traction"])
+        assert status == 400
+        assert "not blockable" in body["detail"]
+
+        # The freeze lever is the physical wire: releasing the handles leaves
+        # the cut instance stale at its last mirrored value.
+        r = await c.post(
+            "/api/trains/TRAIN001/links/cut",
+            json={"source": "driving_system_1", "target": "stcs_atp_duo_1"},
+        )
+        assert r.status_code == 200
+        await _equipment(c, "driving_system_1", mode="off", direction="off")
+        bits = _out_bits(await _train(c))
+        assert bits["traction_handle_traction"]["value"] is True
+        assert bits["direction_handle_forward_1"]["value"] is True
+        assert bits["direction_handle_forward_2"]["value"] is True
+
+        # While frozen, the operator can drive the bits; signals the
+        # simulator still owns (derived feedbacks, cab activation) win.
+        status, snap = await _equipment(c, "stcs_atp_duo_1", train_out_signal="0" * 11)
         assert status == 200
-        healed = _out_bits(snap)["traction_handle_traction"]
-        assert healed["value"] is False and healed["blocked"] is False
+        signal = _atp_state(snap)["train_out_signal"]
+        assert signal[5] == "0" and signal[6] == "0"  # frozen duplicate wires stick
+        assert signal[9] == "0"  # frozen mirror: manual sticks
+        assert signal[0] == "1" and signal[4] == "1"  # derived + re-asserted rows
+
+        # Restoring the wire self-heals the mirror on the next delivery.
+        r = await c.delete(
+            "/api/trains/TRAIN001/links/cut?source=driving_system_1&target=stcs_atp_duo_1"
+        )
+        assert r.status_code == 200
+        status, snap = await _equipment(c, "stcs_atp_duo_1", command="0")
+        bits = _out_bits(snap)
+        assert bits["traction_handle_traction"]["value"] is False
+        assert bits["direction_handle_forward_1"]["value"] is False
+        assert bits["direction_handle_forward_2"]["value"] is False
 
 
 async def test_blocking_settles_the_derived_value_over_stale_assertions() -> None:

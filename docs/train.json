@@ -68,6 +68,20 @@
       {
         "type": "stcs_atp_duo",
         "cab_id": 2
+      },
+      {
+        "type": "switch_box",
+        "cab_id": 1,
+        "params": {
+          "initial_position": "c2"
+        }
+      },
+      {
+        "type": "switch_box",
+        "cab_id": 2,
+        "params": {
+          "initial_position": "c2"
+        }
       }
     ]
   },

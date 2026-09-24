@@ -33,13 +33,16 @@ class StcsAtpControl:
     is the raw ATP-to-train bit string; the door fields are observed door
     state fed back by the doors through the intent resolver. The handle
     fields are one driving system's full handle state, asserted per cab
-    through the intent resolver to drive the direction/traction feedback
-    bits. ``train_out_signal`` is a raw train-to-ATP bit assertion from the
-    API; the simulator re-derives state-derived feedback bits after applying
-    it unless a bit is blocked, so unblocked derived bits keep reflecting real
-    train state and blocked or train-originated bits persist as asserted.
+    through the intent resolver; STCS projects the handle positions onto its
+    direction/traction mirror bits at ingest. ``train_out_signal`` is a raw
+    train-to-ATP bit assertion from the API; the simulator re-derives
+    state-derived feedback bits after applying it unless a bit is blocked, so
+    unblocked derived bits keep reflecting real train state and blocked or
+    train-originated bits persist as asserted.
     ``block``/``unblock`` freeze or resume the simulator's derivation of the
-    named derived train-out signals (all-or-nothing validation).
+    named derived train-out signals (all-or-nothing validation). ``system_switch``
+    is one switch box position assert, delivered through the stcs_atp feedback
+    group and mirrored to the matching cab's one-hot ``system_switch_*`` bits.
     """
 
     command: str | None = None
@@ -51,6 +54,14 @@ class StcsAtpControl:
     train_out_signal: str | None = None
     block: tuple[str, ...] | None = None
     unblock: tuple[str, ...] | None = None
+    system_switch: str | None = None
+
+
+@dataclass(frozen=True)
+class SwitchBoxControl:
+    """The position a cab's switch box is set to: "c2", "auto", or "cbtc"."""
+
+    position: str
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -84,5 +95,7 @@ class TrainControl:
     key: bool | None = None
 
 
-EquipmentControl = DoorControl | BtmControl | StcsAtpControl | DrivingSystemControl
+EquipmentControl = (
+    DoorControl | BtmControl | StcsAtpControl | DrivingSystemControl | SwitchBoxControl
+)
 Control = EquipmentControl | CabStateControl | TrainControl | DriverControl

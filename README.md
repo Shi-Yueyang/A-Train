@@ -88,7 +88,8 @@ example:
 			{"type": "door", "params": {"side": "left"}},
 			{"type": "door", "params": {"side": "right"}},
 			{"type": "btm", "cab_id": 1},
-			{"type": "stcs_atp_duo", "cab_id": 1}
+			{"type": "stcs_atp_duo", "cab_id": 1},
+			{"type": "switch_box", "cab_id": 1}
 		]
 	},
 	"atp": [
@@ -101,7 +102,7 @@ example:
 Equipment keys are generated internally as unique REST addresses; cab-scoped
 equipment must be unique by `(type, cab_id)`, which is also how ATP wire
 messages address instances. The supported equipment types are `door`, `btm`,
-`driving_system`, `stcs_atp_duo`, and `stcs_atp_solo`. Each equipment entry
+`driving_system`, `stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`. Each equipment entry
 may include `"enabled": false` to leave that equipment out of the installed
 train; omitted `enabled` values default to `true`. Equipment configuration is
 validated before the server starts. The optional `atp` array lists ATP
