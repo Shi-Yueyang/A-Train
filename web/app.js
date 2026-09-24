@@ -278,6 +278,20 @@ function renderEquipmentControls(equipment) {
         )
         .map(buildStcsSendButton)
   );
+  ensurePanels(
+    $("stcs-train-out-buttons"),
+    prefix(
+      equipment.filter(
+        (entry) => entry.type === "stcs_atp_duo" || entry.type === "stcs_atp_solo"
+      )
+    ),
+    () =>
+      equipment
+        .filter(
+          (entry) => entry.type === "stcs_atp_duo" || entry.type === "stcs_atp_solo"
+        )
+        .map(buildStcsTrainOutButton)
+  );
 
   syncDrivingPanels(equipment);
   syncDoorCards(equipment);
@@ -429,6 +443,18 @@ function buildStcsSendButton(entry) {
   button.onclick = async () => {
     await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
       command: $("stcs-command").value,
+    });
+  };
+  return button;
+}
+
+function buildStcsTrainOutButton(entry) {
+  const key = entry.key;
+  const button = document.createElement("button");
+  button.textContent = `Assert → ${key}`;
+  button.onclick = async () => {
+    await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
+      train_out_signal: $("stcs-train-out").value,
     });
   };
   return button;

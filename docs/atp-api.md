@@ -284,8 +284,12 @@ invalid.
 
 The STCS ATP component also maintains a plain internal `train_out_states` map
 for the 30 train-side feedback bits. It is exposed as `train_out_signal` (bit string) and
-`train_out_states` (named entries) in `StcsAtpSnapshot`. The
-following feedback states are derived from ATP command states:
+`train_out_states` (named entries) in `StcsAtpSnapshot`. The remaining
+train-originated bits (buttons, system switches, panel states) have no
+simulator-side source and are asserted through the Web API equipment endpoint
+(`web-api.md` §3.5, `POST .../equipment/stcs_atp_duo_<cab_id>` with
+`train_out_signal`); the derived feedback bits below always reflect real
+train state. The following feedback states are derived from ATP command states:
 `emergency_brake_1_inner_feedback` is active-low: it is `false` when
 `emergency_brake_1` is active and `true` otherwise. Likewise,
 `emergency_brake_2_inner_feedback` is `false` when `emergency_brake_2` is

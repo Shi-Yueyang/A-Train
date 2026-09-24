@@ -249,6 +249,7 @@ with the component's error message on invalid input.
 | Field         | Type               | Used by                    | Notes                                                        |
 | ------------- | ------------------ | -------------------------- | ------------------------------------------------------------ |
 | `command`   | string             | `door`, `stcs_atp_duo_<cab_id>` | `"open"` / `"close"`; STCS ATP command. |
+| `train_out_signal` | string      | `stcs_atp_duo_<cab_id>` | train→ATP bit assertion (`"0"`/`"1"` string, bit meanings in atp-api.md §4.2); positions beyond the string keep their value. |
 | `cab_id`    | integer            | optional consistency check | Target cab, when applicable. |
 | `data`      | string             | `btm_1`, `btm_2` | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400. |
 | `mode`      | string             | `driving_1`, `driving_2`  | Driving-system mode handle: `"traction"` / `"off"` / `"brake"`. |
@@ -261,7 +262,7 @@ with the component's error message on invalid input.
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `left_door`, `right_door` | `command` `"open"` / `"close"` sets the selected door state. |
 | `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
-| `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. |
+| `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. `train_out_signal` asserts train→ATP bits; bits the simulator derives from real state (brake feedbacks, cab/key activation, handle and door mirrors, sleep) are immediately re-established and reject the override, while train-originated signals (buttons, system switches, panel states) persist as asserted. |
 | `driving_1`, `driving_2` | Sets any subset of the three driver-room handles (no interlocks; each position is independently settable). While a cab's `mode` is `"traction"` or `"brake"`, that driving system **overwrites** the legacy `drive_demand` lever for every step: traction effort is applied in the direction-handle position mapped through the cab's facing (either travel direction is possible, from standstill too); brake effort opposes the current motion and produces no force at standstill. With `mode` `"off"` the legacy lever applies again. Engaged systems of several cabs act additively (net effort is clamped to the handle range). |
 
 **Example**:

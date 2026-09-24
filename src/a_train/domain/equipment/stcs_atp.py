@@ -67,6 +67,14 @@ class StcsAtpBase:
             self._last_command_time = received_at
             for signal, bit in zip(self.ATP_TO_TRAIN_SIGNALS, control.command):
                 self._train_in_states[signal.name] = bit == "1"
+        if control.train_out_signal is not None:
+            bits = control.train_out_signal
+            if not isinstance(bits, str) or not bits or any(bit not in "01" for bit in bits):
+                raise ValueError(
+                    "stcs_atp train_out_signal must be a non-empty string of '0' and '1'"
+                )
+            for signal, bit in zip(self.TRAIN_TO_ATP_SIGNALS, bits):
+                self._train_out_states[signal.name] = bit == "1"
         self._update_train_out_states()
 
     def _set_train_out_state(self, name: str, value: bool) -> None:

@@ -73,6 +73,8 @@ class EquipmentControlRequest:
     - ``door``: ``command`` is ``"open"`` or ``"close"``.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
     - ``stcs_atp`` with ``cab_id``: ``command`` is recorded on that cab's STCS instance.
+    - ``stcs_atp`` ``train_out_signal``: raw train-to-ATP bit assertion;
+      simulator-derived feedback bits are re-established from real state.
     - ``driving_system``: ``mode``/``direction``/``acceleration`` handle
       positions; every combination of fields may be set together.
     """
@@ -85,6 +87,7 @@ class EquipmentControlRequest:
     mode: str | None = None
     direction: str | None = None
     acceleration: float | None = None
+    train_out_signal: str | None = None
 
 
 @dataclass(frozen=True)
@@ -346,9 +349,11 @@ class Train:
                 raise ValueError("btm requires data")
             return BtmControl(command.data, command.cab_id)
         if isinstance(equipment, StcsAtpBase):
-            if command.command is None:
-                raise ValueError("stcs_atp requires a command")
-            return StcsAtpControl(command.command)
+            if command.command is None and command.train_out_signal is None:
+                raise ValueError("stcs_atp requires a command or train_out_signal")
+            return StcsAtpControl(
+                command=command.command, train_out_signal=command.train_out_signal
+            )
         if isinstance(equipment, DrivingSystem):
             if command.mode is None and command.direction is None and command.acceleration is None:
                 raise ValueError("driving system requires mode, direction, or acceleration")

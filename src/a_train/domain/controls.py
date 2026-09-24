@@ -34,7 +34,9 @@ class StcsAtpControl:
     state fed back by the doors through the intent resolver. The handle
     fields are one driving system's full handle state, asserted per cab
     through the intent resolver to drive the direction/traction feedback
-    bits.
+    bits. ``train_out_signal`` is a raw train-to-ATP bit assertion from the
+    API; the simulator re-derives state-derived feedback bits after applying
+    it, so only train-originated bits (buttons, switches) persist.
     """
 
     command: str | None = None
@@ -43,6 +45,7 @@ class StcsAtpControl:
     cab_id: int | None = None
     direction: str | None = None
     mode: str | None = None
+    train_out_signal: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -167,6 +167,45 @@ async def test_stcs_atp_command_records_arrival_wall_clock_time() -> None:
         assert _stcs_atp(await _train(c))["last_command_time"] is None
 
 
+# -- STCS ATP train->ATP (out) signals are assertable through the API ----------
+
+
+async def test_stcs_atp_train_out_signal_is_settable_through_the_api() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        # Bit 11 = turnback_button: a train-originated signal the simulator
+        # never derives, so the assertion sticks.
+        status, snap = await _equipment(c, "stcs_atp_duo_1", train_out_signal="0" * 11 + "1")
+        assert status == 200
+        state = _stcs_atp(snap)
+        assert state["train_out_states"][11]["name"] == "turnback_button"
+        assert state["train_out_states"][11]["value"] is True
+        assert state["train_out_signal"][11] == "1"
+
+        # Bits the simulator derives from real train state reject the
+        # override: door_state_1 (bit 20) is re-asserted from the open door.
+        await _equipment(c, "left_door", command="open")
+        status, snap = await _equipment(c, "stcs_atp_duo_1", train_out_signal="0" * 21)
+        assert status == 200
+        signal = _stcs_atp(snap)["train_out_signal"]
+        assert signal[11] == "0"  # the button was explicitly released
+        assert signal[20] == "1"  # authoritative door state wins
+
+        # Shorter strings keep positions beyond the last bit unchanged.
+        await _equipment(c, "stcs_atp_duo_1", train_out_signal="0")
+        assert _stcs_atp(snap)["train_out_signal"][20] == "1"
+
+        # Validation mirrors the inbound command: non-binary or empty rejected,
+        # and one of command / train_out_signal is required.
+        for bad in ("10x", ""):
+            status, _ = await _equipment(c, "stcs_atp_duo_1", train_out_signal=bad)
+            assert status == 400
+        empty_status, error = await _equipment(c, "stcs_atp_duo_1")
+        assert empty_status == 400
+        assert "command" in error["detail"]
+
+
 # -- Cab activation is native train state, no authority ------------------------
 
 

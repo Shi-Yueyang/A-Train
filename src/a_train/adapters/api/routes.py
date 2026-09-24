@@ -177,6 +177,7 @@ async def set_equipment(
         mode=body.mode,
         direction=body.direction,
         acceleration=body.acceleration,
+        train_out_signal=body.train_out_signal,
     )
     result = await core.submit_command(EquipmentCommand(train_id=train_id, payload=payload))
     _raise_on_error(result)

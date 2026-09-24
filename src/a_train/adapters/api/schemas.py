@@ -82,6 +82,11 @@ class EquipmentSetRequest(BaseModel):
         default=None,
         description="Driving-system acceleration handle, continuous effort in [0.0, 1.0].",
     )
+    train_out_signal: str | None = Field(
+        default=None,
+        description="STCS ATP train-to-ATP bit assertion ('0'/'1' string); derived "
+        "feedback bits are re-established from real train state.",
+    )
 
 
 class CabResponse(BaseModel):
