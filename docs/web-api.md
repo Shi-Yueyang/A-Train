@@ -67,8 +67,8 @@ commands:
         "last_command": null,
         "last_command_time": null,
         "train_out_signal": "110000000000000000000000000000",
-        "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
-        "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": true } ]
+        "train_in_states": [ { "name": "emergency_brake_1", "value": false, "blockable": false, "blocked": false } ],
+        "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": true, "blockable": true, "blocked": false } ]
     } }
   ]
 }
@@ -145,7 +145,8 @@ Pauses the core. Idempotent while paused or stopped. Body: none.
 ### POST /api/simulation/reset
 
 Restores the configured initial world state, sets `simulation_time` to `0.0`,
-clears all control and equipment runtime state, and leaves the core `STOPPED`.
+clears all control, equipment, and link-cut state, and leaves the core
+`STOPPED`.
 Body: none.
 
 **Response 200**: `StatusResponse`.
@@ -250,6 +251,8 @@ with the component's error message on invalid input.
 | ------------- | ------------------ | -------------------------- | ------------------------------------------------------------ |
 | `command`   | string             | `door`, `stcs_atp_duo_<cab_id>` | `"open"` / `"close"`; STCS ATP command. |
 | `train_out_signal` | string      | `stcs_atp_duo_<cab_id>` | train→ATP bit assertion (`"0"`/`"1"` string, bit meanings in atp-api.md §4.2); positions beyond the string keep their value. |
+| `block`           | array of string | `stcs_atp_duo_<cab_id>` | Freeze this instance's internal derivation of the named derived train-out signals; while blocked a bit keeps its last value and a `train_out_signal` assertion on it sticks. Unknown or non-derived names → 400, all-or-nothing. |
+| `unblock`         | array of string | `stcs_atp_duo_<cab_id>` | Resume derivation of the named signals; the bit self-heals to derived state on the same application. |
 | `cab_id`    | integer            | optional consistency check | Target cab, when applicable. |
 | `data`      | string             | `btm_1`, `btm_2` | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400. |
 | `mode`      | string             | `driving_1`, `driving_2`  | Driving-system mode handle: `"traction"` / `"off"` / `"brake"`. |
@@ -262,7 +265,7 @@ with the component's error message on invalid input.
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `left_door`, `right_door` | `command` `"open"` / `"close"` sets the selected door state. |
 | `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
-| `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. `train_out_signal` asserts train→ATP bits; bits the simulator derives from real state (brake feedbacks, cab/key activation, handle and door mirrors, sleep) are immediately re-established and reject the override, while train-originated signals (buttons, system switches, panel states) persist as asserted. |
+| `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. `train_out_signal` asserts train→ATP bits; bits the simulator writes itself — the derived feedbacks (brake feedbacks, handle mirrors, sleep) and the real-state mirrors (cab/key activation, door states) — are re-established and reject the override, while train-originated signals (buttons, system switches, panel states) persist as asserted. `block` freezes the simulator's derivation of named *derived* signals (snapshot rows with `blockable: true`): while blocked such a bit keeps its last value, a `train_out_signal` assertion on it sticks, and ATP-side reactions to input bits are unaffected. `unblock` resumes derivation; the bit self-heals on the same application. Unknown or non-blockable names are rejected 400, all-or-nothing. |
 | `driving_1`, `driving_2` | Sets any subset of the three driver-room handles (no interlocks; each position is independently settable). While a cab's `mode` is `"traction"` or `"brake"`, that driving system **overwrites** the legacy `drive_demand` lever for every step: traction effort is applied in the direction-handle position mapped through the cab's facing (either travel direction is possible, from standstill too); brake effort opposes the current motion and produces no force at standstill. With `mode` `"off"` the legacy lever applies again. Engaged systems of several cabs act additively (net effort is clamped to the handle range). |
 
 **Example**:
@@ -278,6 +281,43 @@ Content-Type: application/json
 
 **Errors**: 400 unknown train; unknown equipment key (no such equipment on the
 train); missing or invalid fields for the target equipment.
+
+### Link cuts (physical equipment wires)
+
+A link cut drops every intent delivery over one concrete physical wire: an
+intent `source` (equipment key or `cab_<id>` broadcast source) reaching a
+`target` (equipment key or `"train"`). A cut wire is **stale, not zeroed**:
+the recipient keeps its last delivered value until the wire is restored,
+and restores self-heal on the next delivery (§3.7). Grouped feedback fans
+out per physical wire: cutting `left_door -> stcs_atp_duo_1` leaves
+`left_door -> stcs_atp_duo_2` live. `reset()` clears all cuts. The current
+cut set is reported in every train snapshot as `link_cuts`.
+
+| Method & Path                                          | Body / params                                   | Meaning                                |
+| ------------------------------------------------------ | ----------------------------------------------- | -------------------------------------- |
+| `PUT /api/trains/{train_id}/links`                     | `{ "cuts": [ { "source", "target" }, ... ] }`   | Replace the whole cut set; `[]` restores all. |
+| `POST /api/trains/{train_id}/links/cut`                | `{ "source": "...", "target": "..." }`          | Cut one wire; already-cut is a no-op.  |
+| `DELETE /api/trains/{train_id}/links/cut?source=&target=` | query params                                  | Restore one wire; restoring a live wire is a no-op. |
+
+**Example**:
+
+```http
+POST /api/trains/TRAIN001/links/cut
+Content-Type: application/json
+
+{ "source": "left_door", "target": "stcs_atp_duo_1" }
+```
+
+```http
+DELETE /api/trains/TRAIN001/links/cut?source=left_door&target=stcs_atp_duo_1
+```
+
+**Response 200**: `TrainResponse` reflecting the updated set.
+
+**Errors**: 400 unknown source/target (not an installed equipment key or a
+configured `cab_<id>`; targets additionally may be `"train"`), self-cut
+(`source == target`). A `PUT` replaces all-or-nothing: an invalid set leaves
+the previous cuts untouched.
 
 ## Response models
 
@@ -312,10 +352,11 @@ by equipment type (§3.5).
         "last_command": null,
         "last_command_time": null,
         "train_out_signal": "110000000000000000000000000000",
-        "train_in_states": [ { "name": "emergency_brake_1", "value": false } ],
-        "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": true } ]
+        "train_in_states": [ { "name": "emergency_brake_1", "value": false, "blockable": false, "blocked": false } ],
+        "train_out_states": [ { "name": "emergency_brake_1_inner_feedback", "value": true, "blockable": true, "blocked": false } ]
     } }
-  ]
+  ],
+  "link_cuts": []
 }
 ```
 
@@ -330,6 +371,8 @@ by equipment type (§3.5).
 | `drive_demand` | number | The held legacy signed lever in`[-1.0, 1.0]`; without an engaged driving system, negative values decelerate toward (and clamp at) zero and never move a standing train rearward. Ignored for any step in which a driving system or the ATP protection brake is engaged, but its value persists. |
 | `equipment`    | array | One `{type, key, state}` entry per equipment instance. |
 
+| `link_cuts`    | array | Active physical wire cuts `{source, target}` (equipment-wire faults, "Link cuts" above and §3.7). |
+
 **`equipment` entries**:
 
 | Field | Shape | Notes |
@@ -343,9 +386,18 @@ by equipment type (§3.5).
 that cab); `last_command_time` is the wall-clock time in POSIX seconds (UTC)
 at which the core applied that command (null until the first command, cleared
 by reset); `train_in_states` and `train_out_states` are every
-decoded signal as `{name, value}` in bit order (17 train-in, 30 train-out;
+decoded signal as `{name, value, blockable, blocked}` in bit order (17 train-in, 30 train-out;
 names and meanings in atp-api.md §4.2); `train_out_signal` is the train-out
-state as one bit string. `door_state_1` / `door_state_2` mirror the
+state as one bit string. Each signal row's `blockable` is true exactly for the
+ten train-out signals whose value the simulator *derives* internally —
+`emergency_brake_1_inner_feedback`, `emergency_brake_2_inner_feedback`,
+`emergency_brake_feedback`, `service_brake_7_feedback`, `sleep_signal`,
+`direction_handle_forward_1`, `direction_handle_forward_2`,
+`direction_handle_backward`, `traction_handle_traction`, and
+`traction_handle_brake` — and `blocked` reports the active freeze set through
+`block`/`unblock` (cleared by `simulation/reset`). Every other row — train-in
+bits, asserted real-state mirrors, and operator-owned panel signals — is
+`blockable: false`. `door_state_1` / `door_state_2` mirror the
 `left_door` / `right_door` open state. `direction_handle_forward_1` /
 `direction_handle_forward_2` / `direction_handle_backward` and
 `traction_handle_traction` / `traction_handle_brake` mirror the driving

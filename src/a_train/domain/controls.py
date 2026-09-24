@@ -36,7 +36,10 @@ class StcsAtpControl:
     through the intent resolver to drive the direction/traction feedback
     bits. ``train_out_signal`` is a raw train-to-ATP bit assertion from the
     API; the simulator re-derives state-derived feedback bits after applying
-    it, so only train-originated bits (buttons, switches) persist.
+    it unless a bit is blocked, so unblocked derived bits keep reflecting real
+    train state and blocked or train-originated bits persist as asserted.
+    ``block``/``unblock`` freeze or resume the simulator's derivation of the
+    named derived train-out signals (all-or-nothing validation).
     """
 
     command: str | None = None
@@ -46,6 +49,8 @@ class StcsAtpControl:
     direction: str | None = None
     mode: str | None = None
     train_out_signal: str | None = None
+    block: tuple[str, ...] | None = None
+    unblock: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

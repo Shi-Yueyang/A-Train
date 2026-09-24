@@ -84,8 +84,18 @@ class EquipmentSetRequest(BaseModel):
     )
     train_out_signal: str | None = Field(
         default=None,
-        description="STCS ATP train-to-ATP bit assertion ('0'/'1' string); derived "
-        "feedback bits are re-established from real train state.",
+        description="STCS ATP train-to-ATP bit assertion ('0'/'1' string); unblocked "
+        "derived feedback bits are re-established from real train state.",
+    )
+    block: list[str] | None = Field(
+        default=None,
+        description="STCS ATP: freeze the simulator's derivation of these derived "
+        "train-out signals; the bits stay stale and become manually assertable.",
+    )
+    unblock: list[str] | None = Field(
+        default=None,
+        description="STCS ATP: resume derivation of these signals (self-heals on the "
+        "next recompute).",
     )
 
 
@@ -98,6 +108,19 @@ class CabResponse(BaseModel):
     )
 
 
+class LinkCutInput(BaseModel):
+    """One physical wire to cut: source equipment/cab to target instance."""
+
+    source: str = Field(description="Equipment key or 'cab_<id>' broadcast source.")
+    target: str = Field(description="Equipment key or 'train'.")
+
+
+class LinkCutsReplaceRequest(BaseModel):
+    """Whole cut set; an empty list restores every wire (§3.7)."""
+
+    cuts: list[LinkCutInput] = Field(default_factory=list)
+
+
 class TrainResponse(BaseModel):
     train_id: str
     cabs: list[CabResponse]
@@ -107,6 +130,7 @@ class TrainResponse(BaseModel):
     direction: str
     drive_demand: float
     equipment: list[object] = Field(default_factory=list)
+    link_cuts: list[object] = Field(default_factory=list)
 
 
 class TrainsResponse(BaseModel):
@@ -153,6 +177,10 @@ def _cabs_to_response(snap: TrainSnapshot) -> list[CabResponse]:
     ]
 
 
+def _link_cuts_to_list(snap: TrainSnapshot) -> list[object]:
+    return [dataclasses.asdict(cut) for cut in snap.link_cuts]
+
+
 def train_snapshot_to_response(snap: TrainSnapshot) -> TrainResponse:
     return TrainResponse(
         train_id=snap.train_id,
@@ -163,6 +191,7 @@ def train_snapshot_to_response(snap: TrainSnapshot) -> TrainResponse:
         direction=snap.direction,
         drive_demand=snap.drive_demand,
         equipment=_serialize_equipment(snap.equipment),
+        link_cuts=_link_cuts_to_list(snap),
     )
 
 
@@ -176,6 +205,7 @@ def _train_to_dict(snap: TrainSnapshot) -> dict:
         "direction": snap.direction,
         "drive_demand": snap.drive_demand,
         "equipment": _serialize_equipment(snap.equipment),
+        "link_cuts": _link_cuts_to_list(snap),
     }
 
 

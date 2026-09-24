@@ -64,10 +64,18 @@ class DrivingSystemSnapshot:
 
 @dataclass(frozen=True)
 class SignalState:
-    """One named boolean signal, ordered by bit index in its snapshot list."""
+    """One named boolean signal, ordered by bit index in its snapshot list.
+
+    ``blockable`` marks signals whose value the simulator derives from other
+    state and whose derivation the equipment API can freeze; ``blocked``
+    reports that a freeze is currently active. Both are ``False`` for plain
+    asserted signals.
+    """
 
     name: str
     value: bool
+    blockable: bool = False
+    blocked: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,7 +86,9 @@ class StcsAtpSnapshot:
     name in bit order; ``train_out_signal`` is the same train-out state as one
     bit string, ``last_command`` the raw last ATP assertion, and
     ``last_command_time`` the wall-clock time (POSIX seconds) at which the
-    core applied that assertion (``None`` until the first command).
+    core applied that assertion (``None`` until the first command). Derived
+    train-out signals report their ``blockable``/``blocked`` state per
+    :class:`SignalState`.
     """
 
     last_command: str | None = None
@@ -104,6 +114,14 @@ class EquipmentSnapshot:
 
 
 @dataclass(frozen=True)
+class LinkCutSnapshot:
+    """One cut physical wire: intents from ``source`` reaching ``target`` drop."""
+
+    source: str
+    target: str
+
+
+@dataclass(frozen=True)
 class TrainSnapshot:
     """Read-only view of a single train at a point in simulation time.
 
@@ -113,7 +131,8 @@ class TrainSnapshot:
     ``"backward"``, or ``"stopped"`` at zero speed. ``drive_demand`` is the
     held legacy lever and has no effect while any driving system is engaged
     (the engaged driving system overwrites it). Equipment state is a stable
-    tuple of individually addressed entries.
+    tuple of individually addressed entries. ``link_cuts`` lists the cut
+    physical wires (equipment fault wiring, §3.7), sorted by source and target.
     """
 
     train_id: str
@@ -124,3 +143,4 @@ class TrainSnapshot:
     direction: str = "stopped"
     drive_demand: float = 0.0
     equipment: tuple[EquipmentSnapshot, ...] = field(default_factory=tuple)
+    link_cuts: tuple[LinkCutSnapshot, ...] = field(default_factory=tuple)

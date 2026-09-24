@@ -289,7 +289,12 @@ train-originated bits (buttons, system switches, panel states) have no
 simulator-side source and are asserted through the Web API equipment endpoint
 (`web-api.md` §3.5, `POST .../equipment/stcs_atp_duo_<cab_id>` with
 `train_out_signal`); the derived feedback bits below always reflect real
-train state. The following feedback states are derived from ATP command states:
+train state, unless that signal's derivation has been blocked through the Web
+API (`web-api.md`), in which case the bit keeps its last value — and an
+operator assertion on a blocked bit sticks — until unblocked. Blocking
+concerns only this train-side derivation: ATP-to-train bits are asserted as
+always, and blocked feedback bits simply reach ATP as frozen bit values. The
+following feedback states are derived from ATP command states:
 `emergency_brake_1_inner_feedback` is active-low: it is `false` when
 `emergency_brake_1` is active and `true` otherwise. Likewise,
 `emergency_brake_2_inner_feedback` is `false` when `emergency_brake_2` is

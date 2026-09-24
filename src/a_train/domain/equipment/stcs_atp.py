@@ -1,4 +1,17 @@
-"""STCS ATP protection state and train-output feedback."""
+"""STCS ATP protection state and train-output feedback.
+
+The component maintains the two protocol bit maps. Train-in bits are asserted
+verbatim by the ATP ``command`` string; train-out bits are either asserted by
+train-side state (doors, cabs, handles, operator panels) or *derived* by this
+component. Derived bits are declared as data on ``SignalDefinition`` rows, so
+duo and solo variants differ only by their protocol tables and the recompute
+pass is a generic interpreter over one table.
+
+A derived row is *blockable*: while blocked through the equipment API, the
+recompute pass leaves the bit at its stale value, so operator
+``train_out_signal`` assertions stick; unblocking self-heals the value on the
+next recompute pass.
+"""
 
 from __future__ import annotations
 
@@ -11,11 +24,82 @@ from .base import EquipmentIntent
 
 
 @dataclass(frozen=True)
+class Invert:
+    """Derived train-out signal: ``not`` one named signal of either map."""
+
+    source: str
+
+
+@dataclass(frozen=True)
+class Nor:
+    """Derived train-out signal: ``not`` any of the named signals."""
+
+    sources: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class HandleMirror:
+    """Derived train-out signal mirroring driving-system handle feedback.
+
+    ``axis`` selects the handle (``"mode"`` or ``"direction"``) and ``value``
+    the position to report. With ``cab`` set the bit mirrors that single cab;
+    ``cab=None`` aggregates any cab whose handle feedback reached this
+    instance.
+    """
+
+    axis: str
+    value: str
+    cab: int | None = None
+
+
+_AXIS_INDEX = {"mode": 0, "direction": 1}
+
+
+@dataclass(frozen=True)
 class SignalDefinition:
-    """One named boolean signal at a protocol-defined bit position."""
+    """One named boolean signal at a protocol-defined bit position.
+
+    ``derive`` declares the internal logic that writes this bit; rows without
+    a rule are plain asserted signals the operator already owns.
+    """
 
     name: str
     default: bool = False
+    derive: Invert | Nor | HandleMirror | None = None
+
+    @property
+    def blockable(self) -> bool:
+        return self.derive is not None
+
+
+# Train-out signals the simulator derives from other state. Duo and solo
+# variants share these rows; a future variant declares its own derivations.
+_EB1_FEEDBACK = SignalDefinition(
+    "emergency_brake_1_inner_feedback", derive=Invert("emergency_brake_1")
+)
+_EB2_FEEDBACK = SignalDefinition(
+    "emergency_brake_2_inner_feedback", derive=Invert("emergency_brake_2")
+)
+_EB_FEEDBACK = SignalDefinition(
+    "emergency_brake_feedback", derive=Nor(("emergency_brake_1", "emergency_brake_2"))
+)
+_SB7_FEEDBACK = SignalDefinition(
+    "service_brake_7_feedback", derive=Invert("maximum_service_brake_7")
+)
+_DIRECTION_FORWARD_1 = SignalDefinition(
+    "direction_handle_forward_1", derive=HandleMirror("direction", "forward", cab=1)
+)
+_DIRECTION_FORWARD_2 = SignalDefinition(
+    "direction_handle_forward_2", derive=HandleMirror("direction", "forward", cab=2)
+)
+_DIRECTION_BACKWARD = SignalDefinition(
+    "direction_handle_backward", derive=HandleMirror("direction", "backward")
+)
+_SLEEP = SignalDefinition("sleep_signal", derive=Invert("cab_activation"))
+_HANDLE_TRACTION = SignalDefinition(
+    "traction_handle_traction", derive=HandleMirror("mode", "traction")
+)
+_HANDLE_BRAKE = SignalDefinition("traction_handle_brake", derive=HandleMirror("mode", "brake"))
 
 
 class StcsAtpBase:
@@ -31,6 +115,7 @@ class StcsAtpBase:
         self._last_command: str | None = None
         self._last_command_time: float | None = None
         self._handles: dict[int, tuple[str, str]] = {}
+        self._blocked: set[str] = set()
         self._train_out_states = {
             signal.name: signal.default for signal in self.TRAIN_TO_ATP_SIGNALS
         }
@@ -50,6 +135,8 @@ class StcsAtpBase:
     def apply_control(self, control: StcsAtpControl, *, received_at: float | None = None) -> None:
         if not isinstance(control, StcsAtpControl):
             raise ValueError("stcs_atp control is invalid")
+        if control.block is not None or control.unblock is not None:
+            self._apply_blocks(control.block, control.unblock)
         if control.left_door_open is not None:
             self._set_train_out_state("door_state_1", control.left_door_open)
         if control.right_door_open is not None:
@@ -77,6 +164,21 @@ class StcsAtpBase:
                 self._train_out_states[signal.name] = bit == "1"
         self._update_train_out_states()
 
+    def _apply_blocks(self, block: tuple[str, ...] | None, unblock: tuple[str, ...] | None) -> None:
+        block_names = tuple(block or ())
+        unblock_names = tuple(unblock or ())
+        for name in block_names + unblock_names:
+            if not self._train_out_definition(name).blockable:
+                raise ValueError(f"stcs_atp signal is not blockable: {name}")
+        self._blocked.update(block_names)
+        self._blocked.difference_update(unblock_names)
+
+    def _train_out_definition(self, name: str) -> SignalDefinition:
+        for definition in self.TRAIN_TO_ATP_SIGNALS:
+            if definition.name == name:
+                return definition
+        raise ValueError(f"unknown stcs_atp signal: {name}")
+
     def _set_train_out_state(self, name: str, value: bool) -> None:
         if name in self._train_out_states:
             self._train_out_states[name] = value
@@ -100,43 +202,27 @@ class StcsAtpBase:
         self._handles[cab_id] = (mode, direction)
 
     def _update_train_out_states(self) -> None:
-        self._set_train_out_state(
-            "emergency_brake_1_inner_feedback",
-            not self._train_in_states.get("emergency_brake_1", False),
-        )
-        self._set_train_out_state(
-            "emergency_brake_2_inner_feedback",
-            not self._train_in_states.get("emergency_brake_2", False),
-        )
-        self._set_train_out_state(
-            "emergency_brake_feedback",
-            not (
-                self._train_in_states.get("emergency_brake_1", False)
-                or self._train_in_states.get("emergency_brake_2", False)
-            ),
-        )
-        self._set_train_out_state(
-            "service_brake_7_feedback",
-            not self._train_in_states.get("maximum_service_brake_7", False),
-        )
-        self._set_train_out_state(
-            "sleep_signal", not self._train_out_states.get("cab_activation", False)
-        )
-        modes = {cab: handle[0] for cab, handle in self._handles.items()}
-        directions = {cab: handle[1] for cab, handle in self._handles.items()}
-        self._set_train_out_state(
-            "direction_handle_forward_1", directions.get(1, "off") == "forward"
-        )
-        self._set_train_out_state(
-            "direction_handle_forward_2", directions.get(2, "off") == "forward"
-        )
-        self._set_train_out_state("direction_handle_backward", "backward" in directions.values())
-        self._set_train_out_state("traction_handle_traction", "traction" in modes.values())
-        self._set_train_out_state("traction_handle_brake", "brake" in modes.values())
-        self._update_variant_train_out_states()
+        """Re-derive every unblocked declared train-out signal, in table order."""
+        for definition in self.TRAIN_TO_ATP_SIGNALS:
+            if definition.derive is None or definition.name in self._blocked:
+                continue
+            self._train_out_states[definition.name] = self._evaluate(definition.derive)
 
-    def _update_variant_train_out_states(self) -> None:
-        """Allow a variant to derive additional output signals."""
+    def _evaluate(self, rule: Invert | Nor | HandleMirror) -> bool:
+        if isinstance(rule, Invert):
+            return not self._bit(rule.source)
+        if isinstance(rule, Nor):
+            return not any(self._bit(source) for source in rule.sources)
+        index = _AXIS_INDEX[rule.axis]
+        if rule.cab is not None:
+            handle = self._handles.get(rule.cab)
+            return handle is not None and handle[index] == rule.value
+        return any(handle[index] == rule.value for handle in self._handles.values())
+
+    def _bit(self, name: str) -> bool:
+        if name in self._train_in_states:
+            return self._train_in_states[name]
+        return self._train_out_states.get(name, False)
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
         intents: list[EquipmentIntent] = []
@@ -165,8 +251,13 @@ class StcsAtpBase:
 
     def read_state(self) -> StcsAtpSnapshot:
         train_out = tuple(
-            SignalState(name=name, value=self._train_out_states[name])
-            for name in (signal.name for signal in self.TRAIN_TO_ATP_SIGNALS)
+            SignalState(
+                name=definition.name,
+                value=self._train_out_states[definition.name],
+                blockable=definition.blockable,
+                blocked=definition.name in self._blocked,
+            )
+            for definition in self.TRAIN_TO_ATP_SIGNALS
         )
         return StcsAtpSnapshot(
             last_command=self._last_command,
@@ -183,6 +274,7 @@ class StcsAtpBase:
         self._last_command = None
         self._last_command_time = None
         self._handles.clear()
+        self._blocked.clear()
         self._train_in_states = {
             signal.name: signal.default for signal in self.ATP_TO_TRAIN_SIGNALS
         }
@@ -216,17 +308,17 @@ class StcsAtpDuo(StcsAtpBase):
         SignalDefinition("turnback_indicator"),
     )
     TRAIN_TO_ATP_SIGNALS = (
-        SignalDefinition("emergency_brake_1_inner_feedback"),
-        SignalDefinition("emergency_brake_2_inner_feedback"),
-        SignalDefinition("emergency_brake_feedback"),
-        SignalDefinition("service_brake_7_feedback"),
+        _EB1_FEEDBACK,
+        _EB2_FEEDBACK,
+        _EB_FEEDBACK,
+        _SB7_FEEDBACK,
         SignalDefinition("cab_activation"),
-        SignalDefinition("direction_handle_forward_1"),
-        SignalDefinition("direction_handle_forward_2"),
-        SignalDefinition("direction_handle_backward"),
-        SignalDefinition("sleep_signal"),
-        SignalDefinition("traction_handle_traction"),
-        SignalDefinition("traction_handle_brake"),
+        _DIRECTION_FORWARD_1,
+        _DIRECTION_FORWARD_2,
+        _DIRECTION_BACKWARD,
+        _SLEEP,
+        _HANDLE_TRACTION,
+        _HANDLE_BRAKE,
         SignalDefinition("turnback_button"),
         SignalDefinition("turnback_activation_feedback"),
         SignalDefinition("left_door_open_button"),
@@ -271,17 +363,17 @@ class StcsAtpSolo(StcsAtpBase):
         SignalDefinition("turnback_indicator"),
     )
     TRAIN_TO_ATP_SIGNALS = (
-        SignalDefinition("emergency_brake_1_inner_feedback"),
-        SignalDefinition("emergency_brake_2_inner_feedback"),
-        SignalDefinition("emergency_brake_feedback"),
-        SignalDefinition("service_brake_7_feedback"),
+        _EB1_FEEDBACK,
+        _EB2_FEEDBACK,
+        _EB_FEEDBACK,
+        _SB7_FEEDBACK,
         SignalDefinition("cab_activation"),
-        SignalDefinition("direction_handle_forward_1"),
-        SignalDefinition("direction_handle_forward_2"),
-        SignalDefinition("direction_handle_backward"),
-        SignalDefinition("sleep_signal"),
-        SignalDefinition("traction_handle_traction"),
-        SignalDefinition("traction_handle_brake"),
+        _DIRECTION_FORWARD_1,
+        _DIRECTION_FORWARD_2,
+        _DIRECTION_BACKWARD,
+        _SLEEP,
+        _HANDLE_TRACTION,
+        _HANDLE_BRAKE,
         SignalDefinition("turnback_button"),
         SignalDefinition("turnback_activation_feedback"),
         SignalDefinition("left_door_open_button"),

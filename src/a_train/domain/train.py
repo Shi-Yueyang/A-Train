@@ -7,6 +7,8 @@ cab and submit a transport-neutral command to the simulation core, which calls
 the small aggregate API:
 
     apply_control(control)   validate + update control state (no time advance)
+    set_equipment(command)   validate + update equipment state (no time advance)
+    replace/add/remove_link_cuts  cut physical equipment wires (§3.7)
     step(dt)                 resolve dynamics, integrate
     get_snapshot()           construct an immutable view
     reset()                  restore configured physical state, clear runtime
@@ -18,6 +20,7 @@ Physics lives in ``physics.py``; it never mutates aggregate state.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,6 +43,7 @@ from .equipment import (
     EquipmentIntent,
     StcsAtpBase,
 )
+from .link_cuts import LinkCuts
 from .physics import (
     integrate,
     is_finite,
@@ -74,7 +78,10 @@ class EquipmentControlRequest:
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
     - ``stcs_atp`` with ``cab_id``: ``command`` is recorded on that cab's STCS instance.
     - ``stcs_atp`` ``train_out_signal``: raw train-to-ATP bit assertion;
-      simulator-derived feedback bits are re-established from real state.
+      simulator-derived feedback bits are re-established from real state
+      unless their derivation is blocked.
+    - ``stcs_atp`` ``block``/``unblock``: freeze or resume this instance's
+      internal derivation of the named derived train-out signals.
     - ``driving_system``: ``mode``/``direction``/``acceleration`` handle
       positions; every combination of fields may be set together.
     """
@@ -88,6 +95,8 @@ class EquipmentControlRequest:
     direction: str | None = None
     acceleration: float | None = None
     train_out_signal: str | None = None
+    block: tuple[str, ...] | None = None
+    unblock: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -235,6 +244,10 @@ class Train:
         self._position = config.initial_position
         self._speed = config.initial_speed
         self._acceleration = 0.0
+        # Physical wire-fault state (§3.7): cut pairs are validated against
+        # the installed equipment and native cabs, then consulted on every
+        # intent delivery.
+        self._link_cuts = LinkCuts()
 
         self._drive_demand = 0.0
         self._driver_inputs: tuple[DriverControl, ...] = ()
@@ -278,6 +291,49 @@ class Train:
         if control.active is not None or control.key is not None:
             self._resolve_all_intents()
         return ControlResult()
+
+    # -- Physical link cuts (§3.7) --------------------------------------
+
+    def replace_link_cuts(self, cuts: Iterable[tuple[str, str]]) -> ControlResult:
+        """Replace the whole cut set; all-or-nothing validation (§3.7)."""
+
+        pairs = set(cuts)
+        error = self._validate_link_cuts(pairs)
+        if error is not None:
+            return ControlResult(ok=False, error=error)
+        self._link_cuts.replace(pairs)
+        return ControlResult()
+
+    def add_link_cuts(self, cuts: Iterable[tuple[str, str]]) -> ControlResult:
+        """Cut additional physical wires; already-cut pairs are no-ops."""
+
+        pairs = set(cuts)
+        error = self._validate_link_cuts(pairs)
+        if error is not None:
+            return ControlResult(ok=False, error=error)
+        self._link_cuts.add(pairs)
+        return ControlResult()
+
+    def remove_link_cuts(self, cuts: Iterable[tuple[str, str]]) -> ControlResult:
+        """Restore physical wires; cutting no such pair is a no-op (§3.7)."""
+
+        error = self._validate_link_cuts(set(cuts))
+        if error is not None:
+            return ControlResult(ok=False, error=error)
+        self._link_cuts.remove(set(cuts))
+        return ControlResult()
+
+    def _validate_link_cuts(self, cuts: set[tuple[str, str]]) -> str | None:
+        sources = set(self._equipment) | {f"cab_{cab_id}" for cab_id in self._config.cab_ids}
+        targets = set(self._equipment) | {"train"}
+        for source, target in sorted(cuts):
+            if source == target:
+                return f"link source and target are identical: {source!r}"
+            if source not in sources:
+                return f"unknown link source: {source!r}"
+            if target not in targets:
+                return f"unknown link target: {target!r}"
+        return None
 
     def set_equipment(
         self, command: EquipmentControlRequest, *, received_at: float | None = None
@@ -349,10 +405,20 @@ class Train:
                 raise ValueError("btm requires data")
             return BtmControl(command.data, command.cab_id)
         if isinstance(equipment, StcsAtpBase):
-            if command.command is None and command.train_out_signal is None:
-                raise ValueError("stcs_atp requires a command or train_out_signal")
+            if (
+                command.command is None
+                and command.train_out_signal is None
+                and command.block is None
+                and command.unblock is None
+            ):
+                raise ValueError(
+                    "stcs_atp requires a command, train_out_signal, or block/unblock signals"
+                )
             return StcsAtpControl(
-                command=command.command, train_out_signal=command.train_out_signal
+                command=command.command,
+                train_out_signal=command.train_out_signal,
+                block=command.block,
+                unblock=command.unblock,
             )
         if isinstance(equipment, DrivingSystem):
             if command.mode is None and command.direction is None and command.acceleration is None:
@@ -410,28 +476,50 @@ class Train:
         driver_inputs: list[DriverControl] = []
         for intent in intents:
             if intent.target == "train":
+                if self._link_cuts.is_cut(intent.source, "train"):
+                    continue
                 if isinstance(intent.control, TrainControl):
                     self.apply_control(intent.control)
                 elif isinstance(intent.control, DriverControl):
                     driver_inputs.append(intent.control)
                 continue
-            target = self._equipment.get(intent.target)
-            if target is not None:
-                target.apply_control(intent.control)
-            elif intent.target == "all_equipments" and isinstance(intent.control, CabStateControl):
-                for equipment in self._equipment.values():
-                    observe_cab_state = getattr(equipment, "observe_cab_state", None)
-                    if observe_cab_state is not None:
-                        observe_cab_state(intent.control)
-            elif intent.target == "stcs_atp":  # Broadcast or route shared feedback.
-                for equipment in self._equipment.values():
-                    if isinstance(equipment, StcsAtpBase) and (
-                        not isinstance(intent.control, StcsAtpControl)
-                        or intent.control.cab_id is None
-                        or equipment.cab_id == intent.control.cab_id
-                    ):
-                        equipment.apply_control(intent.control)
+            for key in self._intent_recipients(intent):
+                if self._link_cuts.is_cut(intent.source, key):
+                    continue
+                equipment = self._equipment[key]
+                observe_cab_state = getattr(equipment, "observe_cab_state", None)
+                if isinstance(intent.control, CabStateControl) and observe_cab_state is not None:
+                    observe_cab_state(intent.control)
+                else:
+                    equipment.apply_control(intent.control)
         self._driver_inputs = tuple(driver_inputs)
+
+    def _intent_recipients(self, intent: EquipmentIntent) -> tuple[str, ...]:
+        """Expand an intent target to its concrete physical recipient keys.
+
+        Grouped targets resolve per wire: a cab broadcast reaches every
+        observer, the ``stcs_atp`` feedback group reaches every STCS
+        instance (cab-filtered by the control), so a cut addresses one
+        concrete source→recipient pair (§3.7).
+        """
+
+        if intent.target in self._equipment:
+            return (intent.target,)
+        if intent.target == "all_equipments" and isinstance(intent.control, CabStateControl):
+            return tuple(
+                key
+                for key, equipment in self._equipment.items()
+                if getattr(equipment, "observe_cab_state", None) is not None
+            )
+        if intent.target == "stcs_atp":
+            cab_id = intent.control.cab_id if isinstance(intent.control, StcsAtpControl) else None
+            return tuple(
+                key
+                for key, equipment in self._equipment.items()
+                if isinstance(equipment, StcsAtpBase)
+                and (cab_id is None or equipment.cab_id == cab_id)
+            )
+        return ()
 
     def _equipment_snapshot(self) -> tuple[EquipmentSnapshot, ...]:
         """Group per-instance snapshots by type key for the train snapshot.
@@ -473,10 +561,12 @@ class Train:
             ),
             drive_demand=self._drive_demand,
             equipment=equipment,
+            link_cuts=self._link_cuts.snapshot(),
         )
 
     def reset(self) -> None:
-        """Restore configured physical state and clear control/equipment state."""
+        """Restore configured physical state; clear control, equipment, and
+        link-cut runtime state."""
 
         self._position = self._config.initial_position
         self._speed = self._config.initial_speed
@@ -486,6 +576,7 @@ class Train:
             cab_id: cab_id == self._config.initial_active_cab for cab_id in self._config.cab_ids
         }
         self._cab_key = {cab_id: False for cab_id in self._config.cab_ids}
+        self._link_cuts.clear()
         for eq in self._equipment.values():
             eq.reset()
         self._resolve_all_intents()

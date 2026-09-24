@@ -24,6 +24,7 @@ from .commands import (
     Command,
     CommandResult,
     EquipmentCommand,
+    LinkCutsCommand,
     PauseCommand,
     ResetCommand,
     RunCommand,
@@ -182,6 +183,8 @@ class SimulationCore:
                 return self._apply_train_control(command)
             if isinstance(command, EquipmentCommand):
                 return self._apply_equipment(command)
+            if isinstance(command, LinkCutsCommand):
+                return self._apply_link_cuts(command)
             return CommandResult(ok=False, error=f"unknown command: {type(command).__name__}")
         except Exception as exc:  # noqa: BLE001 - never escape into run_loop
             return CommandResult(ok=False, error=f"command failed: {exc}")
@@ -253,6 +256,19 @@ class SimulationCore:
         # applied so the UI can show real command arrival; this is an
         # observability field injected into the domain, not a physics input.
         result = self._train.set_equipment(command.payload, received_at=time.time())
+        return CommandResult(ok=result.ok, error=result.error)
+
+    def _apply_link_cuts(self, command: LinkCutsCommand) -> CommandResult:
+        if command.train_id != self._train.train_id:
+            return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
+        if command.action == "replace":
+            result = self._train.replace_link_cuts(command.cuts)
+        elif command.action == "add":
+            result = self._train.add_link_cuts(command.cuts)
+        elif command.action == "remove":
+            result = self._train.remove_link_cuts(command.cuts)
+        else:
+            return CommandResult(ok=False, error=f"unknown link action: {command.action!r}")
         return CommandResult(ok=result.ok, error=result.error)
 
     # -- Fixed-step update cycle (§2.5) ----------------------------------

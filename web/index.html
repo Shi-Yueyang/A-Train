@@ -82,6 +82,19 @@
           </label>
           <span id="btm-send-buttons" class="controls"></span>
         </div>
+        <fieldset id="link-cuts">
+          <legend>
+            Physical link cuts (cut equipment wires; receivers hold their stale value)
+          </legend>
+          <div class="controls">
+            <select id="cut-source" aria-label="cut source"></select>
+            <span>&rarr;</span>
+            <select id="cut-target" aria-label="cut target"></select>
+            <button id="btn-cut-link">Cut wire</button>
+            <button id="btn-restore-all-links">Restore all</button>
+          </div>
+          <div id="cut-list" class="cut-list" aria-live="polite"></div>
+        </fieldset>
         <div class="controls">
           <fieldset>
             <legend>STCS ATP command (raw bit string, per instance)</legend>

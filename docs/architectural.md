@@ -455,6 +455,8 @@ small aggregate API:
 
 ```text
 apply_control(command)
+set_equipment(request)
+replace/add/remove_link_cuts(cuts)
 step(dt)
 get_snapshot()
 reset()
@@ -471,7 +473,8 @@ current batch (state assertions: an absent input lapses, so a released
 protection brake or a returned-to-off driving handle stops affecting the
 next step), and routes equipment-target intents to the target's
 `apply_control()` (e.g. door and driving-system handle feedback into
-the matching `stcs_atp_duo_<cab_id>` instance); it also runs after every accepted equipment
+the matching `stcs_atp_duo_<cab_id>` instance), skipping every delivery over
+a cut physical wire (§3.7); it also runs after every accepted equipment
 control, after reset, and once at construction. `get_snapshot()` returns a newly constructed immutable train snapshot; it
 never exposes the aggregate or mutable equipment objects.
 
@@ -538,10 +541,44 @@ this interface and extending the aggregate's configuration and snapshot types.
 Do not add protocol-specific behavior to an equipment component; adapters
 translate protocol data into equipment commands and publish snapshot data.
 
+When an equipment protocol derives its own output signals from state it holds
+(the STCS ATP inverted brake feedbacks, sleep, and handle mirrors), express the
+derivations as declarative rows on the equipment's signal table and apply them
+in one generic recompute pass; do not special-case variants in code. Each
+derivation is individually blockable through the control surface: a blocked
+derivation leaves its bit stale — manual assertions stick and unblock self-heals
+— mirroring the stale-not-zeroed wire doctrine of §3.7. Block state is ordinary
+equipment control state: it arrives only through typed controls on the command
+queue, is cleared by `reset()`, and is reported in signal snapshots.
+
 Keep snapshot extensions backward-compatible: add an optional frozen nested
 snapshot for new equipment rather than changing existing physical-state field
 meanings. This lets the WebSocket and ATP adapters evolve independently while
 the simulation core continues to treat each train as one aggregate.
+
+## 3.7 Physical Link Cuts (Equipment Wire Faults)
+
+The aggregate owns one more piece of world state: the set of **cut physical
+wires**. A wire is the concrete pair (intent source, intent recipient), where
+the source is an equipment key or a `cab_<id>` broadcast source and the
+recipient is one concrete equipment key or `train`. Grouped intent targets
+(`all_equipments`, the shared `stcs_atp` feedback group) are expanded to their
+concrete recipients at delivery time, so cutting e.g.
+`left_door -> stcs_atp_duo_1` leaves the parallel `left_door ->
+stcs_atp_duo_2` wire delivering.
+
+A cut delivery is a dropped message, not a zeroed one: the recipient keeps its
+last delivered value while the wire is cut (stale-signal semantics), and
+because every intent re-asserts current state, a restored wire self-heals on
+its next delivery. `reset()` clears all cuts. Cut requests are validated
+against the installed equipment and configured cabs, all-or-nothing, and
+arrive only through the command queue like every other control, so
+determinism is preserved. Cuts are equipment-wire state and are reported in
+the train snapshot (`link_cuts`), never on the ATP channel.
+
+This gives test rigs a hardware-fault model -- a dead actuator wire, a frozen
+feedback line, or an ATP protection brake that cannot reach the train --
+without equipment classes knowing about it.
 
 ---
 

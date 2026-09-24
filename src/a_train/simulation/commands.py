@@ -70,6 +70,15 @@ class EquipmentCommand(Command):
 
 
 @dataclass(frozen=True, kw_only=True)
+class LinkCutsCommand(Command):
+    """Replace, add, or remove physical link cuts of one train (§3.7)."""
+
+    train_id: str
+    action: str  # "replace" | "add" | "remove"
+    cuts: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, kw_only=True)
 class CommandResult:
     """Structured result of a command; invalid input is reported here rather
     than raised, so adapter exceptions never enter ``run_loop()`` (§2.6)."""

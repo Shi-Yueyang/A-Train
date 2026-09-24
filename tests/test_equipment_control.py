@@ -303,3 +303,149 @@ async def test_equipment_changes_do_not_advance_time(command: str) -> None:
         await _equipment(c, "right_door", command=command)
         after = (await c.get("/api/status")).json()["simulation_time"]
         assert after == before
+
+
+# -- STCS ATP internal derivations can be blocked through the API -------------
+
+
+def _atp_state(snap: dict, key: str = "stcs_atp_duo_1") -> dict:
+    return next(e["state"] for e in snap["equipment"] if e["key"] == key)
+
+
+def _out_bits(snap: dict, key: str = "stcs_atp_duo_1") -> dict[str, dict]:
+    return {s["name"]: s for s in _atp_state(snap, key)["train_out_states"]}
+
+
+async def test_block_freezes_feedback_while_the_protection_brake_still_bites() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        # Roll the train, and confirm the clear-brake feedback is derived.
+        await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 1.0})
+        await _step(c, 1.0)
+        moving = (await _train(c))["speed"]
+        assert moving > 0.0
+        feedback = _out_bits(await _train(c))["service_brake_7_feedback"]
+        assert feedback == {
+            "name": "service_brake_7_feedback",
+            "value": True,
+            "blockable": True,
+            "blocked": False,
+        }
+        assert _out_bits(await _train(c))["door_state_1"]["blockable"] is False
+
+        # Block, then assert maximum_service_brake_7 (bit 2): the feedback
+        # freezes claiming a clear brake while the input bit lands.
+        status, _ = await _equipment(c, "stcs_atp_duo_1", block=["service_brake_7_feedback"])
+        assert status == 200
+        status, snap = await _equipment(c, "stcs_atp_duo_1", command="001")
+        assert status == 200
+        frozen = _out_bits(snap)["service_brake_7_feedback"]
+        assert frozen["value"] is True and frozen["blocked"] is True
+
+        # The blocked feedback does not gate the train-target reaction.
+        await _step(c, 1.0)
+        assert (await _train(c))["speed"] == 0.0
+
+        # Manual assertions stick on the frozen bit; unblocked derived bits
+        # are still re-established against the operator's override.
+        status, snap = await _equipment(c, "stcs_atp_duo_1", train_out_signal="0000")
+        assert status == 200
+        assert _atp_state(snap)["train_out_signal"][:4] == "1110"
+
+        # Unblocking self-heals immediately (brake is still commanded).
+        status, snap = await _equipment(c, "stcs_atp_duo_1", unblock=["service_brake_7_feedback"])
+        assert status == 200
+        healed = _out_bits(snap)["service_brake_7_feedback"]
+        assert healed["value"] is False and healed["blocked"] is False
+
+        await c.post("/api/simulation/reset")
+        after_reset = _out_bits(await _train(c))["service_brake_7_feedback"]
+        assert after_reset["value"] is True and after_reset["blocked"] is False
+
+
+async def test_block_validation_is_all_or_nothing_and_scoped_to_derived_signals() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        status, body = await _equipment(c, "stcs_atp_duo_1", block=["nope"])
+        assert status == 400
+        assert "unknown stcs_atp signal" in body["detail"]
+
+        status, body = await _equipment(c, "stcs_atp_duo_1", block=["door_state_1"])
+        assert status == 400
+        assert "not blockable" in body["detail"]
+
+        # Train-in bits have no simulator-side derivation to freeze.
+        status, _ = await _equipment(c, "stcs_atp_duo_1", block=["emergency_brake_1"])
+        assert status == 400
+
+        # One invalid name poisons the whole request in either list.
+        status, _ = await _equipment(
+            c, "stcs_atp_duo_1", block=["sleep_signal", "cab_activation"], unblock=["nope"]
+        )
+        assert status == 400
+        assert not any(s["blocked"] for s in _out_bits(await _train(c)).values())
+
+        # A lone block is a valid equipment request.
+        status, _ = await _equipment(c, "stcs_atp_duo_1", block=["sleep_signal"])
+        assert status == 200
+
+
+async def test_block_freezes_handle_mirror_bits_per_instance() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        status, snap = await _equipment(
+            c, "driving_system_1", mode="traction", direction="forward", acceleration=1.0
+        )
+        assert status == 200
+        bits = _out_bits(snap)
+        assert bits["traction_handle_traction"]["value"] is True
+        assert bits["direction_handle_forward_1"]["value"] is True
+
+        status, _ = await _equipment(c, "stcs_atp_duo_1", block=["traction_handle_traction"])
+        assert status == 200
+
+        # Releasing the handles re-derives the unblocked mirror; the frozen
+        # bit keeps claiming traction, and the other cab's instance is
+        # untouched.
+        status, snap = await _equipment(c, "driving_system_1", mode="off", direction="off")
+        assert status == 200
+        bits = _out_bits(snap)
+        assert bits["traction_handle_traction"]["value"] is True
+        assert bits["traction_handle_traction"]["blocked"] is True
+        assert bits["direction_handle_forward_1"]["value"] is False
+        other = _out_bits(snap, "stcs_atp_duo_2")
+        assert other["traction_handle_traction"]["value"] is False
+
+        status, snap = await _equipment(c, "stcs_atp_duo_1", unblock=["traction_handle_traction"])
+        assert status == 200
+        healed = _out_bits(snap)["traction_handle_traction"]
+        assert healed["value"] is False and healed["blocked"] is False
+
+
+async def test_block_freezes_sleep_derivation_from_cab_activation() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        # Cab 1 starts active: sleep is derived false.
+        assert _out_bits(await _train(c))["sleep_signal"]["value"] is False
+
+        status, _ = await _equipment(c, "stcs_atp_duo_1", block=["sleep_signal"])
+        assert status == 200
+        r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "active": False})
+        assert r.status_code == 200
+
+        bits = _out_bits(await _train(c))
+        assert bits["cab_activation"] == {
+            "name": "cab_activation",
+            "value": False,
+            "blockable": False,
+            "blocked": False,
+        }
+        assert bits["sleep_signal"]["value"] is False
+        assert bits["sleep_signal"]["blocked"] is True
+
+        status, snap = await _equipment(c, "stcs_atp_duo_1", unblock=["sleep_signal"])
+        assert status == 200
+        assert _out_bits(snap)["sleep_signal"]["value"] is True

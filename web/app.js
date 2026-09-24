@@ -81,12 +81,12 @@ async function refresh() {
   }
 }
 
-async function postCommand(path, body) {
-  const res = await fetchJson(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}),
-  });
+async function postCommand(path, body, method = "POST") {
+  const options = { method, headers: { "Content-Type": "application/json" } };
+  if (method !== "GET" && method !== "DELETE") {
+    options.body = JSON.stringify(body || {});
+  }
+  const res = await fetchJson(path, options);
   if (res.ok) {
     state.error = null;
     state.notice = "ok";
@@ -460,6 +460,58 @@ function buildStcsTrainOutButton(entry) {
   return button;
 }
 
+function renderLinksPanel(train) {
+  const sourceSel = $("cut-source");
+  const targetSel = $("cut-target");
+  const list = $("cut-list");
+  if (!train) {
+    list.replaceChildren();
+    return;
+  }
+  const keys = (train.equipment || []).map((entry) => entry.key);
+  fillOptions(sourceSel, [...(train.cabs || []).map((c) => `cab_${c.cab_id}`), ...keys]);
+  fillOptions(targetSel, ["train", ...keys]);
+  list.replaceChildren();
+  const cuts = train.link_cuts || [];
+  if (!cuts.length) {
+    const empty = document.createElement("span");
+    empty.className = "cut-empty";
+    empty.textContent = "no cut wires";
+    list.appendChild(empty);
+    return;
+  }
+  for (const cut of cuts) {
+    const row = document.createElement("div");
+    row.className = "cut-row";
+    const label = document.createElement("span");
+    label.textContent = `${cut.source} → ${cut.target} (stale)`;
+    const restore = document.createElement("button");
+    restore.textContent = "Restore";
+    restore.onclick = () =>
+      postCommand(
+        `/trains/${state.selectedTrainId}/links/cut?source=${encodeURIComponent(
+          cut.source
+        )}&target=${encodeURIComponent(cut.target)}`,
+        null,
+        "DELETE"
+      );
+    row.append(label, restore);
+    list.appendChild(row);
+  }
+}
+
+function fillOptions(select, values) {
+  const previous = select.value;
+  select.replaceChildren(
+    ...values.map((value) => {
+      const option = document.createElement("option");
+      option.value = option.textContent = value;
+      if (value === previous) option.selected = true;
+      return option;
+    })
+  );
+}
+
 function renderEquipment(container, equipment) {
   container.replaceChildren();
   if (!equipment.length) {
@@ -492,8 +544,9 @@ function renderStcs(container, entries) {
   }
 }
 
-function buildSignalTable(states) {
+function buildSignalTable(states, onBlockToggle) {
   const table = document.createElement("table");
+  const showBlock = (states || []).some((signal) => signal.blockable);
   for (const [bit, signal] of (states || []).entries()) {
     const row = document.createElement("tr");
     if (signal.value) row.className = "on";
@@ -506,13 +559,28 @@ function buildSignalTable(states) {
     valueCell.className = "value";
     valueCell.textContent = signal.value ? "1" : "0";
     row.append(bitCell, nameCell, valueCell);
+    if (showBlock) {
+      const blockCell = document.createElement("td");
+      blockCell.className = "block";
+      if (signal.blockable) {
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.checked = Boolean(signal.blocked);
+        toggle.title = "block internal derivation";
+        toggle.onchange = () => onBlockToggle(signal.name, toggle.checked);
+        blockCell.appendChild(toggle);
+      } else {
+        blockCell.textContent = "—";
+      }
+      row.append(blockCell);
+    }
     table.appendChild(row);
   }
   return table;
 }
 
 function buildStcsCard(entry) {
-  const state = entry.state || {};
+  const stcs = entry.state || {};
   const card = document.createElement("article");
   card.className = "equipment-card stcs-card";
 
@@ -528,12 +596,12 @@ function buildStcsCard(entry) {
   cab.textContent = `cab: ${cabLabel}`;
   const command = document.createElement("span");
   const commandAt =
-    typeof state.last_command_time === "number"
-      ? ` (received ${formatWallClock(state.last_command_time)})`
+    typeof stcs.last_command_time === "number"
+      ? ` (received ${formatWallClock(stcs.last_command_time)})`
       : "";
-  command.textContent = `last ATP command: ${state.last_command ?? "—"}${commandAt}`;
+  command.textContent = `last ATP command: ${stcs.last_command ?? "—"}${commandAt}`;
   const signal = document.createElement("span");
-  signal.textContent = `train-out signal: ${state.train_out_signal || "—"}`;
+  signal.textContent = `train-out signal: ${stcs.train_out_signal || "—"}`;
   raw.append(
     cab,
     document.createElement("br"),
@@ -545,15 +613,19 @@ function buildStcsCard(entry) {
 
   const columns = document.createElement("div");
   columns.className = "stcs-columns";
-  for (const [title, states] of [
-    ["ATP → train (in)", state.train_in_states],
-    ["train → ATP (out)", state.train_out_states],
+  const setBlocked = async (name, blocked) => {
+    await postCommand(`/trains/${state.selectedTrainId}/equipment/${entry.key}`,
+      blocked ? { block: [name] } : { unblock: [name] });
+  };
+  for (const [title, states, onBlockToggle] of [
+    ["ATP → train (in)", stcs.train_in_states, null],
+    ["train → ATP (out)", stcs.train_out_states, setBlocked],
   ]) {
     const column = document.createElement("div");
     const label = document.createElement("h4");
     label.textContent = title;
     column.appendChild(label);
-    column.appendChild(buildSignalTable(states));
+    column.appendChild(buildSignalTable(states, onBlockToggle));
     columns.appendChild(column);
   }
   card.appendChild(columns);
@@ -596,6 +668,7 @@ function render() {
   renderStatus();
   renderTrainSelectors();
   renderTrainState();
+  renderLinksPanel(selectedTrain());
   renderMessage();
   renderWsStatus();
 }
@@ -706,6 +779,14 @@ function bind() {
     });
 
   $("btm-payload").oninput = renderBtmEncoding;
+
+  $("btn-cut-link").onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/links/cut`, {
+      source: $("cut-source").value,
+      target: $("cut-target").value,
+    });
+  $("btn-restore-all-links").onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/links`, { cuts: [] }, "PUT");
 }
 
 async function sendBtmPayload(key) {

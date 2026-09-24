@@ -203,7 +203,7 @@ frozen `TrainConfig` and rebuilt state on `reset`:
 
 ```python
 if len(train_configs) != 1:
-  raise ValueError("exactly one train configuration is required")
+    raise ValueError("exactly one train configuration is required")
 self._train = Train(train_configs[0])
 ```
 
