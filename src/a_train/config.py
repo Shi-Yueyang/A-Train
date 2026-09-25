@@ -1,15 +1,15 @@
-"""Startup configuration for the declarative train and its ATP endpoints.
+"""Startup configuration for the declarative train and ATP listeners.
 
 The whole startup configuration lives in the single ``--train-config`` JSON
 file: a ``train`` object describing the train, cabs, physics, and equipment,
-plus an optional ``atp`` array of server endpoints, one per cab. The parsed
+plus an optional ``atp`` array of local listener addresses. The parsed
 configuration is handed to the server through the ``A_TRAIN_CONFIG``
 environment variable so the uvicorn factory and reload subprocesses receive
 the same values.
 
-Endpoint dictionaries are plain transport-neutral data: ``host`` (non-empty
-str) and ``port`` (1-65535). ATP connections carry no cab binding; the train
-identity and cab targets live in the protocol messages.
+Listener dictionaries are plain transport-neutral data: ``host``
+(non-empty str) and ``port`` (1-65535). ATP connections carry no cab binding;
+the train identity and cab targets live in the protocol messages.
 """
 
 from __future__ import annotations
@@ -71,8 +71,8 @@ def _generated_equipment_key(equipment_type: str, params: Mapping[str, Any], use
     return key
 
 
-def validate_endpoint(entry: Mapping[str, Any], where: str = "atp endpoint") -> dict[str, Any]:
-    """Normalise one endpoint mapping, raising ConfigError on invalid fields."""
+def validate_endpoint(entry: Mapping[str, Any], where: str = "atp listener") -> dict[str, Any]:
+    """Normalise one listener mapping, raising ConfigError on invalid fields."""
 
     if not isinstance(entry, Mapping):
         raise ConfigError(f"{where}: expected an object, got {entry!r}")
@@ -85,8 +85,8 @@ def validate_endpoint(entry: Mapping[str, Any], where: str = "atp endpoint") -> 
     }
 
 
-def endpoints_from_data(data: Any, where: str = "atp endpoints") -> list[dict[str, Any]]:
-    """Validate the ``atp`` startup array: one ``{host, port}`` peer per entry."""
+def endpoints_from_data(data: Any, where: str = "atp listeners") -> list[dict[str, Any]]:
+    """Validate the ``atp`` array: one local ``{host, port}`` listener per entry."""
 
     if data is None:
         return []

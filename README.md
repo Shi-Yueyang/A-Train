@@ -45,11 +45,12 @@ curl http://127.0.0.1:8001/api/status
 
 ## ATP
 
-The simulator hosts one configured train. List the external ATP servers to
-dial in the `atp` array of the train configuration file (see below).
-Connections carry no cab binding: every peer receives the identical
-whole-train `TRAIN_STATE` broadcast, and every peer may command any cab by
-putting `cab_id` in its `ATP_COMMAND` messages.
+The simulator hosts one configured train and listens for external ATP clients
+on the address or addresses in the `atp` array of the train configuration
+file (see below). ATP connects to A-Train. Connections carry no cab binding:
+every connected peer receives the identical whole-train `TRAIN_STATE`
+broadcast, and every peer may command any cab by putting `cab_id` in its
+`ATP_COMMAND` messages.
 
 ```bash
 python -m a_train run --train-config train.json --host 127.0.0.1 --port 8001
@@ -67,7 +68,7 @@ python -m a_train run --train-config train.json
 ```
 
 The file describes the single supported train, its cabs, physics, and a flat
-equipment list, plus an optional `atp` array of ATP server endpoints. For
+equipment list, plus an optional `atp` array of local ATP listener addresses. For
 example:
 
 ```json
@@ -105,9 +106,10 @@ messages address instances. The supported equipment types are `door`, `btm`,
 `driving_system`, `stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`. Each equipment entry
 may include `"enabled": false` to leave that equipment out of the installed
 train; omitted `enabled` values default to `true`. Equipment configuration is
-validated before the server starts. The optional `atp` array lists ATP
-servers as `{host, port}` pairs to dial -- peers are not bound to cabs; a
-missing or empty `atp` array runs the simulator with zero ATP connections.
+validated before the server starts. Each optional `atp` entry is a `{host,
+port}` address for A-Train to bind; ATP clients connect to that address. Peers
+are not bound to cabs. A missing or empty `atp` array starts without an ATP
+listener.
 
 ## Checks
 

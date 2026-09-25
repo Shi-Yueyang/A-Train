@@ -69,7 +69,7 @@ Non-goals for the initial version:
 │                 │                       │                        │
 │          ATP Connection A       ATP Connection B                 │
 │                 │                       │                        │
-│              TCP Client             TCP Client                    │
+│              TCP Server             TCP Server                    │
 └─────────────────┼───────────────────────┼────────────────────────┘
                   │                       │
                   │ TCP                   │ TCP
@@ -102,7 +102,7 @@ repository structure in §7.2):
   external protocols into core commands and never touch domain objects
   directly.
 
-**External ATP processes** — ATP is an external system, not implemented by this project. Each cab connects to its own ATP process:
+**External ATP processes** — ATP is an external system, not implemented by this project. Each ATP process connects to A-Train over TCP; message `cab_id` fields select cab-scoped actions:
 
 ```text
 Train
@@ -114,7 +114,7 @@ Train
     └── External ATP Process 2
 ```
 
-The simulator communicates with ATP via TCP/NDJSON. ATP processes are independent. A failure of one should not crash the simulator. No fail-safe behavior (e.g. automatic deceleration on ATP loss) is defined; see non-goals.
+The simulator listens for ATP connections and communicates via TCP/NDJSON. ATP processes are independent. A failure of one should not crash the simulator. ATP clients may reconnect after a drop. No fail-safe behavior (e.g. automatic deceleration on ATP loss) is defined; see non-goals.
 
 **Browser** is a presentation and control client. It must not contain core simulation logic.
 
@@ -305,13 +305,14 @@ physics.
 
 Use integration tests only. Each test starts the application through
 `bootstrap.py` with its real `SimulationCore`, FastAPI application, WebSocket
-publisher, and ATP adapter. Replace external ATP processes with a controllable
-test TCP server that speaks the production NDJSON protocol.
+publisher, and ATP adapter. Replace external ATP processes with controllable
+test TCP clients that connect to A-Train and speak the production NDJSON
+protocol.
 
 Each integration test configures the required initial state, selects `MANUAL`
 mode through the REST API, advances time through `POST /api/simulation/step`,
 and verifies observable behavior through REST responses, WebSocket snapshots,
-and the test ATP server's received and sent protocol messages. Tests must not
+and the test ATP client's received and sent protocol messages. Tests must not
 access core or domain objects directly.
 
 The integration suite must cover complete workflows for run/pause/reset,
@@ -642,13 +643,13 @@ configuration and observability -- is specified in
 **[`atp-api.md`](atp-api.md)**, which mirrors the implementation in
 `src/a_train/adapters/atp/`.
 
-In one paragraph: each ATP process is a TCP server serving exactly one cab;
-the simulator dials every configured endpoint, streams `train_state`
-      observations with the current per-cab BTM entry embedded in the
-snapshot, and accepts `atp_command` action requests from ATP, mapping them
-onto the same transport-neutral core commands the Web API submits. Invalid
-input is answered with `ERROR` without affecting the simulation. The interface
-boundary that makes this safe is §4.1: ATP requests, physics decides.
+In one paragraph: A-Train listens on every configured ATP address, streams
+`train_state` observations with the current per-cab BTM entry embedded in the
+snapshot to each connected ATP process, and accepts `atp_command` action
+requests from ATP, mapping them onto the same transport-neutral core commands
+the Web API submits. Invalid input is answered with `ERROR` without affecting
+the simulation. The interface boundary that makes this safe is §4.1: ATP
+requests, physics decides.
 
 ---
 
@@ -851,8 +852,8 @@ train-simulator/
 │   │   └── atp/
 │   │       ├── __init__.py         # ATP adapter public exports.
 │   │       ├── protocol.py         # NDJSON encode/decode and protocol-message validation.
-│   │       ├── client.py           # One reconnecting TCP client for one external ATP process.
-│   │       └── manager.py          # Creates clients and bridges snapshots and ATP commands.
+│   │       ├── connection.py       # Accepted ATP TCP session and framed message publishing.
+│   │       └── manager.py          # Hosts listeners and bridges snapshots and ATP commands.
 │
 ├── web/                            # Static browser client; contains no simulation rules.
 │   ├── index.html                  # Application document and static asset entry point.
@@ -860,10 +861,10 @@ train-simulator/
 │   └── style.css                   # Browser presentation styles.
 │
 ├── tests/                          # End-to-end integration tests only.
-│   ├── conftest.py                 # Starts the complete application and test ATP server.
+│   ├── conftest.py                 # Starts the complete application and test ATP client.
 │   ├── support/
 │   │   ├── app.py                  # Application lifecycle and REST/WebSocket test client helpers.
-│   │   └── atp_server.py           # Controllable production-protocol TCP server for test ATP peers.
+│   │   └── atp_server.py           # Controllable production-protocol ATP test client.
 │   ├── test_simulation_control.py  # Run, pause, reset, manual stepping, and time-mode workflows.
 │   ├── test_train_movement.py      # Train physics and signal behavior observed through the public API.
 │   ├── test_atp_integration.py     # Train-state publication and ATP-command application over TCP/NDJSON.

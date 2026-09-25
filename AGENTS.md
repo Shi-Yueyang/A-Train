@@ -29,7 +29,7 @@ documentation with dependency or contract changes.
   snapshot publication.
 - `src/a_train/adapters/api/` contains the FastAPI REST and WebSocket adapter.
 - `src/a_train/adapters/atp/` contains the TCP/NDJSON ATP adapter.
-- `tests/` contains integration tests using the public API and test ATP server.
+- `tests/` contains integration tests using the public API and test ATP client.
 - `web/` contains the browser client and must not contain simulation logic.
 - `docs/` contains the architecture and public API contracts.
 

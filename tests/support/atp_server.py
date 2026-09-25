@@ -1,38 +1,44 @@
-"""Controllable production-protocol TCP server for test ATP peers (§6).
+"""Controllable ATP TCP client for integration tests (§6).
 
-The simulator connects to an external ATP process over TCP/NDJSON. In tests
-that ATP process is replaced by this server, which speaks the same NDJSON
-protocol over a real TCP socket -- no production module is mocked.
-
-Each connected client's received NDJSON lines are collected into a shared
-deque; a test can ``send`` a message (broadcast to all connected clients) and
-``wait_for_message`` to read the next received message.
+The test peer connects to A-Train's listener and exchanges production NDJSON
+over real TCP sockets. It retries until the application is listening.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import socket
 from collections import deque
 from collections.abc import Mapping
 from typing import Any
 
 
 class TestAtpServer:
-    """A controllable asyncio TCP server speaking NDJSON."""
+    """A controllable ATP client speaking NDJSON to A-Train."""
 
     __test__ = False  # support helper; not a pytest test class
 
     def __init__(self) -> None:
-        self._server: asyncio.Server | None = None
         self._port: int = 0
         self._received: deque[dict[str, Any]] = deque()
-        self._clients: list[asyncio.StreamWriter] = []
+        self._clients: dict[int, asyncio.StreamWriter] = {}
+        self._tasks: list[asyncio.Task[None]] = []
+        self._stopping = False
 
-    async def start(self, host: str = "127.0.0.1", port: int = 0) -> int:
-        self._server = await asyncio.start_server(self._handle_connection, host, port)
-        sock = self._server.sockets[0]
-        self._port = sock.getsockname()[1]
+    async def start(
+        self, host: str = "127.0.0.1", port: int = 0, *, peer_count: int = 1
+    ) -> int:
+        if port == 0:
+            with socket.socket() as probe:
+                probe.bind((host, 0))
+                port = int(probe.getsockname()[1])
+        self._port = port
+        self._stopping = False
+        self._tasks = [
+            asyncio.create_task(self._connect_peer(host, port, index))
+            for index in range(peer_count)
+        ]
         return self._port
 
     @property
@@ -48,34 +54,37 @@ class TestAtpServer:
 
         self._clients[index].close()
 
-    async def _handle_connection(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        self._clients.append(writer)
-        try:
-            while True:
-                line = await reader.readline()
-                if not line:
-                    break
-                try:
-                    message = json.loads(line.decode("utf-8"))
-                except json.JSONDecodeError:
-                    continue
-                self._received.append(message)
-        except (asyncio.IncompleteReadError, ConnectionError):
-            pass
-        finally:
-            if writer in self._clients:
-                self._clients.remove(writer)
+    async def _connect_peer(self, host: str, port: int, index: int) -> None:
+        while not self._stopping:
+            writer: asyncio.StreamWriter | None = None
             try:
-                writer.close()
-                await writer.wait_closed()
+                reader, writer = await asyncio.open_connection(host, port)
+                self._clients[index] = writer
+                while True:
+                    line = await reader.readline()
+                    if not line:
+                        break
+                    try:
+                        message = json.loads(line.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        continue
+                    self._received.append(message)
             except (ConnectionError, OSError):
                 pass
+            finally:
+                self._clients.pop(index, None)
+                if writer is not None:
+                    writer.close()
+                    try:
+                        await writer.wait_closed()
+                    except (ConnectionError, OSError):
+                        pass
+            if not self._stopping:
+                await asyncio.sleep(0.05)
 
     async def send(self, message: Mapping[str, Any]) -> None:
         data = (json.dumps(dict(message)) + "\n").encode("utf-8")
-        for writer in list(self._clients):
+        for writer in list(self._clients.values()):
             writer.write(data)
             await writer.drain()
 
@@ -100,7 +109,13 @@ class TestAtpServer:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
-        for writer in list(self._clients):
+        self._stopping = True
+        for task in self._tasks:
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
+        for writer in list(self._clients.values()):
             try:
                 writer.close()
             except (ConnectionError, OSError):

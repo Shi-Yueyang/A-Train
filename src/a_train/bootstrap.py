@@ -38,8 +38,6 @@ async def lifespan(
     app: FastAPI,
     train_configs: Sequence[TrainConfig] | None = None,
     atp_endpoints: Sequence[AtpEndpoint] | None = None,
-    *,
-    atp_retry_delay: float = 1.0,
 ):
     # Startup: assemble production components and start background tasks.
     command_queue: asyncio.Queue[Command] = asyncio.Queue()
@@ -67,11 +65,7 @@ async def lifespan(
         endpoints = tuple(AtpEndpoint(entry["host"], entry["port"]) for entry in env_endpoints)
     else:
         endpoints = tuple(atp_endpoints)
-    atp_manager = AtpManager(
-        core,
-        endpoints=endpoints,
-        retry_delay=atp_retry_delay,
-    )
+    atp_manager = AtpManager(core, endpoints=endpoints)
     await atp_manager.start()
 
     app.state.core = core
@@ -107,8 +101,6 @@ def _config_from_environment() -> tuple[TrainConfig | None, list[dict[str, Any]]
 def create_app(
     train_configs: Sequence[TrainConfig] | None = None,
     atp_endpoints: Sequence[AtpEndpoint] | None = None,
-    *,
-    atp_retry_delay: float = 1.0,
 ) -> FastAPI:
     """Build the FastAPI application with the production lifespan wired in.
 
@@ -131,7 +123,6 @@ def create_app(
             app,
             train_configs=train_configs_capture,
             atp_endpoints=endpoints_capture,
-            atp_retry_delay=atp_retry_delay,
         ):
             yield
 

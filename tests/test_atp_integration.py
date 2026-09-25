@@ -1,7 +1,7 @@
 """Phase 3.2 acceptance tests — ATP protocol and content publishing.
 
-Channels are READY the moment TCP opens -- no handshake. Every READY peer
-receives identical whole-train ``TRAIN_STATE`` broadcasts; inbound
+Every accepted peer is ready the moment TCP opens -- no handshake. Every
+connected ATP peer receives identical whole-train ``TRAIN_STATE`` broadcasts; inbound
 ``ATP_COMMAND`` messages state their target ``cab_id`` in the message and
 drive the train through the core; malformed and unexpected input is answered
 with ``ERROR`` without stopping the simulation or another connection. All
@@ -32,7 +32,7 @@ T1 = TrainConfig(
 
 
 def _two_peers(port: int) -> list[AtpEndpoint]:
-    return [AtpEndpoint("127.0.0.1", port), AtpEndpoint("127.0.0.1", port)]
+    return [AtpEndpoint("127.0.0.1", port)]
 
 
 def _one_peer(port: int) -> list[AtpEndpoint]:
@@ -82,9 +82,9 @@ def _wire_entry(message: dict, eq_type: str, cab_id: int) -> dict:
 
 async def test_manual_step_publishes_identical_train_state_to_both_peers() -> None:
     server = TestAtpServer()
-    port = await server.start()
+    port = await server.start(peer_count=2)
     try:
-        async with running_app([T1], _two_peers(port)) as c:
+        async with running_app([T1], _one_peer(port)) as c:
             await _await_ready(c, ready_count=2)
 
             await c.post("/api/simulation/time-mode", json={"mode": "MANUAL"})
@@ -209,9 +209,9 @@ async def test_invalid_atp_command_answers_error() -> None:
 
 async def test_malformed_line_reported_without_stopping_anything() -> None:
     server = TestAtpServer()
-    port = await server.start()
+    port = await server.start(peer_count=2)
     try:
-        async with running_app([T1], _two_peers(port)) as c:
+        async with running_app([T1], _one_peer(port)) as c:
             await _await_ready(c, ready_count=2)
 
             await server.send_raw("this is not json\n")

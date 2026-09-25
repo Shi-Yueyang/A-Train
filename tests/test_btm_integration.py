@@ -1,4 +1,4 @@
-"""Phase 3.2 acceptance tests — end-to-end BTM delivery to an ATP peer (atp-api.md §3.1).
+"""Phase 3.2 acceptance tests — end-to-end BTM delivery to an ATP client (atp-api.md §3.1).
 
 A BTM payload injected through the equipment endpoint appears in the target
 cab's ``TRAIN_STATE`` equipment snapshot; the payload stays opaque to the
@@ -28,7 +28,7 @@ PAYLOAD = bytes([0x01, 0x23, 0xA4, 0xFF, 0x00, 0x81, 0x72])
 
 
 def _cabs(port: int) -> list[AtpEndpoint]:
-    return [AtpEndpoint("127.0.0.1", port), AtpEndpoint("127.0.0.1", port)]
+    return [AtpEndpoint("127.0.0.1", port)]
 
 
 def _manager(c):  # AtpManager
@@ -103,7 +103,7 @@ async def _next_train_state_with_btm(
 
 async def test_btm_delivery_is_embedded_in_train_state() -> None:
     server = TestAtpServer()
-    port = await server.start()
+    port = await server.start(peer_count=2)
     try:
         async with running_app([T1], _cabs(port)) as c:
             await _await_ready(c, ready_count=2)

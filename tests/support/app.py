@@ -26,7 +26,6 @@ async def running_app(
     train_configs: Sequence[TrainConfig] | None = None,
     atp_endpoints: Sequence[AtpEndpoint] | None = None,
     *,
-    atp_retry_delay: float = 0.05,
     use_environment_train_config: bool = False,
 ) -> AsyncIterator[httpx.AsyncClient]:
     """``atp_endpoints=None`` uses the production env-var path (config.py)."""
@@ -34,7 +33,6 @@ async def running_app(
     app = create_app(
         None if use_environment_train_config and train_configs is None else train_configs,
         atp_endpoints,
-        atp_retry_delay=atp_retry_delay,
     )
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)

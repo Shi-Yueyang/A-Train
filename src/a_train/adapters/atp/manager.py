@@ -1,19 +1,4 @@
-"""Creates clients and bridges snapshots and ATP commands (atp-api.md, §2.6).
-
-The manager holds one ``AtpClient`` per configured ATP peer (atp-api.md §1.1).
-A peer's connection carries no cab binding: ``start()`` launches every
-client's connection loop, subscribes one bounded snapshot queue per peer, and
-runs a publisher task per client that turns core snapshots into identical
-whole-train ``TRAIN_STATE`` lines (atp-api.md §3.1). Inbound ATP content is
-validated (its message-borne ``cab_id`` selects the target) and converted
-into commands submitted to the core, which stamps the domain train identity
-(architectural.md §4.1). Rejected input is answered with an ``ERROR`` message
-(atp-api.md §5). Publisher and inbound tasks perform all protocol I/O outside
-``run_loop()``, so a slow or chatty ATP peer cannot delay physics (§2.6).
-
-With no endpoints configured (the default), ``start()`` and ``stop()`` are
-no-ops and the application runs ATP-free.
-"""
+"""Hosts ATP TCP listeners and bridges snapshots and ATP commands (§2.6)."""
 
 from __future__ import annotations
 
@@ -27,8 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 from ...domain.train import EquipmentControlRequest, TrainControl
 from ...simulation.commands import EquipmentCommand, TrainControlCommand
-from .client import AtpClient
-from .protocol import make_error, parse_atp_command
+from .connection import AtpConnection
+from .protocol import decode_line, make_error, parse_atp_command
 
 if TYPE_CHECKING:
     from ...simulation.core import SimulationCore
@@ -38,40 +23,50 @@ logger = logging.getLogger("a_train.adapters.atp")
 
 @dataclass(frozen=True)
 class AtpEndpoint:
-    """Where to reach one external ATP process."""
+    """Local address on which A-Train accepts ATP connections."""
 
     host: str
     port: int
 
 
 class AtpManager:
-    """Owns the TCP clients, publishers, and inbound handling for all peers."""
+    """Owns ATP TCP listeners, accepted sessions, and protocol handling."""
 
     def __init__(
         self,
         core: SimulationCore,
         endpoints: Sequence[AtpEndpoint] = (),
-        *,
-        retry_delay: float = 1.0,
-        max_retry_delay: float = 30.0,
     ) -> None:
         self._core = core
         self._endpoints = tuple(endpoints)
-        self._retry_delay = retry_delay
-        self._max_retry_delay = max_retry_delay
-        self._clients: list[AtpClient] = []
-        self._publisher_tasks: dict[AtpClient, asyncio.Task[None]] = {}
-        self._queues: dict[AtpClient, asyncio.Queue[Any]] = {}
+        self._servers: list[asyncio.AbstractServer] = []
+        self._clients: list[AtpConnection] = []
+        self._session_tasks: set[asyncio.Task[None]] = set()
+        self._publisher_tasks: dict[AtpConnection, asyncio.Task[None]] = {}
+        self._queues: dict[AtpConnection, asyncio.Queue[Any]] = {}
+        self._active_peers_by_endpoint = {endpoint: 0 for endpoint in self._endpoints}
+        self._listening = False
 
     @property
-    def clients(self) -> tuple[AtpClient, ...]:
+    def clients(self) -> tuple[AtpConnection, ...]:
         return tuple(self._clients)
 
     @property
+    def endpoints(self) -> tuple[AtpEndpoint, ...]:
+        return self._endpoints
+
+    @property
+    def listening(self) -> bool:
+        return self._listening
+
+    @property
     def ready_count(self) -> int:
-        """Number of peer channels currently open (READY)."""
+        """Number of ATP peers currently connected."""
 
         return sum(1 for client in self._clients if client.ready)
+
+    def active_peer_count(self, endpoint: AtpEndpoint) -> int:
+        return self._active_peers_by_endpoint.get(endpoint, 0)
 
     def send_message(self, message: dict[str, Any]) -> bool:
         """Broadcast one framed message to every READY peer; True if any write."""
@@ -83,44 +78,113 @@ class AtpManager:
         return sent
 
     async def start(self) -> None:
-        for endpoint in self._endpoints:
-            client = AtpClient(
-                endpoint.host,
-                endpoint.port,
-                retry_delay=self._retry_delay,
-                max_retry_delay=self._max_retry_delay,
-            )
-            client.set_inbound_handler(partial(self._handle_inbound, client))
-            queue = self._core.subscribe()
-            self._queues[client] = queue
-            self._publisher_tasks[client] = asyncio.create_task(
-                self._publish_loop(client, queue),
-                name=f"atp-publisher {endpoint.host}:{endpoint.port}",
-            )
-            await client.start()
-            self._clients.append(client)
+        try:
+            for endpoint in self._endpoints:
+                server = await asyncio.start_server(
+                    partial(self._accept, endpoint), endpoint.host, endpoint.port
+                )
+                self._servers.append(server)
+            self._listening = bool(self._servers)
+        except BaseException:
+            await self.stop()
+            raise
 
     async def stop(self) -> None:
+        for server in self._servers:
+            server.close()
+        await asyncio.gather(*(server.wait_closed() for server in self._servers))
+        self._servers.clear()
         for client in self._clients:
-            await client.stop()
-            task = self._publisher_tasks.pop(client, None)
-            if task is not None:
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
-            queue = self._queues.pop(client, None)
-            if queue is not None:
-                self._core.unsubscribe(queue)
+            client.close()
+        tasks = [*self._session_tasks, *self._publisher_tasks.values()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for queue in self._queues.values():
+            self._core.unsubscribe(queue)
+        self._publisher_tasks.clear()
+        self._queues.clear()
         self._clients.clear()
+        self._session_tasks.clear()
+        self._active_peers_by_endpoint = {endpoint: 0 for endpoint in self._endpoints}
+        self._listening = False
 
-    async def _publish_loop(self, client: AtpClient, queue: asyncio.Queue[Any]) -> None:
+    def _accept(
+        self,
+        endpoint: AtpEndpoint,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        task = asyncio.create_task(
+            self._serve_peer(endpoint, reader, writer), name="atp-peer-session"
+        )
+        self._session_tasks.add(task)
+        task.add_done_callback(self._session_tasks.discard)
+
+    async def _serve_peer(
+        self,
+        endpoint: AtpEndpoint,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        client = AtpConnection(writer)
+        self._clients.append(client)
+        self._active_peers_by_endpoint[endpoint] += 1
+        queue = self._core.subscribe()
+        self._queues[client] = queue
+        publisher = asyncio.create_task(
+            self._publish_loop(client, queue), name=f"atp-publisher {client.ident}"
+        )
+        self._publisher_tasks[client] = publisher
+        logger.info("%s: channel established", client.ident)
+        try:
+            while True:
+                try:
+                    line = await reader.readline()
+                except ValueError as exc:
+                    logger.warning("%s: stream error: %s", client.ident, exc)
+                    break
+                if not line:
+                    logger.info("%s: closed by peer", client.ident)
+                    break
+                try:
+                    message = decode_line(line)
+                except ValueError as exc:
+                    logger.warning("%s: %s", client.ident, exc)
+                    client.send_message(make_error("malformed_message", str(exc)))
+                    continue
+                await self._handle_inbound(client, message)
+        except asyncio.CancelledError:
+            raise
+        except (ConnectionError, OSError) as exc:
+            logger.info("%s: connection ended: %s", client.ident, exc)
+        finally:
+            publisher.cancel()
+            with suppress(asyncio.CancelledError):
+                await publisher
+            self._publisher_tasks.pop(client, None)
+            self._queues.pop(client, None)
+            self._core.unsubscribe(queue)
+            self._active_peers_by_endpoint[endpoint] -= 1
+            if client in self._clients:
+                self._clients.remove(client)
+            client.close()
+            with suppress(Exception):
+                await writer.wait_closed()
+
+    async def _publish_loop(
+        self, client: AtpConnection, queue: asyncio.Queue[Any]
+    ) -> None:
         while True:
             snapshot = await queue.get()
             client.publish(snapshot)
 
     # -- Inbound ATP content (atp-api.md §4, §5) ---------------------------------
 
-    async def _handle_inbound(self, client: AtpClient, message: dict[str, Any]) -> None:
+    async def _handle_inbound(
+        self, client: AtpConnection, message: dict[str, Any]
+    ) -> None:
         mtype = message.get("type")
         if mtype == "atp_command":
             await self._handle_atp_command(client, message)
@@ -131,7 +195,9 @@ class AtpManager:
                 make_error("unknown_message_type", f"unexpected message type: {mtype!r}")
             )
 
-    async def _handle_atp_command(self, client: AtpClient, message: dict[str, Any]) -> None:
+    async def _handle_atp_command(
+        self, client: AtpConnection, message: dict[str, Any]
+    ) -> None:
         train_id = self._core.train_id
         try:
             cab_id, drive_demand, door, atp_signal = parse_atp_command(message)

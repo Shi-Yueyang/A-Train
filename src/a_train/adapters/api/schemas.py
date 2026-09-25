@@ -142,12 +142,13 @@ class TrainsResponse(BaseModel):
 
 
 class AtpConnectionResponse(BaseModel):
-    """One ATP peer connection state (atp-api.md §6.2)."""
+    """One A-Train ATP listener state (atp-api.md §6.2)."""
 
     host: str
     port: int
-    state: str = Field(description="IDLE / CONNECTING / READY / DISCONNECTED / STOPPED.")
-    ready: bool = Field(description="True while the TCP channel is open.")
+    state: str = Field(description="READY while the listener accepts connections; otherwise STOPPED.")
+    ready: bool = Field(description="True while the TCP listener is active.")
+    active_peers: int = Field(description="Number of currently connected ATP clients.")
 
 
 class AtpStatusResponse(BaseModel):

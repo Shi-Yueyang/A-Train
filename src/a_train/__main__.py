@@ -38,7 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         help=(
             "JSON file defining the train, cabs, physics, equipment, and the "
-            "optional ATP server endpoints (one per cab)."
+            "optional local ATP listener addresses. ATP clients connect to them."
         ),
     )
 

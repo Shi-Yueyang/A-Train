@@ -2,8 +2,8 @@
 
 This document specifies the wire protocol between the simulator and external
 ATP (Automatic Train Protection) processes, as **implemented** by
-`src/a_train/adapters/atp/` (`protocol.py` framing and builders, `client.py`
-transport, `manager.py` dispatch). The architectural boundary it enforces --
+`src/a_train/adapters/atp/` (`protocol.py` framing and builders,
+`connection.py` transport, `manager.py` dispatch). The architectural boundary it enforces --
 "ATP requests, physics decides" -- is in `architectural.md` §4.1. The
 browser-facing HTTP/WebSocket API is a separate contract (`web-api.md`).
 
@@ -16,14 +16,14 @@ browser-facing HTTP/WebSocket API is a separate contract (`web-api.md`).
 | Aspect         | Rule                                                                                                            |
 | -------------- | --------------------------------------------------------------------------------------------------------------- |
 | Transport      | TCP, one persistent connection per ATP peer.                                                                    |
-| TCP server     | The**ATP process**. It accepts exactly one connection at a time.                                          |
-| TCP client     | The**simulator**. It dials each configured endpoint and keeps the connection open.                        |
+| TCP server     | The **simulator**. It accepts ATP client connections on each configured listener.                         |
+| TCP client     | The **ATP process**. It connects to A-Train and keeps the connection open.                                  |
 | Stream content | NDJSON: one JSON object per line,`\n`-terminated, UTF-8.                                                      |
 | Channel identity | **None.** Connections carry no cab or train binding; the endpoint list is pure network addressing. Equipment addressing and command targets live entirely in the message payloads. |
 
 The channel is live the moment TCP opens, and the simulator starts publishing
-immediately. Every READY peer receives the **same** whole-train broadcast:
-all channels carry byte-identical messages.
+immediately. Every connected ATP peer receives the **same** whole-train
+broadcast: all channels carry byte-identical messages.
 
 ### 1.2 Framing rules
 
@@ -33,36 +33,32 @@ all channels carry byte-identical messages.
   JSON, non-object, missing `type`) is answered with an `ERROR`
   (`malformed_message`, §5.1) and the connection stays up.
 - A line longer than 64 KiB is a stream error: the session is dropped and the
-  client reconnects (§1.4).
+  ATP client may reconnect.
 
 ### 1.3 Channel lifecycle
 
 ```text
-IDLE ──start()──> CONNECTING ──TCP open──> READY ──peer close / error──> DISCONNECTED
-                    ^                                                       │
-                    └──────────────── backoff wait ◄────────────────────────┘
-STOPPED (only via shutdown)
+A-Train listener: STOPPED ──start()──> READY ──shutdown──> STOPPED
+ATP client:       disconnected ──TCP open──> connected ──close/error──> disconnected
 ```
 
-These are the states reported by `GET /api/atp/status` (§6.2). `READY` means
-"the TCP socket is open".
+`GET /api/atp/status` reports listener readiness and the number of connected
+ATP clients (§6.2). Listener `READY` means A-Train is accepting connections;
+it does not mean that an ATP client is currently connected.
 
 ### 1.4 Reconnection and backoff
 
-While not READY, the client retries forever:
+ATP owns reconnect policy. It may retry after a failed connection or a dropped
+session. A-Train remains listening and accepts the next connection; it does
+not dial ATP or run a reconnect loop.
 
-- Failed attempts double the delay, capped at `30 s`.
-- A session that reached `READY` even once resets the delay to the base value
-  (`1 s`), so recovery from a dropped link is fast.
-- On reconnect the simulator **re-publishes the most recent snapshot** it
-  remembers, so an ATP peer that was offline is immediately brought up to
-  date.
+On every accepted connection the simulator publishes the latest snapshot
+immediately, so a reconnected ATP peer is brought up to date.
 
 ### 1.5 Dead-link detection
 
 Link failure detection is TCP-based: a closed or reset socket ends the
-session, drops the channel to `DISCONNECTED`, and the reconnect loop (§1.4)
-takes over.
+session. A-Train continues listening; the ATP client may reconnect (§1.4).
 
 ---
 
@@ -417,10 +413,11 @@ session that is answered.
 
 ## 6. Configuration and Observability
 
-### 6.1 Configuring endpoints
+### 6.1 Configuring listeners
 
-Endpoints are configured in the train configuration file passed to
-`--train-config`, as the top-level `atp` array of ATP peers to dial
+Listeners are configured in the train configuration file passed to
+`--train-config`, as the top-level `atp` array of local addresses for A-Train
+to bind
 (`README.md` shows the CLI usage; `config.py` defines validation):
 
 ```json
@@ -437,24 +434,23 @@ Endpoints are configured in the train configuration file passed to
 python -m a_train run --train-config train.json
 ```
 
-- Each entry has exactly `host` and `port`; unknown fields (such as a legacy
-  `cab_id`) fail startup. The whole file is validated before the server
-  starts.
-- Validation: non-empty `host` and `port` 1-65535. A peer is never bound to a
-  cab: every READY peer receives the same broadcast and every peer may
-  command any cab. Any number of peers may be configured.
-- A missing or empty `atp` array starts the simulator with zero ATP
-  connections.
+- Each entry has exactly `host` and `port`; unknown fields fail startup. The
+  whole file is validated before the server starts.
+- Validation: non-empty `host` and `port` 1-65535. ATP connects to the
+  configured address. A listener is not bound to a cab: every accepted peer
+  receives the same broadcast and may command any cab. Multiple listener
+  addresses may be configured.
+- A missing or empty `atp` array starts without an ATP listener.
 
 The `train` object in the same file defines the single train's cabs, physics,
-and equipment instances; it is unrelated to the ATP endpoints and required in
+and equipment instances; it is unrelated to the ATP listener addresses and required in
 every configuration file.
 
 ### 6.2 Channel status
 
-`GET /api/atp/status` reports every configured endpoint (`host`, `port`)
-with its current lifecycle state (IDLE / CONNECTING / READY / DISCONNECTED /
-STOPPED) and a `ready` boolean; see `web-api.md`.
+`GET /api/atp/status` reports each configured listener (`host`, `port`),
+listener lifecycle (`READY` / `STOPPED`), a `ready` boolean, and `active_peers`;
+see `web-api.md`.
 
 ---
 
@@ -465,7 +461,7 @@ STOPPED) and a `ready` boolean; see `web-api.md`.
   answered, slow draining is absorbed by the core's bounded snapshot queues
   (oldest snapshot dropped), and physics waits for no adapter I/O
   (architectural §2.6).
-- The simulator runs ATP-free as configured: endpoint connections open,
+- The simulator runs ATP-free as configured. Accepted peer sessions open,
   close, and fail independently of the simulation loop and of each other.
 
 ---
@@ -473,8 +469,8 @@ STOPPED) and a `ready` boolean; see `web-api.md`.
 ## Appendix: Typical Session
 
 ```text
-ATP process starts (TCP server)          simulator connects, channel READY
-simulator ──> {"type":"train_state",...}          (every published snapshot)
+simulator starts (TCP server)            ATP process connects, channel READY
+simulator ──> {"type":"train_state",...}        (every published snapshot)
 simulator ──> {"type":"train_state",...}
 ATP     ──> {"type":"atp_command","cab_id":1,"drive_demand":-1.0}
 simulator ──> {"type":"train_state","acceleration":-2.0,...}  (deceleration applied)

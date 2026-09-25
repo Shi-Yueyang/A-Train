@@ -111,9 +111,10 @@ Runs the core. Idempotent while already running. Body: none.
 
 ### GET /api/atp/status
 
-Read-only view of each configured ATP peer connection (atp-api.md §6.2).
-`connections` is empty when no ATP endpoints are configured. Channels carry
-no cab binding, so entries name only the peer address.
+Read-only view of each configured A-Train ATP listener (atp-api.md §6.2).
+`connections` is empty when no ATP listeners are configured. Channels carry
+no cab binding, so entries name the local listener address and current number
+of connected ATP clients.
 
 **Response 200**:
 
@@ -124,7 +125,8 @@ no cab binding, so entries name only the peer address.
       "host": "127.0.0.1",
       "port": 9101,
       "state": "READY",
-      "ready": true
+      "ready": true,
+      "active_peers": 1
     }
   ]
 }
@@ -132,10 +134,11 @@ no cab binding, so entries name only the peer address.
 
 | Field   | Type   | Notes                                                                     |
 | ------- | ------ | ------------------------------------------------------------------------- |
-| `host`  | string | Peer address the simulator dials.                                         |
-| `port`  | int    | Peer address the simulator dials.                                         |
-| `state` | string | `IDLE` / `CONNECTING` / `READY` / `DISCONNECTED` / `STOPPED`. |
-| `ready` | bool   | True while the TCP channel is open (`READY`). |
+| `host`         | string | Local address A-Train binds. |
+| `port`         | int    | Local TCP port A-Train binds. |
+| `state`        | string | `READY` while the listener is active; otherwise `STOPPED`. |
+| `ready`        | bool   | True while A-Train is accepting TCP connections. |
+| `active_peers` | int    | Number of currently connected ATP clients. |
 
 ### POST /api/simulation/pause
 

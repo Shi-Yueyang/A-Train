@@ -86,18 +86,20 @@ async def get_status(core: SimulationCore = Depends(get_core)) -> StatusResponse
 
 @router.get("/atp/status", response_model=AtpStatusResponse)
 async def get_atp_status(request: Request) -> AtpStatusResponse:
-    """Report each configured ATP peer's channel state (atp-api.md §6.2)."""
+    """Report each configured ATP listener and its active peer count."""
 
     manager = request.app.state.atp_manager
+    state = "READY" if manager.listening else "STOPPED"
     return AtpStatusResponse(
         connections=[
             AtpConnectionResponse(
-                host=client.host,
-                port=client.port,
-                state=client.state.value,
-                ready=client.ready,
+                host=endpoint.host,
+                port=endpoint.port,
+                state=state,
+                ready=manager.listening,
+                active_peers=manager.active_peer_count(endpoint),
             )
-            for client in manager.clients
+            for endpoint in manager.endpoints
         ]
     )
 

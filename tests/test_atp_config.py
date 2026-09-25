@@ -1,8 +1,8 @@
-"""End-to-end acceptance for ATP endpoints configured at startup (atp-api.md §6.1).
+"""End-to-end acceptance for ATP listeners configured at startup (atp-api.md §6.1).
 
-Only the real boundaries are exercised: the environment-configured app dials a
-production-protocol TCP test server, invalid configuration fails startup, and
-the real CLI run command rejects bad input without starting the server.
+Only the real boundaries are exercised: the environment-configured app binds
+a listener used by a production-protocol ATP test client, invalid
+configuration fails startup, and the real CLI run command rejects bad input.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ def test_run_command_reports_invalid_atp_config_without_starting(
     assert TRAIN_CONFIG_ENV not in os.environ
 
 
-async def test_env_configured_endpoints_connect_through_run_wiring(monkeypatch) -> None:
+async def test_env_configured_listener_accepts_through_run_wiring(monkeypatch) -> None:
     server = TestAtpServer()
     port = await server.start()
     endpoint = {**EP1, "port": port}
@@ -74,6 +74,7 @@ async def test_env_configured_endpoints_connect_through_run_wiring(monkeypatch) 
                 "port": port,
                 "state": "READY",
                 "ready": True,
+                "active_peers": 1,
             }
             # The channel carries content with no handshake exchange.
             first = await server.wait_for_message()

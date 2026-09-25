@@ -106,7 +106,7 @@ directly and degrades to read-only when it is unreachable.
 - **`alive`** — OS level: unit active?, MainPID, `NRestarts`, exit code.
 - **`ready`** — app level: the unit's own status endpoint. Already
   implemented for the simulator's view of ATP links:
-  `GET /api/atp/status` (READY/DISCONNECTED/...) — the cross-host link edges
+  `GET /api/atp/status` (listener READY/STOPPED plus active peer count) — the cross-host link edges
   are app-plane facts, and no supervisor knows them.
 
 Process `alive` ≠ healthy (hung-but-alive reports UP); that gap belongs to

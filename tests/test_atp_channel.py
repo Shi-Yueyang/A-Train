@@ -1,10 +1,8 @@
-"""Phase 3.1 acceptance tests — ATP communication channel (TODO.md §Phase 3.1).
+"""ATP listener acceptance tests (TODO.md §Phase 3.1).
 
-The application opens one reconnecting TCP connection per configured ATP peer
-and is READY the moment TCP opens (no handshake); it retries while a server is
-down and isolates a dropped connection from the simulation and other peers.
-All observed against the real application and a production-protocol test TCP
-server (§6.1); no production module is mocked.
+A-Train accepts ATP TCP clients without a handshake and isolates dropped
+connections from the simulation and other peers. Tests use the real application
+and production-protocol test ATP clients; no production module is mocked.
 """
 
 from __future__ import annotations
@@ -32,7 +30,7 @@ T1 = TrainConfig(
 
 
 def _two_peers(port: int) -> list[AtpEndpoint]:
-    return [AtpEndpoint("127.0.0.1", port), AtpEndpoint("127.0.0.1", port)]
+    return [AtpEndpoint("127.0.0.1", port)]
 
 
 def _one_peer(port: int) -> list[AtpEndpoint]:
@@ -69,14 +67,41 @@ def _free_port() -> int:
         return int(probe.getsockname()[1])
 
 
-# -- Criterion: each configured peer reaches READY as soon as TCP opens ----------
+async def test_simulator_listens_and_serves_atp_peer() -> None:
+    port = _free_port()
+    endpoint = AtpEndpoint("127.0.0.1", port)
+    async with running_app([T1], [endpoint]) as c:
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        try:
+            line = await asyncio.wait_for(reader.readline(), 2.0)
+            assert b'"type":"train_state"' in line
+
+            writer.write(b'{"type":"hello"}\n')
+            await writer.drain()
+            error = await asyncio.wait_for(reader.readline(), 2.0)
+            assert b'"code":"unknown_message_type"' in error
+
+            status = (await c.get("/api/atp/status")).json()
+            assert status["connections"] == [{
+                "host": "127.0.0.1",
+                "port": port,
+                "state": "READY",
+                "ready": True,
+                "active_peers": 1,
+            }]
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+
+# -- Criterion: the listener serves clients immediately without a handshake ---
 
 
 async def test_channels_become_ready_without_handshake() -> None:
     server = TestAtpServer()
-    port = await server.start()
+    port = await server.start(peer_count=2)
     try:
-        async with running_app([T1], _two_peers(port)) as c:
+        async with running_app([T1], _one_peer(port)) as c:
             await _wait_until(lambda: _manager(c).ready_count == 2)
             assert server.connection_count == 2
 
@@ -88,13 +113,13 @@ async def test_channels_become_ready_without_handshake() -> None:
         await server.stop()
 
 
-# -- Criterion: server down at startup is retried until it appears --------------
+# -- Criterion: an ATP client can connect after listener startup ---------------
 
 
-async def test_channel_becomes_ready_when_server_appears_later() -> None:
+async def test_atp_client_connects_after_listener_starts() -> None:
     port = _free_port()
     async with running_app([T1], _one_peer(port)) as c:
-        await asyncio.sleep(0.15)  # several refused retries already elapsed
+        await asyncio.sleep(0.15)  # listener is active while no ATP client is connected
         assert _manager(c).ready_count == 0
 
         server = TestAtpServer()
@@ -106,18 +131,17 @@ async def test_channel_becomes_ready_when_server_appears_later() -> None:
             await server.stop()
 
 
-# -- Criterion: a dropped connection is reported, simulation and other -----------
-# -- peer connections keep running; the dropped peer reconnects on its own -------
+# -- Criterion: a dropped peer is isolated; ATP reconnects to the live listener --
 
 
 async def test_dropped_connection_is_reported_and_isolated(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     server = TestAtpServer()
-    port = await server.start()
+    port = await server.start(peer_count=2)
     try:
         with caplog.at_level(logging.INFO, logger="a_train.adapters.atp"):
-            async with running_app([T1], _two_peers(port)) as c:
+            async with running_app([T1], _one_peer(port)) as c:
                 await _wait_until(lambda: _manager(c).ready_count == 2)
 
                 await c.post("/api/simulation/time-mode", json={"mode": "MANUAL"})
@@ -154,9 +178,9 @@ async def test_dropped_connection_is_reported_and_isolated(
 
 async def test_ready_connection_survives_unknown_inbound_messages() -> None:
     server = TestAtpServer()
-    port = await server.start()
+    port = await server.start(peer_count=2)
     try:
-        async with running_app([T1], _two_peers(port)) as c:
+        async with running_app([T1], _one_peer(port)) as c:
             await _wait_until(lambda: _manager(c).ready_count == 2)
 
             await server.send({"type": "hello", "payload": {"n": 42}})
@@ -199,34 +223,34 @@ async def test_send_message_writes_framed_ndjson_to_peers() -> None:
 async def test_rest_reports_connection_states_through_the_lifecycle() -> None:
     port = _free_port()
     async with running_app([T1], _one_peer(port)) as c:
-        await asyncio.sleep(0.15)  # refused attempts put the client in backoff
-
-        async def _status_until(*states: str, timeout: float = 5.0) -> dict:
+        async def _status_until(active_peers: int, timeout: float = 5.0) -> dict:
             async def _poll() -> dict:
                 while True:
                     body = (await c.get("/api/atp/status")).json()
                     conn = body["connections"][0]
-                    if conn["state"] in states:
+                    if conn["active_peers"] == active_peers:
                         return conn
                     await asyncio.sleep(0.02)
 
             return await asyncio.wait_for(_poll(), timeout)
 
-        conn = await _status_until("DISCONNECTED", "CONNECTING")
+        conn = await _status_until(0)
         assert conn == {
             "host": "127.0.0.1",
             "port": port,
-            "state": conn["state"],
-            "ready": False,
+            "state": "READY",
+            "ready": True,
+            "active_peers": 0,
         }
 
         server = TestAtpServer()
         await server.start(port=port)
         try:
-            ready = await _status_until("READY")
+            ready = await _status_until(1)
             assert ready["ready"] is True
 
             server.drop_client(0)
-            await _status_until("DISCONNECTED", "CONNECTING")
+            await _status_until(0)
+            await _status_until(1)
         finally:
             await server.stop()

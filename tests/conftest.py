@@ -1,8 +1,8 @@
-"""Pytest fixtures: the real application and a controllable TCP test ATP server.
+"""Pytest fixtures: the real application and a controllable ATP test client.
 
 Per the Phase 0 passing criteria, the fixture starts the complete application
 (real ``SimulationCore``, FastAPI lifespan, ATP manager) and a controllable
-TCP test ATP server, without mocking any production module.
+ATP test client, without mocking any production module.
 """
 
 from __future__ import annotations
