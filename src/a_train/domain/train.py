@@ -589,3 +589,15 @@ class Train:
         for eq in self._equipment.values():
             eq.reset()
         self._resolve_all_intents()
+
+    def reset_equipment(self, key: str) -> ControlResult:
+        """Reset a single equipment instance identified by `key`.
+
+        Returns a ControlResult with an error if the key is unknown.
+        """
+        equipment = self._equipment.get(key)
+        if equipment is None:
+            return ControlResult(ok=False, error=f"unknown equipment: {key!r}")
+        equipment.reset()
+        self._resolve_all_intents()
+        return ControlResult()

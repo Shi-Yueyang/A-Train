@@ -205,6 +205,18 @@ async def set_equipment(
     )
 
 
+@router.post("/trains/{train_id}/equipment/{key}/reset", response_model=TrainResponse)
+async def reset_equipment(
+    train_id: str, key: str, core: SimulationCore = Depends(get_core)
+) -> TrainResponse:
+    """Reset a single equipment instance on the train to its configured state."""
+    from ...simulation.commands import EquipmentResetCommand
+
+    return await _train_command_response(
+        core, train_id, EquipmentResetCommand(train_id=train_id, key=key)
+    )
+
+
 # -- Physical link cuts (§3.7) --------------------------------------------------
 
 

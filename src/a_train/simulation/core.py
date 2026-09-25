@@ -24,6 +24,7 @@ from .commands import (
     Command,
     CommandResult,
     EquipmentCommand,
+    EquipmentResetCommand,
     LinkCutsCommand,
     PauseCommand,
     ResetCommand,
@@ -183,6 +184,8 @@ class SimulationCore:
                 return self._apply_train_control(command)
             if isinstance(command, EquipmentCommand):
                 return self._apply_equipment(command)
+            if isinstance(command, EquipmentResetCommand):
+                return self._apply_equipment_reset(command)
             if isinstance(command, LinkCutsCommand):
                 return self._apply_link_cuts(command)
             return CommandResult(ok=False, error=f"unknown command: {type(command).__name__}")
@@ -258,6 +261,12 @@ class SimulationCore:
         result = self._train.set_equipment(command.payload, received_at=time.time())
         return CommandResult(ok=result.ok, error=result.error)
 
+    def _apply_equipment_reset(self, command: EquipmentResetCommand) -> CommandResult:
+        if command.train_id != self._train.train_id:
+            return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
+        result = self._train.reset_equipment(command.key)
+        return CommandResult(ok=result.ok, error=result.error)
+
     def _apply_link_cuts(self, command: LinkCutsCommand) -> CommandResult:
         if command.train_id != self._train.train_id:
             return CommandResult(ok=False, error=f"unknown train: {command.train_id}")
@@ -328,3 +337,4 @@ class SimulationCore:
                 queue.put_nowait(snapshot)
             except asyncio.QueueFull:
                 pass
+

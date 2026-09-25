@@ -70,6 +70,14 @@ class EquipmentCommand(Command):
 
 
 @dataclass(frozen=True, kw_only=True)
+class EquipmentResetCommand(Command):
+    """Reset one equipment instance of a train (restore its configured state)."""
+
+    train_id: str
+    key: str
+
+
+@dataclass(frozen=True, kw_only=True)
 class LinkCutsCommand(Command):
     """Replace, add, or remove physical link cuts of one train (§3.7)."""
 

@@ -79,13 +79,10 @@
           <legend>Switch boxes (system selection, one per fitted cab)</legend>
           <div class="equipment-grid" id="switch-box-panels"></div>
         </fieldset>
-        <div class="controls btm-controls">
-          <label class="btm-payload-label" for="btm-payload">BTM payload (hex)
-            <textarea id="btm-payload" rows="2" placeholder="01 23 a4 ff 00 81 72"></textarea>
-            <output id="btm-base64" class="btm-base64" aria-live="polite"></output>
-          </label>
-          <span id="btm-send-buttons" class="controls"></span>
-        </div>
+        <fieldset id="btm-group">
+          <legend>BTMs (one panel per instance)</legend>
+          <div class="equipment-grid" id="btm-panels"></div>
+        </fieldset>
         <fieldset id="link-cuts">
           <legend>
             Physical link cuts (cut equipment wires; receivers hold their stale value)
@@ -99,18 +96,6 @@
           </div>
           <div id="cut-list" class="cut-list" aria-live="polite"></div>
         </fieldset>
-        <div class="controls">
-          <fieldset>
-            <legend>STCS ATP command (raw bit string, per instance)</legend>
-            <input id="stcs-command" type="text" size="12" placeholder="0001000" />
-            <span id="stcs-send-buttons" class="controls"></span>
-          </fieldset>
-          <fieldset>
-            <legend>STCS ATP train-out assert (raw bit string, per instance)</legend>
-            <input id="stcs-train-out" type="text" size="12" placeholder="00000000001" />
-            <span id="stcs-train-out-buttons" class="controls"></span>
-          </fieldset>
-        </div>
       </section>
 
       <section id="train-state">

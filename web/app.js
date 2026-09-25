@@ -132,9 +132,8 @@ function hexToBase64(value) {
   return btoa(binary);
 }
 
-function renderBtmEncoding() {
-  const preview = $("btm-base64");
-  const value = $("btm-payload").value;
+function renderBtmEncoding(input, preview) {
+  const value = input.value;
   if (!value.trim()) {
     preview.textContent = "";
     return;
@@ -265,42 +264,14 @@ function renderEquipmentControls(equipment) {
     () => byType(equipment, "switch_box").map(buildSwitchBoxCard)
   );
   ensurePanels(
-    $("btm-send-buttons"),
+    $("btm-panels"),
     prefix(byType(equipment, "btm")),
-    () => byType(equipment, "btm").map(buildBtmSendButton)
+    () => byType(equipment, "btm").map(buildBtmCard)
   );
-  ensurePanels(
-    $("stcs-send-buttons"),
-    prefix(
-      equipment.filter(
-        (entry) => entry.type === "stcs_atp_duo" || entry.type === "stcs_atp_solo"
-      )
-    ),
-    () =>
-      equipment
-        .filter(
-          (entry) => entry.type === "stcs_atp_duo" || entry.type === "stcs_atp_solo"
-        )
-        .map(buildStcsSendButton)
-  );
-  ensurePanels(
-    $("stcs-train-out-buttons"),
-    prefix(
-      equipment.filter(
-        (entry) => entry.type === "stcs_atp_duo" || entry.type === "stcs_atp_solo"
-      )
-    ),
-    () =>
-      equipment
-        .filter(
-          (entry) => entry.type === "stcs_atp_duo" || entry.type === "stcs_atp_solo"
-        )
-        .map(buildStcsTrainOutButton)
-  );
-
   syncDrivingPanels(equipment);
   syncDoorCards(equipment);
   syncSwitchBoxes(equipment);
+  syncBtmCards(equipment);
 }
 
 function dirtyKey(key) {
@@ -364,11 +335,18 @@ function buildDrivingCard(entry) {
     if (ok) delete state.dirty[dirtyKey(key)];
   };
 
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "Reset";
+  resetBtn.onclick = async () => {
+    await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}/reset`, {});
+  };
+
   row.append(
     labeled("Mode", mode),
     labeled("Direction", direction),
     labeled("Acceleration", accel, accelVal),
-    apply
+    apply,
+    resetBtn
   );
   card.appendChild(row);
   card.widgets = { readout, mode, direction, accel, accelVal };
@@ -421,6 +399,11 @@ function buildDoorCard(entry) {
       postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, { command });
     row.appendChild(button);
   }
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "Reset";
+  resetBtn.onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${key}/reset`, {});
+  row.appendChild(resetBtn);
   card.appendChild(row);
   card.widgets = { readout };
   return card;
@@ -456,6 +439,11 @@ function buildSwitchBoxCard(entry) {
       system_switch: position.value,
     });
   row.append(position);
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "Reset";
+  resetBtn.onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${key}/reset`, {});
+  row.appendChild(resetBtn);
   card.appendChild(row);
 
   card.widgets = { readout, position };
@@ -472,36 +460,56 @@ function syncSwitchBoxes(equipment) {
   }
 }
 
-function buildBtmSendButton(entry) {
+function buildBtmCard(entry) {
   const key = entry.key;
-  const button = document.createElement("button");
-  button.textContent = `Send → ${key}`;
-  button.onclick = () => sendBtmPayload(key);
-  return button;
+  const card = document.createElement("article");
+  card.className = "equipment-card btm-card";
+  card.dataset.key = key;
+
+  const heading = document.createElement("h3");
+  heading.textContent = key;
+  card.appendChild(heading);
+
+  const readout = document.createElement("p");
+  readout.className = "stcs-raw";
+  card.appendChild(readout);
+
+  const payloadLabel = document.createElement("label");
+  payloadLabel.className = "btm-payload-label";
+  payloadLabel.textContent = "Payload (hex)";
+  const payload = document.createElement("textarea");
+  payload.className = "btm-payload";
+  payload.rows = 2;
+  payload.placeholder = "01 23 a4 ff 00 81 72";
+  payload.setAttribute("aria-label", `${key} payload (hex)`);
+  const preview = document.createElement("output");
+  preview.className = "btm-base64";
+  preview.setAttribute("aria-live", "polite");
+  payload.oninput = () => renderBtmEncoding(payload, preview);
+  payloadLabel.append(payload, preview);
+  card.appendChild(payloadLabel);
+
+  const row = document.createElement("div");
+  row.className = "controls";
+  const send = document.createElement("button");
+  send.textContent = "Send";
+  send.onclick = () => sendBtmPayload(key, payload.value);
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "Reset";
+  resetBtn.onclick = () => postCommand(`/trains/${state.selectedTrainId}/equipment/${key}/reset`, {});
+  row.append(send, resetBtn);
+  card.appendChild(row);
+  card.widgets = { readout };
+  return card;
 }
 
-function buildStcsSendButton(entry) {
-  const key = entry.key;
-  const button = document.createElement("button");
-  button.textContent = `Send → ${key}`;
-  button.onclick = async () => {
-    await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
-      command: $("stcs-command").value,
-    });
-  };
-  return button;
-}
-
-function buildStcsTrainOutButton(entry) {
-  const key = entry.key;
-  const button = document.createElement("button");
-  button.textContent = `Assert → ${key}`;
-  button.onclick = async () => {
-    await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
-      train_out_signal: $("stcs-train-out").value,
-    });
-  };
-  return button;
+function syncBtmCards(equipment) {
+  for (const card of $("btm-panels").children) {
+    const entry = equipment.find((item) => item.key === card.dataset.key);
+    if (!entry || !card.widgets) continue;
+    const state = entry.state;
+    card.widgets.readout.textContent = `cab ${state.cab_id} · ${state.pending ? "pending" : "idle"} · received ${state.received_count}`;
+  }
 }
 
 function renderLinksPanel(train) {
@@ -577,14 +585,26 @@ function renderEquipment(container, equipment) {
     const details = document.createElement("pre");
     details.textContent = JSON.stringify(entry.state, null, 2);
     card.appendChild(details);
+    const row = document.createElement("div");
+    row.className = "controls";
+    const resetBtn = document.createElement("button");
+    resetBtn.textContent = "Reset";
+    resetBtn.onclick = () => postCommand(`/trains/${state.selectedTrainId}/equipment/${entry.key}/reset`, {});
+    row.appendChild(resetBtn);
+    card.appendChild(row);
     container.appendChild(card);
   }
 }
 
 function renderStcs(container, entries) {
-  container.replaceChildren();
-  for (const entry of entries) {
-    container.appendChild(buildStcsCard(entry));
+  const signature = `${state.selectedTrainId}:${entries.map((entry) => entry.key).join(",")}`;
+  if (controlSignature.stcs !== signature) {
+    controlSignature.stcs = signature;
+    container.replaceChildren(...entries.map(buildStcsCard));
+  }
+  for (const card of container.children) {
+    const entry = entries.find((item) => item.key === card.dataset.key);
+    if (entry) updateStcsCard(card, entry);
   }
 }
 
@@ -624,9 +644,9 @@ function buildSignalTable(states, onBlockToggle) {
 }
 
 function buildStcsCard(entry) {
-  const stcs = entry.state || {};
   const card = document.createElement("article");
   card.className = "equipment-card stcs-card";
+  card.dataset.key = entry.key;
 
   const heading = document.createElement("h3");
   const cabMatch = /^stcs_atp_(?:duo|solo)_(\d+)$/.exec(entry.key);
@@ -636,44 +656,88 @@ function buildStcsCard(entry) {
 
   const raw = document.createElement("p");
   raw.className = "stcs-raw";
-  const cab = document.createElement("span");
-  cab.textContent = `cab: ${cabLabel}`;
-  const command = document.createElement("span");
-  const commandAt =
-    typeof stcs.last_command_time === "number"
-      ? ` (received ${formatWallClock(stcs.last_command_time)})`
-      : "";
-  command.textContent = `last ATP command: ${stcs.last_command ?? "—"}${commandAt}`;
-  const signal = document.createElement("span");
-  signal.textContent = `train-out signal: ${stcs.train_out_signal || "—"}`;
-  raw.append(
-    cab,
-    document.createElement("br"),
-    command,
-    document.createElement("br"),
-    signal
-  );
   card.appendChild(raw);
+
+  const signalInputs = document.createElement("div");
+  signalInputs.className = "stcs-inputs";
+  const inField = document.createElement("div");
+  inField.className = "stcs-input-field";
+  const inInput = document.createElement("input");
+  inInput.type = "text";
+  inInput.inputMode = "numeric";
+  inInput.placeholder = "0001000";
+  inInput.setAttribute("aria-label", `${entry.key} ATP-to-train signal`);
+  const inSend = document.createElement("button");
+  inSend.textContent = "Send in";
+  inSend.onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${entry.key}`, {
+      command: inInput.value,
+    });
+  inField.append(labeled("ATP → train signal", inInput), inSend);
+
+  const outField = document.createElement("div");
+  outField.className = "stcs-input-field";
+  const outInput = document.createElement("input");
+  outInput.type = "text";
+  outInput.inputMode = "numeric";
+  outInput.placeholder = "00000000001";
+  outInput.setAttribute("aria-label", `${entry.key} train-to-ATP signal`);
+  const outSend = document.createElement("button");
+  outSend.textContent = "Send out";
+  outSend.onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${entry.key}`, {
+      train_out_signal: outInput.value,
+    });
+  outField.append(labeled("Train → ATP signal", outInput), outSend);
+
+  signalInputs.append(inField, outField);
+  card.appendChild(signalInputs);
+
+  const actions = document.createElement("div");
+  actions.className = "controls stcs-actions";
+  const reset = document.createElement("button");
+  reset.textContent = "Reset";
+  reset.onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${entry.key}/reset`, {});
+  actions.appendChild(reset);
+  card.appendChild(actions);
 
   const columns = document.createElement("div");
   columns.className = "stcs-columns";
-  const setBlocked = async (name, blocked) => {
-    await postCommand(`/trains/${state.selectedTrainId}/equipment/${entry.key}`,
-      blocked ? { block: [name] } : { unblock: [name] });
-  };
-  for (const [title, states, onBlockToggle] of [
-    ["ATP → train (in)", stcs.train_in_states, null],
-    ["train → ATP (out)", stcs.train_out_states, setBlocked],
-  ]) {
+  const tables = [];
+  for (const title of ["ATP → train (in)", "train → ATP (out)"]) {
     const column = document.createElement("div");
     const label = document.createElement("h4");
     label.textContent = title;
     column.appendChild(label);
-    column.appendChild(buildSignalTable(states, onBlockToggle));
+    const tableHost = document.createElement("div");
+    column.appendChild(tableHost);
     columns.appendChild(column);
+    tables.push(tableHost);
   }
   card.appendChild(columns);
+  card.widgets = { raw, tables };
   return card;
+}
+
+function updateStcsCard(card, entry) {
+  const stcs = entry.state || {};
+  const cabMatch = /^stcs_atp_(?:duo|solo)_(\d+)$/.exec(entry.key);
+  const cabLabel = cabMatch ? `Cab ${cabMatch[1]}` : "Cab —";
+  const commandAt =
+    typeof stcs.last_command_time === "number"
+      ? ` (received ${formatWallClock(stcs.last_command_time)})`
+      : "";
+  card.widgets.raw.textContent =
+    `${cabLabel} · last ATP command: ${stcs.last_command ?? "—"}${commandAt} · train-out signal: ${stcs.train_out_signal || "—"}`;
+
+  const setBlocked = (name, blocked) =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${entry.key}`,
+      blocked ? { block: [name] } : { unblock: [name] });
+  const inputs = [stcs.train_in_states, stcs.train_out_states];
+  card.widgets.tables.forEach((host, index) => {
+    host.replaceChildren(buildSignalTable(inputs[index], index === 1 ? setBlocked : null));
+  });
 }
 
 // Sync a demand slider from the live snapshot, but never while it holds the
@@ -822,8 +886,6 @@ function bind() {
       key: false,
     });
 
-  $("btm-payload").oninput = renderBtmEncoding;
-
   $("btn-cut-link").onclick = () =>
     postCommand(`/trains/${state.selectedTrainId}/links/cut`, {
       source: $("cut-source").value,
@@ -833,10 +895,10 @@ function bind() {
     postCommand(`/trains/${state.selectedTrainId}/links`, { cuts: [] }, "PUT");
 }
 
-async function sendBtmPayload(key) {
+async function sendBtmPayload(key, payload) {
   let data;
   try {
-    data = hexToBase64($("btm-payload").value);
+    data = hexToBase64(payload);
   } catch (error) {
     state.error = error.message;
     state.notice = null;
