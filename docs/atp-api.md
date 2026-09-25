@@ -295,8 +295,8 @@ following feedback states are derived from ATP command states:
 `emergency_brake_1` is active and `true` otherwise. Likewise,
 `emergency_brake_2_inner_feedback` is `false` when `emergency_brake_2` is
 active and `true` otherwise.
-`emergency_brake_feedback` aggregates the pair: it is `true` when either
-emergency brake is active and `false` when both are clear, and
+`emergency_brake_feedback` aggregates the pair as a NAND: it is `false` only
+when both emergency brakes are active and `true` otherwise, and
 `service_brake_7_feedback` is active-low: it is `false` when
 `maximum_service_brake_7` is active and `true` otherwise:
 

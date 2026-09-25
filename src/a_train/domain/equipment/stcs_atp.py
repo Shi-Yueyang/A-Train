@@ -40,6 +40,13 @@ class Or:
 
 
 @dataclass(frozen=True)
+class Nand:
+    """Derived train-out signal: high unless all named signals are high."""
+
+    sources: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Follows:
     """Derived train-out signal: an exact copy of another signal STCS holds."""
 
@@ -56,7 +63,7 @@ class SignalDefinition:
 
     name: str
     default: bool = False
-    derive: Invert | Or | Follows | None = None
+    derive: Invert | Or | Nand | Follows | None = None
 
     @property
     def blockable(self) -> bool:
@@ -72,7 +79,7 @@ _EB2_FEEDBACK = SignalDefinition(
     "emergency_brake_2_inner_feedback", derive=Invert("emergency_brake_2")
 )
 _EB_FEEDBACK = SignalDefinition(
-    "emergency_brake_feedback", derive=Or(("emergency_brake_1", "emergency_brake_2"))
+    "emergency_brake_feedback", derive=Nand(("emergency_brake_1", "emergency_brake_2"))
 )
 _SB7_FEEDBACK = SignalDefinition(
     "service_brake_7_feedback", derive=Follows("maximum_service_brake_7")
@@ -236,11 +243,13 @@ class StcsAtpBase:
                 out[definition.name] = self._evaluate(definition.derive, out)
         return out
 
-    def _evaluate(self, rule: Invert | Or | Follows, out: dict[str, bool]) -> bool:
+    def _evaluate(self, rule: Invert | Or | Nand | Follows, out: dict[str, bool]) -> bool:
         if isinstance(rule, Follows):
             return self._bit(rule.source, out)
         if isinstance(rule, Invert):
             return not self._bit(rule.source, out)
+        if isinstance(rule, Nand):
+            return not all(self._bit(source, out) for source in rule.sources)
         return any(self._bit(source, out) for source in rule.sources)
 
     def _bit(self, name: str, out: dict[str, bool]) -> bool:

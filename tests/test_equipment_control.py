@@ -364,14 +364,14 @@ async def test_block_freezes_feedback_while_the_protection_brake_still_bites() -
         assert after_reset["value"] is True and after_reset["blocked"] is False
 
 
-async def test_emergency_brake_feedback_aggregates_both_brake_inputs() -> None:
+async def test_emergency_brake_feedback_is_low_only_when_both_brakes_are_active() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
 
         async def eb_feedback() -> bool:
             return _out_bits(await _train(c))["emergency_brake_feedback"]["value"]
 
-        assert await eb_feedback() is False  # both clear
+        assert await eb_feedback() is True  # neither active
         await _equipment(c, "stcs_atp_duo_1", command="100")  # emergency_brake_1 active
         assert await eb_feedback() is True
         await _equipment(c, "stcs_atp_duo_1", command="010")  # only emergency_brake_2 active
@@ -380,8 +380,10 @@ async def test_emergency_brake_feedback_aggregates_both_brake_inputs() -> None:
         # The inner feedbacks remain active-low per-brake inversions.
         assert bits["emergency_brake_1_inner_feedback"]["value"] is True
         assert bits["emergency_brake_2_inner_feedback"]["value"] is False
-        await _equipment(c, "stcs_atp_duo_1", command="000")
+        await _equipment(c, "stcs_atp_duo_1", command="110")  # both active
         assert await eb_feedback() is False
+        await _equipment(c, "stcs_atp_duo_1", command="000")
+        assert await eb_feedback() is True
 
 
 async def test_block_validation_is_all_or_nothing_and_scoped_to_derived_signals() -> None:
