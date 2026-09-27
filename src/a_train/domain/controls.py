@@ -70,6 +70,7 @@ class SwitchBoxControl:
 class DrivingSystemControl:
     """Handle positions of one cab's driving system (all fields optional)."""
 
+    cab_id: int | None = None
     mode: str | None = None
     direction: str | None = None
     acceleration: float | None = None

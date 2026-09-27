@@ -534,6 +534,13 @@ class Train:
                 for key, equipment in self._equipment.items()
                 if getattr(equipment, "observe_cab_state", None) is not None
             )
+        if intent.target == "driving_system" and isinstance(intent.control, DrivingSystemControl):
+            cab_id = intent.control.cab_id
+            return tuple(
+                key
+                for key, equipment in self._equipment.items()
+                if isinstance(equipment, DrivingSystem) and equipment.cab_id == cab_id
+            )
         if intent.target == "stcs_atp":
             cab_id = intent.control.cab_id if isinstance(intent.control, StcsAtpControl) else None
             return tuple(

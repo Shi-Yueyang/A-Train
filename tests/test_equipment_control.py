@@ -324,6 +324,12 @@ async def test_drive_accepted_from_any_configured_cab() -> None:
         r = await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 9, "drive_demand": 0.0})
         assert r.status_code == 400  # cab not configured
 
+        r = await c.post("/api/trains/TRAIN001/commands", json={"drive_demand": 0.25})
+        assert r.status_code == 200  # train-wide demand does not require a cab selector
+
+        r = await c.post("/api/trains/TRAIN001/commands", json={"active": True})
+        assert r.status_code == 400  # cab-specific controls still require cab_id
+
 
 async def test_key_state_is_independent_per_cab_and_resets() -> None:
     async with running_app([T1]) as c:
@@ -456,6 +462,68 @@ async def test_turnback_activation_feedback_is_the_inverse_of_activation() -> No
         await _equipment(c, "stcs_atp_duo_1", command="00000")
         feedback = _out_bits(await _train(c))["turnback_activation_feedback"]
         assert feedback["value"] is True
+
+
+async def test_cut_off_traction_holds_same_cab_system_off_and_clears_drive_demand() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 0.75})
+        await _equipment(
+            c,
+            "driving_system_1",
+            mode="traction",
+            direction="forward",
+            acceleration=1.0,
+        )
+        await _equipment(
+            c,
+            "driving_system_2",
+            mode="brake",
+            direction="backward",
+            acceleration=0.4,
+        )
+
+        status, snap = await _equipment(c, "stcs_atp_duo_1", command="0000001")
+        assert status == 200
+
+        def equipment_state(snapshot: dict, key: str) -> dict:
+            return next(item["state"] for item in snapshot["equipment"] if item["key"] == key)
+
+        train = await _train(c)
+        assert train["drive_demand"] == 0.0
+        assert equipment_state(snap, "driving_system_1") == {
+            "cab_id": 1,
+            "facing": "forward",
+            "mode": "off",
+            "direction": "off",
+            "acceleration": 0.0,
+        }
+        assert equipment_state(snap, "driving_system_2")["mode"] == "brake"
+
+        await _equipment(
+            c,
+            "driving_system_1",
+            mode="traction",
+            direction="forward",
+            acceleration=1.0,
+        )
+        await c.post("/api/trains/TRAIN001/commands", json={"cab_id": 1, "drive_demand": 0.5})
+        assert (await _train(c))["drive_demand"] == 0.5
+        await _step(c, 0.05)
+        held = await _train(c)
+        assert held["drive_demand"] == 0.0
+        assert equipment_state(held, "driving_system_1")["mode"] == "off"
+
+        await _equipment(c, "stcs_atp_duo_1", command="0000000")
+        await _equipment(
+            c,
+            "driving_system_1",
+            mode="traction",
+            direction="forward",
+            acceleration=1.0,
+        )
+        released = await _train(c)
+        assert equipment_state(released, "driving_system_1")["mode"] == "traction"
 
 
 async def test_block_validation_is_all_or_nothing_and_scoped_to_derived_signals() -> None:

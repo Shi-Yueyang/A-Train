@@ -277,6 +277,12 @@ with `last_command_time` -- the wall-clock time (POSIX seconds, UTC) at which
 the core applied that assertion (both REST and WebSocket only; they are
 filtered out of `TRAIN_STATE`, §3.1). An empty or other non-binary command is
 invalid.
+While `cut_off_traction` (train-in bit 6) is high, the addressed cab's driving
+system is continuously reset to `off` / `off` / `0.0`, and the train-wide
+legacy drive-demand lever is asserted to zero on equipment-intent resolution,
+including before each physics step. When the input goes low, the driving
+system can be commanded again; drive demand remains zero until explicitly
+changed.
 
 The STCS ATP component also maintains a plain internal `train_out_states` map
 for the 30 train-side feedback bits. It is exposed as `train_out_signal` (bit string) and

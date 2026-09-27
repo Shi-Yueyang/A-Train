@@ -13,6 +13,15 @@ async def test_root_serves_demo_page(app_client) -> None:
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     assert "A-Train API Tester" in r.text
+    assert 'id="cab-panels"' in r.text
+    assert 'id="cab-select"' not in r.text
+    assert 'id="drive-demand-card" class="equipment-card drive-demand-card"' in r.text
+    assert 'id="link-cuts" class="equipment-card link-cuts-card"' in r.text
+    assert 'id="driving-systems"' not in r.text
+    assert 'id="doors-group"' not in r.text
+    assert 'id="switch-boxes-group"' not in r.text
+    assert 'id="btm-group"' not in r.text
+    assert 'id="btn-reset-demand"' in r.text
     assert "app.js" in r.text
 
 

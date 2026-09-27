@@ -1,20 +1,17 @@
 // A-Train browser demo client (Phase 2.5).
 //
-// A thin test client of the simulator (architectural.md §5.1): it applies no
-// restriction the API itself does not impose, and every API operation is
-// reachable, addressed the same way the API addresses it — equipment by
-// instance key (one panel per driving system, door, BTM, STCS ATP), train
-// commands by cab. It subscribes to the `/ws` snapshot stream so state
-// updates continuously without polling, and submits commands through the REST
-// API. Rejected commands surface their error without changing the displayed
-// state. The UI contains no simulation rules.
+// A thin test client of the simulator (architectural.md §5.1): it adds no
+// API restrictions. Equipment is addressed by instance key, cab activation
+// and key by cab, and drive demand train-wide. It subscribes to the `/ws`
+// snapshot stream so state updates continuously without polling and submits
+// commands through the REST API. Rejected commands surface their error
+// without changing the displayed state. The UI contains no simulation rules.
 
 const API = "/api";
 const state = {
   status: null,
   trains: [],
   selectedTrainId: null,
-  selectedCab: null,
   error: null,
   notice: null,
   ws: "connecting",
@@ -63,10 +60,6 @@ function setState(status, trains) {
   state.notice = null;
   if (!trains.some((t) => t.train_id === state.selectedTrainId)) {
     state.selectedTrainId = trains[0] ? trains[0].train_id : null;
-  }
-  const sel = selectedTrain();
-  if (sel && !sel.cabs.some((c) => c.cab_id === state.selectedCab)) {
-    state.selectedCab = sel.cabs[0].cab_id;
   }
   render();
 }
@@ -168,28 +161,6 @@ function renderStatus() {
   setLiveText($("sim-mult"), s ? fmt(s.time_multiplier, 2) : "—");
 }
 
-function renderTrainSelectors() {
-  const cabSel = $("cab-select");
-  const sel = selectedTrain();
-  if (sel) {
-    if (
-      cabSel.children.length !== sel.cabs.length ||
-      ![...cabSel.options].some((o) => Number(o.value) === state.selectedCab)
-    ) {
-      cabSel.innerHTML = "";
-      for (const c of sel.cabs) {
-        const o = document.createElement("option");
-        o.value = String(c.cab_id);
-        o.textContent = String(c.cab_id);
-        cabSel.appendChild(o);
-      }
-    }
-    cabSel.value = String(state.selectedCab);
-  } else {
-    cabSel.innerHTML = "";
-  }
-}
-
 function renderTrainState() {
   const sel = selectedTrain();
   const pre = $("train-state-pre");
@@ -199,8 +170,7 @@ function renderTrainState() {
     setLiveText(pre, "no trains");
     equipmentEl.replaceChildren();
     stcsEl.replaceChildren();
-    setLiveText($("cab-state"), "—");
-    setLiveText($("key-state"), "—");
+    syncCabCards([]);
     renderEquipmentControls([]);
     return;
   }
@@ -212,13 +182,7 @@ function renderTrainState() {
         `${c.cab_id}=${c.active ? "active" : "inactive"}, key=${c.key ? "inserted" : "removed"} (${c.facing})`
     )
     .join(", ");
-  const selected = cabs.find((c) => c.cab_id === state.selectedCab);
-  setLiveText($("cab-state"), selected
-    ? `cab ${selected.cab_id}: ${selected.active ? "active" : "inactive"}`
-    : "—");
-  setLiveText($("key-state"), selected
-    ? `cab ${selected.cab_id}: ${selected.key ? "inserted" : "removed"}`
-    : "—");
+  syncCabCards(cabs);
   const lines = [
     `train_id        ${sel.train_id}`,
     `cabs            ${cabText}`,
@@ -236,6 +200,59 @@ function renderTrainState() {
   renderEquipment(equipmentEl, equipment.filter((entry) => !isStcsAtp(entry)));
   syncSlider("drive", sel.drive_demand);
   renderEquipmentControls(equipment);
+}
+
+function buildCabCard(cab) {
+  const card = document.createElement("article");
+  card.className = "equipment-card cab-card";
+  card.dataset.key = String(cab.cab_id);
+
+  const heading = document.createElement("h3");
+  heading.textContent = `Cab ${cab.cab_id}`;
+  card.appendChild(heading);
+
+  const status = document.createElement("p");
+  status.className = "stcs-raw";
+  card.appendChild(status);
+
+  const controls = document.createElement("div");
+  controls.className = "cab-switches";
+  const active = document.createElement("input");
+  active.type = "checkbox";
+  active.setAttribute("aria-label", `Cab ${cab.cab_id} active`);
+  active.onchange = () =>
+    postCommand(`/trains/${state.selectedTrainId}/commands`, {
+      cab_id: cab.cab_id,
+      active: active.checked,
+    });
+  const keyInserted = document.createElement("input");
+  keyInserted.type = "checkbox";
+  keyInserted.setAttribute("aria-label", `Cab ${cab.cab_id} key inserted`);
+  keyInserted.onchange = () =>
+    postCommand(`/trains/${state.selectedTrainId}/commands`, {
+      cab_id: cab.cab_id,
+      key: keyInserted.checked,
+    });
+  controls.append(labeled("Active", active), labeled("Key inserted", keyInserted));
+  card.appendChild(controls);
+  card.widgets = { status, active, keyInserted };
+  return card;
+}
+
+function syncCabCards(cabs) {
+  const host = $("cab-panels");
+  const signature = cabs.map((cab) => `${state.selectedTrainId}:${cab.cab_id}`).join(",");
+  ensurePanels(host, signature, () => cabs.map(buildCabCard));
+  for (const card of host.children) {
+    const cab = cabs.find((entry) => String(entry.cab_id) === card.dataset.key);
+    if (!cab) continue;
+    card.widgets.active.checked = cab.active;
+    card.widgets.keyInserted.checked = cab.key;
+    setLiveText(
+      card.widgets.status,
+      `${cab.facing} · ${cab.active ? "active" : "inactive"} · key ${cab.key ? "inserted" : "removed"}`
+    );
+  }
 }
 
 // -- Instance-addressed equipment controls ------------------------------------
@@ -339,6 +356,13 @@ function buildDrivingCard(entry) {
   direction.onchange = markDirty;
   accel.oninput = markDirty;
 
+  const modeField = labeled("Mode", mode);
+  modeField.className = "driving-field";
+  const directionField = labeled("Direction", direction);
+  directionField.className = "driving-field";
+  const accelerationField = labeled("Acceleration", accel, accelVal);
+  accelerationField.className = "driving-field driving-acceleration";
+
   const apply = document.createElement("button");
   apply.textContent = "Apply Handles";
   apply.onclick = async () => {
@@ -357,9 +381,9 @@ function buildDrivingCard(entry) {
   };
 
   row.append(
-    labeled("Mode", mode),
-    labeled("Direction", direction),
-    labeled("Acceleration", accel, accelVal),
+    modeField,
+    directionField,
+    accelerationField,
     apply,
     resetBtn
   );
@@ -853,7 +877,6 @@ function renderWsStatus() {
 
 function render() {
   renderStatus();
-  renderTrainSelectors();
   renderTrainState();
   renderLinksPanel(selectedTrain());
   renderMessage();
@@ -928,43 +951,26 @@ function bind() {
   $("btn-step").onclick = () =>
     postCommand("/simulation/step", { delta: parseFloat($("step-delta").value) });
 
-  $("cab-select").onchange = (e) => {
-    state.selectedCab = Number(e.target.value);
-    render();
-  };
-
   $("drive").oninput = (e) => {
     state.dirty.drive = true;
     $("drive-val").textContent = fmt(parseFloat(e.target.value), 2);
   };
   $("btn-apply-demand").onclick = async () => {
     const ok = await postCommand(`/trains/${state.selectedTrainId}/commands`, {
-      cab_id: state.selectedCab,
       drive_demand: parseFloat($("drive").value),
     });
     if (ok) delete state.dirty.drive;
   };
-  $("btn-cab-activate").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/commands`, {
-      cab_id: state.selectedCab,
-      active: true,
+  $("btn-reset-demand").onclick = async () => {
+    const ok = await postCommand(`/trains/${state.selectedTrainId}/commands`, {
+      drive_demand: 0,
     });
-  $("btn-cab-deactivate").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/commands`, {
-      cab_id: state.selectedCab,
-      active: false,
-    });
-  $("btn-key-insert").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/commands`, {
-      cab_id: state.selectedCab,
-      key: true,
-    });
-  $("btn-key-remove").onclick = () =>
-    postCommand(`/trains/${state.selectedTrainId}/commands`, {
-      cab_id: state.selectedCab,
-      key: false,
-    });
-
+    if (ok) {
+      delete state.dirty.drive;
+      $("drive").value = "0";
+      setLiveText($("drive-val"), "0.00");
+    }
+  };
   $("btn-cut-link").onclick = () =>
     postCommand(`/trains/${state.selectedTrainId}/links/cut`, {
       source: $("cut-source").value,

@@ -40,7 +40,12 @@ class StepRequest(BaseModel):
 class TrainControlRequest(BaseModel):
     """A normalized train-control request from any configured cab (§3.3)."""
 
-    cab_id: int = Field(description="The cab issuing the command; must be a configured cab.")
+    cab_id: int | None = Field(
+        default=None,
+        description=(
+            "Configured cab for cab activation/key controls; optional for train-wide drive demand."
+        ),
+    )
     drive_demand: float | None = Field(
         default=None,
         description="Signed drive lever in [-1.0, 1.0]: positive drives, negative decelerates.",
@@ -154,7 +159,9 @@ class AtpConnectionResponse(BaseModel):
 
     host: str
     port: int
-    state: str = Field(description="READY while the listener accepts connections; otherwise STOPPED.")
+    state: str = Field(
+        description="READY while the listener accepts connections; otherwise STOPPED."
+    )
     ready: bool = Field(description="True while the TCP listener is active.")
     active_peers: int = Field(description="Number of currently connected ATP clients.")
 

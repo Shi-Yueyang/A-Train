@@ -439,6 +439,13 @@ systems of several cabs act additively; cabs still carry no authority. Each
 driving system also asserts its raw handle positions to the matching
 `stcs_atp_duo_<cab_id>` instance as a
 feedback intent, the same pattern as door state.
+While that STCS instance's `cut_off_traction` input is high, it continuously
+resets the driving system on the same cab to `off` / `off` / `0.0` and asserts
+zero train-wide legacy drive demand. Both effects route through the train
+aggregate and respect their source-to-target link cuts. The drive-demand
+assertion takes effect on equipment-intent resolution, including before each
+physics step. When the input goes low, the driving system can be commanded
+again; drive demand stays zero until explicitly changed.
 
 BTM payloads are opaque byte arrays. The train model can receive a BTM
 delivery request for a cab, but does not interpret its contents; the ATP

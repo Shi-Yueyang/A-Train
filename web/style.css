@@ -87,10 +87,6 @@ input[type="range"] {
   resize: vertical;
 }
 
-#btm-panels {
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-}
-
 .btm-base64 {
   color: #888;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -126,6 +122,54 @@ pre#train-state-pre {
   letter-spacing: 0.04em;
 }
 
+#train-control-cards {
+  display: block;
+  column-width: 18rem;
+  column-gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+#train-control-cards .equipment-card {
+  display: block;
+  box-sizing: border-box;
+  width: auto;
+  margin: 0 0 1rem;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.control-card-host {
+  display: contents;
+}
+
+.drive-slider {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.drive-slider input[type="range"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.drive-slider output {
+  min-width: 3.5rem;
+  text-align: right;
+}
+
+.drive-demand-card .controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.drive-demand-card .controls button {
+  min-width: 0;
+}
+
 .equipment-card pre {
   margin: 0;
   overflow-x: auto;
@@ -135,16 +179,51 @@ pre#train-state-pre {
   overflow-wrap: anywhere;
 }
 
-#driving-panels {
-  grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr));
+.cab-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.cab-switches label {
+  cursor: pointer;
 }
 
 .driving-card .controls {
-  gap: 0.5rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
 }
 
-.driving-card input[type="range"] {
-  width: 6rem;
+.driving-card .controls > .driving-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  min-width: 0;
+}
+
+.driving-card .controls > .driving-acceleration {
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.driving-card .controls select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
+.driving-card .controls .driving-acceleration input[type="range"] {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
+.driving-card .controls button {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
 }
 
 .equipment-empty {

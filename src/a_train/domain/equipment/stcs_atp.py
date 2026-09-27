@@ -20,7 +20,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar
 
-from ..controls import CabStateControl, DriverControl, StcsAtpControl
+from ..controls import (
+    CabStateControl,
+    DriverControl,
+    DrivingSystemControl,
+    StcsAtpControl,
+    TrainControl,
+)
 from ..snapshots import SignalState, StcsAtpSnapshot
 from .base import EquipmentIntent
 
@@ -193,9 +199,7 @@ class StcsAtpBase:
                 self.TRAIN_TO_ATP_SIGNALS,
                 "train_out_signals",
             )
-            blocked_after = (self._blocked | set(control.block or ())) - set(
-                control.unblock or ()
-            )
+            blocked_after = (self._blocked | set(control.block or ())) - set(control.unblock or ())
             for name in control.train_out_signals:
                 if definitions[name].blockable and name not in blocked_after:
                     raise ValueError(
@@ -309,6 +313,27 @@ class StcsAtpBase:
                     source=self._key,
                     target="train",
                     control=DriverControl(brake=1.0),
+                )
+            )
+        cut_off_traction = self._train_in_states.get("cut_off_traction", False)
+        if cut_off_traction:
+            intents.extend(
+                (
+                    EquipmentIntent(
+                        source=self._key,
+                        target="driving_system",
+                        control=DrivingSystemControl(
+                            cab_id=self._cab_id,
+                            mode="off",
+                            direction="off",
+                            acceleration=0.0,
+                        ),
+                    ),
+                    EquipmentIntent(
+                        source=self._key,
+                        target="train",
+                        control=TrainControl(drive_demand=0.0),
+                    ),
                 )
             )
         intents.extend(self._emit_variant_intents())

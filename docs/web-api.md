@@ -225,15 +225,21 @@ step boundary.
 **Request body** (`TrainControlRequest`):
 
 ```json
-{ "cab_id": 1, "drive_demand": 0.75, "active": true, "key": true }
+{ "cab_id": 1, "active": true, "key": true }
+```
+
+Train-wide drive demand can be submitted without selecting a cab:
+
+```json
+{ "drive_demand": 0.75 }
 ```
 
 | Field            | Type           | Notes                                                                                                                                                             |
 | ---------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cab_id`       | integer        | Must be one of the train's configured cabs. Cabs carry no authority (§3.3); any configured cab is accepted. Identifies the cab whose native activation flag `active` sets. |
+| `cab_id`       | integer or null | Required for `active` and `key`; must be a configured cab. Omit for train-wide `drive_demand`. |
 | `drive_demand` | number or null | Signed lever in `[-1.0, 1.0]`: positive drives (traction limit), negative decelerates toward zero (decel limit) and never moves a standing train rearward. Overwritten while any driving system is engaged. Omitted or null leaves it unchanged. |
-| `active`       | bool or null   | Sets this cab's native activation flag. Omitted or null leaves it unchanged; it never affects control acceptance or dynamics. |
-| `key`          | bool or null   | Sets whether the key is inserted in this cab. Omitted or null leaves it unchanged. |
+| `active`       | bool or null   | Sets this cab's native activation flag; requires `cab_id`. Omitted or null leaves it unchanged; it never affects control acceptance or dynamics. |
+| `key`          | bool or null   | Sets whether the key is inserted in this cab; requires `cab_id`. Omitted or null leaves it unchanged. |
 
 **Response 200**: `TrainResponse`.
 
@@ -275,6 +281,8 @@ with the component's error message on invalid input.
 | `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. `train_in_signals` and `train_out_signals` apply sparse, named updates without changing omitted bits; train-in updates do not update `last_command`. An update to a derived train-out signal is accepted only while blocked. Bulk `train_out_signal` asserts train→ATP bits; bits the simulator writes itself — the derived feedbacks (brake feedbacks, sleep, and the C2/CBTC control-state groups) and the real-state mirrors (cab/key activation, door, driving-handle, and switch-box states) — are re-established and reject the override, while signals the simulator only stores (operator buttons and panel states, and any mirror row whose feeder is absent or wire-cut) take manual assertions as given. `block` freezes the simulator's derivation of named *derived* signals (snapshot rows with `blockable: true`): while blocked such a bit keeps its last value, manual updates stick, and ATP-side reactions to input bits are unaffected. `unblock` resumes derivation; the bit self-heals on the same application. Unknown signal names and non-blockable names in `block`/`unblock` are rejected 400, all-or-nothing. |
 | `driving_1`, `driving_2` | Sets any subset of the three driver-room handles (no interlocks; each position is independently settable). While a cab's `mode` is `"traction"` or `"brake"`, that driving system **overwrites** the legacy `drive_demand` lever for every step: traction effort is applied in the direction-handle position mapped through the cab's facing (either travel direction is possible, from standstill too); brake effort opposes the current motion and produces no force at standstill. With `mode` `"off"` the legacy lever applies again. Engaged systems of several cabs act additively (net effort is clamped to the handle range). |
 | `switch_box_<cab>` | `system_switch` sets the cab's system-selection box to `"c2"`, `"auto"`, or `"cbtc"` (reset returns it to `"c2"`). Every collect pass the box asserts its position into the matching cab's STCS ATP instance: `system_switch_c2` / `system_switch_auto` / `system_switch_cbtc` read one-hot as installed hardware, overriding operator assertions on those three bits. On a cab with no fitted box they remain plain operator-asserted panel bits; cutting the `switch_box_<cab> -> stcs_atp_duo_<cab>` wire freezes the mirror so the bits can be driven manually again. |
+
+While `cut_off_traction` is high on an STCS ATP instance, its same-cab driving system is continuously reset to `off` / `off` / `0.0`, and the train-wide legacy drive-demand lever is asserted to zero on equipment-intent resolution, including before each physics step. When the signal goes low, that driving system can be commanded again; drive demand remains zero until explicitly changed.
 
 **Example**:
 

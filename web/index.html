@@ -44,58 +44,37 @@
 
       <section id="train-controls">
         <h2>Train Control</h2>
-        <div class="controls">
-          <label>Cab <select id="cab-select"></select></label>
-          <fieldset>
-            <legend>Cab activation</legend>
-            <button id="btn-cab-activate">Activate</button>
-            <button id="btn-cab-deactivate">Deactivate</button>
-            <output id="cab-state" aria-live="polite">—</output>
-          </fieldset>
-          <fieldset>
-            <legend>Cab key</legend>
-            <button id="btn-key-insert">Insert key</button>
-            <button id="btn-key-remove">Remove key</button>
-            <output id="key-state" aria-live="polite">—</output>
-          </fieldset>
+        <div id="train-control-cards">
+          <div id="cab-panels" class="control-card-host"></div>
+          <article id="drive-demand-card" class="equipment-card drive-demand-card">
+            <h3>Drive demand</h3>
+            <label for="drive">Train-wide</label>
+            <div class="drive-slider">
+              <input id="drive" type="range" min="-1" max="1" step="0.01" value="0" />
+              <output id="drive-val" for="drive">0.00</output>
+            </div>
+            <div class="controls">
+              <button id="btn-apply-demand">Apply Demand</button>
+              <button id="btn-reset-demand">Reset Demand</button>
+            </div>
+          </article>
+          <div id="driving-panels" class="control-card-host"></div>
+          <div id="door-controls" class="control-card-host"></div>
+          <div id="switch-box-panels" class="control-card-host"></div>
+          <div id="btm-panels" class="control-card-host"></div>
+          <article id="link-cuts" class="equipment-card link-cuts-card">
+            <h3>Physical link cuts</h3>
+            <p class="stcs-raw">Cut equipment wires; receivers hold their stale value.</p>
+            <div class="controls">
+              <select id="cut-source" aria-label="cut source"></select>
+              <span>&rarr;</span>
+              <select id="cut-target" aria-label="cut target"></select>
+              <button id="btn-cut-link">Cut wire</button>
+              <button id="btn-restore-all-links">Restore all</button>
+            </div>
+            <div id="cut-list" class="cut-list" aria-live="polite"></div>
+          </article>
         </div>
-        <div class="controls">
-          <fieldset>
-            <legend>Drive demand</legend>
-            <input id="drive" type="range" min="-1" max="1" step="0.01" value="0" />
-            <output id="drive-val">0.00</output>
-          </fieldset>
-          <button id="btn-apply-demand">Apply Demand</button>
-        </div>
-        <fieldset id="driving-systems">
-          <legend>Driving systems (one panel per instance)</legend>
-          <div class="equipment-grid" id="driving-panels"></div>
-        </fieldset>
-        <fieldset id="doors-group">
-          <legend>Doors (one per instance)</legend>
-          <div class="equipment-grid" id="door-controls"></div>
-        </fieldset>
-        <fieldset id="switch-boxes-group">
-          <legend>Switch boxes (system selection, one per fitted cab)</legend>
-          <div class="equipment-grid" id="switch-box-panels"></div>
-        </fieldset>
-        <fieldset id="btm-group">
-          <legend>BTMs (one panel per instance)</legend>
-          <div class="equipment-grid" id="btm-panels"></div>
-        </fieldset>
-        <fieldset id="link-cuts">
-          <legend>
-            Physical link cuts (cut equipment wires; receivers hold their stale value)
-          </legend>
-          <div class="controls">
-            <select id="cut-source" aria-label="cut source"></select>
-            <span>&rarr;</span>
-            <select id="cut-target" aria-label="cut target"></select>
-            <button id="btn-cut-link">Cut wire</button>
-            <button id="btn-restore-all-links">Restore all</button>
-          </div>
-          <div id="cut-list" class="cut-list" aria-live="polite"></div>
-        </fieldset>
       </section>
 
       <section id="train-state">
