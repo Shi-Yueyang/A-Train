@@ -439,6 +439,15 @@ systems of several cabs act additively; cabs still carry no authority. Each
 driving system also asserts its raw handle positions to the matching
 `stcs_atp_duo_<cab_id>` instance as a
 feedback intent, the same pattern as door state.
+The separate `control_mode` selects `manual`, `speed`, or `position`; it does
+not change the meaning of the physical handle `mode`. Manual handle positions
+are retained while automatic control updates the effective handles. Speed
+control tracks a signed speed target. Position control tracks an absolute
+track position, uses `max_speed` as a speed cap, and reduces its speed target
+according to a stopping-speed envelope; arrival is within 0.05 m. The
+automatic controller maps its bounded acceleration request into the same
+traction/brake and direction handles as manual control, so the existing
+cab-facing and train-intent path remains in use.
 While that STCS instance's `cut_off_traction` input is high, it continuously
 resets the driving system on the same cab to `off` / `off` / `0.0` and asserts
 zero train-wide legacy drive demand. Both effects route through the train
@@ -473,8 +482,12 @@ reset()
 `apply_control(command)` validates the command's train and cab identity,
 updates requested control state, and returns a structured result. It does not
 advance time or mutate position, speed, or acceleration. `step(dt)` is the
-aggregate coordination point: it collects reference-free intents emitted by
-equipment and resolves them centrally before integrating the physical state.
+aggregate coordination point: it builds an immutable train-motion observation
+from the current position, speed, and acceleration limits, calls each
+equipment's `step(dt, motion)` hook, then collects and resolves
+reference-free intents before integrating the physical state. This lets
+feedback equipment update its own effective outputs for the current physics
+step without receiving mutable train access.
 The resolver applies `train`-target `TrainControl` intents as train controls,
 rebuilds its driver-input set from the `train`-target driver intents in the
 current batch (state assertions: an absent input lapses, so a released
@@ -533,6 +546,7 @@ or modify train physical state directly.
 Equipment component
   key                       # equipment type identifier
       apply_control(...)        # receives the component's typed control object
+                  step(dt, motion)           # tick hook with an immutable motion observation
       emit_intents()            # reference-free requests for train-level effects
   read_state()
   reset()
@@ -542,7 +556,8 @@ An intent identifies a source equipment key, a target equipment key or the
 reserved `train` target, and a control object accepted directly by the target's
 `apply_control()` method. Equipment never holds references to other equipment
 and never applies an intent itself. The aggregate coordinates components in a
-documented, stable order: apply accepted controls, collect and resolve intents,
+documented, stable order: apply accepted controls, call equipment step hooks
+with the same pre-integration motion state, collect and resolve intents,
 advance train dynamics, then construct the snapshot. New equipment such as
 vigilance, pantograph control, or passenger systems can be added by implementing
 this interface and extending the aggregate's configuration and snapshot types.

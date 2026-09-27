@@ -68,12 +68,16 @@ class SwitchBoxControl:
 
 @dataclass(frozen=True, kw_only=True)
 class DrivingSystemControl:
-    """Handle positions of one cab's driving system (all fields optional)."""
+    """Driving mode, target, and manual handles of one cab's driving system."""
 
     cab_id: int | None = None
+    control_mode: str | None = None
     mode: str | None = None
     direction: str | None = None
     acceleration: float | None = None
+    target_speed: float | None = None
+    target_position: float | None = None
+    max_speed: float | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -19,6 +19,14 @@ class EquipmentIntent:
     control: Control
 
 
+@dataclass(frozen=True)
+class TrainMotion:
+    position: float
+    speed: float
+    max_traction_accel: float
+    max_decel: float
+
+
 @runtime_checkable
 class Equipment(Protocol[EquipmentControlT]):
     """Common lifecycle interface for pluggable equipment instances."""
@@ -42,6 +50,8 @@ class Equipment(Protocol[EquipmentControlT]):
     def read_state(self) -> Any: ...
 
     def reset(self) -> None: ...
+
+    def step(self, dt: float, motion: TrainMotion) -> None: ...
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]: ...
 

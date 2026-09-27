@@ -1,6 +1,6 @@
 """Train-facing equipment components and their factory registry."""
 
-from .base import Equipment, EquipmentContext, EquipmentIntent
+from .base import Equipment, EquipmentContext, EquipmentIntent, TrainMotion
 from .btm import Btm
 from .door import Door
 from .driving_system import DrivingSystem
@@ -16,6 +16,7 @@ __all__ = [
     "Equipment",
     "EquipmentContext",
     "EquipmentIntent",
+    "TrainMotion",
     "StcsAtpBase",
     "StcsAtpDuo",
     "StcsAtpSolo",

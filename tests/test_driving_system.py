@@ -232,3 +232,105 @@ async def test_invalid_driving_inputs_are_rejected() -> None:
 
         status, _ = await _handles(c, 9, mode="traction")  # cab not configured
         assert status == 400
+
+
+async def test_speed_control_reaches_target_and_reports_effective_handles() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        status, snap = await _handles(c, 1, control_mode="speed", target_speed=1.0)
+        assert status == 200
+        state = _equipment(snap, "driving_system_1")["state"]
+        assert state["control_mode"] == "speed"
+        assert state["target_speed"] == 1.0
+
+        await _step(c, 2.0)
+        train = await _train(c)
+        state = _equipment(train, "driving_system_1")["state"]
+        assert train["speed"] == pytest.approx(1.0, abs=0.03)
+        assert state["acceleration"] < 0.05
+        assert state["manual_mode"] == "off"
+
+
+async def test_position_control_stops_at_target_with_speed_cap() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        status, snap = await _handles(
+            c,
+            1,
+            control_mode="position",
+            target_position=3.0,
+            max_speed=0.8,
+        )
+        assert status == 200
+        state = _equipment(snap, "driving_system_1")["state"]
+        assert state["control_mode"] == "position"
+        assert state["target_position"] == 3.0
+        assert state["max_speed"] == 0.8
+
+        max_observed_speed = 0.0
+        for _ in range(24):
+            await _step(c, 0.25)
+            train = await _train(c)
+            max_observed_speed = max(max_observed_speed, abs(train["speed"]))
+
+        assert train["position"] == pytest.approx(3.0, abs=0.08)
+        assert abs(train["speed"]) < 0.05
+        assert max_observed_speed <= 0.8 + 1e-9
+
+
+async def test_manual_handle_command_returns_control_to_manual_mode() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        await _handles(c, 1, control_mode="speed", target_speed=1.0)
+        status, snap = await _handles(
+            c, 1, mode="traction", direction="forward", acceleration=0.5
+        )
+        assert status == 200
+        state = _equipment(snap, "driving_system_1")["state"]
+        assert state["control_mode"] == "manual"
+        assert state["manual_mode"] == "traction"
+        assert state["target_speed"] is None
+
+        status, snap = await _handles(c, 1, control_mode="manual")
+        assert status == 200
+        state = _equipment(snap, "driving_system_1")["state"]
+        assert state["manual_mode"] == "traction"
+        await _step(c, FIXED_STEP)
+        assert (await _train(c))["acceleration"] == pytest.approx(0.5)
+
+
+async def test_automatic_control_requires_valid_targets() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        status, _ = await _handles(c, 1, control_mode="speed")
+        assert status == 400
+        status, _ = await _handles(c, 1, control_mode="position", target_position=10.0)
+        assert status == 400
+        status, _ = await _handles(
+            c,
+            1,
+            control_mode="position",
+            target_position=10.0,
+            max_speed=0.0,
+        )
+        assert status == 400
+
+
+async def test_position_control_reaches_a_reverse_track_position() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        status, _ = await _handles(
+            c,
+            1,
+            control_mode="position",
+            target_position=-2.0,
+            max_speed=0.7,
+        )
+        assert status == 200
+
+        for _ in range(24):
+            await _step(c, 0.25)
+        train = await _train(c)
+        assert train["position"] == pytest.approx(-2.0, abs=0.08)
+        assert abs(train["speed"]) < 0.05

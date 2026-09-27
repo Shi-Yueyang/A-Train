@@ -28,7 +28,7 @@ from ..controls import (
     TrainControl,
 )
 from ..snapshots import SignalState, StcsAtpSnapshot
-from .base import EquipmentIntent
+from .base import EquipmentIntent, TrainMotion
 
 
 @dataclass(frozen=True)
@@ -384,6 +384,9 @@ class StcsAtpBase:
         self._train_out_states = {
             signal.name: signal.default for signal in self.TRAIN_TO_ATP_SIGNALS
         }
+
+    def step(self, dt: float, motion: TrainMotion) -> None:
+        pass
 
 
 class StcsAtpDuo(StcsAtpBase):

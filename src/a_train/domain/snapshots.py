@@ -47,12 +47,13 @@ class BtmSnapshot:
 
 @dataclass(frozen=True)
 class DrivingSystemSnapshot:
-    """Read-only view of one cab's driving system (driver-room handles).
+    """Read-only view of one cab's driving system and active control.
 
     ``mode`` is ``"traction"`` / ``"off"`` / ``"brake"``, ``direction`` is
     ``"forward"`` / ``"off"`` / ``"backward"`` (cab-relative), and
-    ``acceleration`` is the handle effort in ``[0.0, 1.0]``. ``facing``
-    repeats the cab's track-facing for display.
+    ``acceleration`` is the effective handle effort in ``[0.0, 1.0]``.
+    Manual handle positions are retained separately while automatic control
+    operates the effective handles.
     """
 
     cab_id: int = 0
@@ -60,6 +61,13 @@ class DrivingSystemSnapshot:
     mode: str = "off"
     direction: str = "off"
     acceleration: float = 0.0
+    control_mode: str = "manual"
+    target_speed: float | None = None
+    target_position: float | None = None
+    max_speed: float | None = None
+    manual_mode: str = "off"
+    manual_direction: str = "off"
+    manual_acceleration: float = 0.0
 
 
 @dataclass(frozen=True)

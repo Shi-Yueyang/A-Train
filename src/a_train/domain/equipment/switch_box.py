@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from ..controls import StcsAtpControl, SwitchBoxControl
 from ..snapshots import SwitchBoxSnapshot
-from .base import EquipmentIntent
+from .base import EquipmentIntent, TrainMotion
 
 
 class SwitchBox:
@@ -49,6 +49,9 @@ class SwitchBox:
 
     def reset(self) -> None:
         self._position = self._initial
+
+    def step(self, dt: float, motion: TrainMotion) -> None:
+        pass
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
         return (

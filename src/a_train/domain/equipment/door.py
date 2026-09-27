@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..controls import DoorControl, StcsAtpControl
 from ..snapshots import DoorSnapshot
-from .base import EquipmentIntent
+from .base import EquipmentIntent, TrainMotion
 
 
 class Door:
@@ -40,6 +40,9 @@ class Door:
 
     def reset(self) -> None:
         self._state = self._initial
+
+    def step(self, dt: float, motion: TrainMotion) -> None:
+        pass
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
         if self._side is None:

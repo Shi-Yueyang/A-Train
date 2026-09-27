@@ -29,6 +29,8 @@ async def test_static_assets_are_served(app_client) -> None:
     js = await app_client.get("/app.js")
     assert js.status_code == 200
     assert "fetch" in js.text
+    assert "Drive to position" in js.text
+    assert "target_position" in js.text
 
     css = await app_client.get("/style.css")
     assert css.status_code == 200

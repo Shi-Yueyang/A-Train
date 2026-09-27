@@ -337,6 +337,10 @@ function buildDrivingCard(entry) {
 
   const row = document.createElement("div");
   row.className = "controls";
+  const controlMode = selectEl(
+    ["manual", "speed", "position"],
+    ["Manual", "Hold speed", "Drive to position"]
+  );
   const mode = selectEl(["off", "traction", "brake"], ["Off", "Traction", "Brake"]);
   const direction = selectEl(["off", "forward", "backward"], ["Off", "Forward", "Backward"]);
   const accel = document.createElement("input");
@@ -347,14 +351,46 @@ function buildDrivingCard(entry) {
   accel.value = "0";
   const accelVal = document.createElement("output");
   accelVal.textContent = "0.00";
+  const targetSpeed = document.createElement("input");
+  targetSpeed.type = "number";
+  targetSpeed.step = "0.1";
+  targetSpeed.setAttribute("aria-label", "Target speed in metres per second");
+  const targetPosition = document.createElement("input");
+  targetPosition.type = "number";
+  targetPosition.step = "0.1";
+  targetPosition.setAttribute("aria-label", "Target position in metres");
+  const maxSpeed = document.createElement("input");
+  maxSpeed.type = "number";
+  maxSpeed.min = "0.1";
+  maxSpeed.step = "0.1";
+  maxSpeed.setAttribute("aria-label", "Maximum speed in metres per second");
 
   const markDirty = () => {
     state.dirty[dirtyKey(key)] = true;
     accelVal.textContent = fmt(parseFloat(accel.value), 2);
   };
+  const controlModeField = labeled("Control", controlMode);
+  controlModeField.className = "driving-field driving-control-mode";
   mode.onchange = markDirty;
   direction.onchange = markDirty;
   accel.oninput = markDirty;
+  targetSpeed.oninput = markDirty;
+  targetPosition.oninput = markDirty;
+  maxSpeed.oninput = markDirty;
+  const syncModeFields = () => {
+    const manual = controlMode.value === "manual";
+    const speed = controlMode.value === "speed";
+    modeField.hidden = !manual;
+    directionField.hidden = !manual;
+    accelerationField.hidden = !manual;
+    speedField.hidden = !speed;
+    positionField.hidden = controlMode.value !== "position";
+    maxSpeedField.hidden = controlMode.value !== "position";
+  };
+  controlMode.onchange = () => {
+    markDirty();
+    syncModeFields();
+  };
 
   const modeField = labeled("Mode", mode);
   modeField.className = "driving-field";
@@ -362,15 +398,28 @@ function buildDrivingCard(entry) {
   directionField.className = "driving-field";
   const accelerationField = labeled("Acceleration", accel, accelVal);
   accelerationField.className = "driving-field driving-acceleration";
+  const speedField = labeled("Target speed (m/s)", targetSpeed);
+  speedField.className = "driving-field";
+  const positionField = labeled("Target position (m)", targetPosition);
+  positionField.className = "driving-field";
+  const maxSpeedField = labeled("Max speed (m/s)", maxSpeed);
+  maxSpeedField.className = "driving-field";
 
   const apply = document.createElement("button");
-  apply.textContent = "Apply Handles";
+  apply.textContent = "Apply Control";
   apply.onclick = async () => {
-    const ok = await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
-      mode: mode.value,
-      direction: direction.value,
-      acceleration: parseFloat(accel.value),
-    });
+    const body = { control_mode: controlMode.value };
+    if (controlMode.value === "manual") {
+      body.mode = mode.value;
+      body.direction = direction.value;
+      body.acceleration = parseFloat(accel.value);
+    } else if (controlMode.value === "speed") {
+      body.target_speed = parseFloat(targetSpeed.value);
+    } else {
+      body.target_position = parseFloat(targetPosition.value);
+      body.max_speed = parseFloat(maxSpeed.value);
+    }
+    const ok = await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, body);
     if (ok) delete state.dirty[dirtyKey(key)];
   };
 
@@ -381,14 +430,30 @@ function buildDrivingCard(entry) {
   };
 
   row.append(
+    controlModeField,
     modeField,
     directionField,
     accelerationField,
+    speedField,
+    positionField,
+    maxSpeedField,
     apply,
     resetBtn
   );
   card.appendChild(row);
-  card.widgets = { readout, mode, direction, accel, accelVal };
+  card.widgets = {
+    readout,
+    controlMode,
+    mode,
+    direction,
+    accel,
+    accelVal,
+    targetSpeed,
+    targetPosition,
+    maxSpeed,
+    syncModeFields,
+  };
+  syncModeFields();
   return card;
 }
 
@@ -407,13 +472,18 @@ function syncDrivingPanels(equipment) {
     const w = card.widgets;
     setLiveText(
       w.readout,
-      `cab ${s.cab_id} · facing ${s.facing} · ${s.mode}/${s.direction}/${fmt(s.acceleration, 2)}`
+      `cab ${s.cab_id} · ${s.control_mode} ·  ${s.mode}/${s.direction}/${fmt(s.acceleration, 2)}`
     );
     if (state.dirty[dirtyKey(card.dataset.key)]) continue;
-    w.mode.value = s.mode;
-    w.direction.value = s.direction;
-    w.accel.value = String(s.acceleration);
-    setLiveText(w.accelVal, fmt(s.acceleration, 2));
+    w.controlMode.value = s.control_mode || "manual";
+    w.mode.value = s.manual_mode || s.mode;
+    w.direction.value = s.manual_direction || s.direction;
+    w.accel.value = String(s.manual_acceleration ?? s.acceleration);
+    w.targetSpeed.value = s.target_speed ?? "";
+    w.targetPosition.value = s.target_position ?? "";
+    w.maxSpeed.value = s.max_speed ?? "";
+    setLiveText(w.accelVal, fmt(parseFloat(w.accel.value), 2));
+    w.syncModeFields();
   }
 }
 

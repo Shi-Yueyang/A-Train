@@ -61,8 +61,8 @@ commands:
     { "type": "door", "key": "left_door", "cab_id": null, "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "cab_id": null, "state": { "state": "closed" } },
     { "type": "btm", "key": "btm_1", "cab_id": 1, "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
-    { "type": "driving_system", "key": "driving_1", "cab_id": 1, "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
-    { "type": "driving_system", "key": "driving_2", "cab_id": 2, "state": { "cab_id": 2, "facing": "backward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
+    { "type": "driving_system", "key": "driving_1", "cab_id": 1, "state": { "cab_id": 1, "facing": "forward", "control_mode": "manual", "mode": "off", "direction": "off", "acceleration": 0.0, "target_speed": null, "target_position": null, "max_speed": null, "manual_mode": "off", "manual_direction": "off", "manual_acceleration": 0.0 } },
+    { "type": "driving_system", "key": "driving_2", "cab_id": 2, "state": { "cab_id": 2, "facing": "backward", "control_mode": "manual", "mode": "off", "direction": "off", "acceleration": 0.0, "target_speed": null, "target_position": null, "max_speed": null, "manual_mode": "off", "manual_direction": "off", "manual_acceleration": 0.0 } },
     { "type": "switch_box", "key": "switch_box_1", "cab_id": 1, "state": { "cab_id": 1, "position": "c2" } },
     { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "cab_id": 1, "state": {
         "last_command": null,
@@ -251,7 +251,8 @@ outside `[-1.0, 1.0]` or not finite.
 Sets train-facing equipment state through the generic equipment endpoint
 (§3.5). `{key}` is the registered equipment type. Equipment changes are applied
 immediately by the core (like train controls) and do not advance simulation
-time; equipment does not affect train dynamics in this version (§3.1). The
+time; driving-system automatic targets affect dynamics on the next fixed step.
+Other equipment does not directly affect train motion. The
 dispatcher validates the body against the target equipment and returns 400
 with the component's error message on invalid input.
 
@@ -271,6 +272,10 @@ with the component's error message on invalid input.
 | `mode`      | string             | `driving_1`, `driving_2`  | Driving-system mode handle: `"traction"` / `"off"` / `"brake"`. |
 | `direction` | string             | `driving_1`, `driving_2`  | Driving-system direction handle: `"forward"` / `"off"` / `"backward"` (cab-relative). |
 | `acceleration` | number          | `driving_1`, `driving_2`  | Driving-system acceleration handle: continuous effort in `[0.0, 1.0]`. |
+| `control_mode` | string          | `driving_1`, `driving_2`  | `"manual"`, `"speed"`, or `"position"`. |
+| `target_speed` | number          | speed control             | Signed target speed in m/s; must be finite. |
+| `target_position` | number       | position control          | Absolute track position in metres; must be finite. |
+| `max_speed` | number              | position control          | Positive speed limit in m/s. |
 
 **Semantics per equipment key**:
 
@@ -279,7 +284,7 @@ with the component's error message on invalid input.
 | `left_door`, `right_door` | `command` `"open"` / `"close"` sets the selected door state. |
 | `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
 | `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. `train_in_signals` and `train_out_signals` apply sparse, named updates without changing omitted bits; train-in updates do not update `last_command`. An update to a derived train-out signal is accepted only while blocked. Bulk `train_out_signal` asserts train→ATP bits; bits the simulator writes itself — the derived feedbacks (brake feedbacks, sleep, and the C2/CBTC control-state groups) and the real-state mirrors (cab/key activation, door, driving-handle, and switch-box states) — are re-established and reject the override, while signals the simulator only stores (operator buttons and panel states, and any mirror row whose feeder is absent or wire-cut) take manual assertions as given. `block` freezes the simulator's derivation of named *derived* signals (snapshot rows with `blockable: true`): while blocked such a bit keeps its last value, manual updates stick, and ATP-side reactions to input bits are unaffected. `unblock` resumes derivation; the bit self-heals on the same application. Unknown signal names and non-blockable names in `block`/`unblock` are rejected 400, all-or-nothing. |
-| `driving_1`, `driving_2` | Sets any subset of the three driver-room handles (no interlocks; each position is independently settable). While a cab's `mode` is `"traction"` or `"brake"`, that driving system **overwrites** the legacy `drive_demand` lever for every step: traction effort is applied in the direction-handle position mapped through the cab's facing (either travel direction is possible, from standstill too); brake effort opposes the current motion and produces no force at standstill. With `mode` `"off"` the legacy lever applies again. Engaged systems of several cabs act additively (net effort is clamped to the handle range). |
+| `driving_1`, `driving_2` | In `manual` control mode, sets any subset of the three driver-room handles (no interlocks; each position is independently settable). A legacy request containing `mode`, `direction`, or `acceleration` without `control_mode` selects manual mode. While a cab's handle `mode` is `"traction"` or `"brake"`, that driving system **overwrites** the legacy `drive_demand` lever for every step. In `speed` mode, `target_speed` is a signed speed setpoint. In `position` mode, the system drives to the absolute `target_position`, slowing under a stopping-speed envelope, with `max_speed` as a cap and a 0.05 m arrival tolerance. Automatic control updates effective handles before each physics step; `manual_*` snapshot fields retain the operator's stored handles. |
 | `switch_box_<cab>` | `system_switch` sets the cab's system-selection box to `"c2"`, `"auto"`, or `"cbtc"` (reset returns it to `"c2"`). Every collect pass the box asserts its position into the matching cab's STCS ATP instance: `system_switch_c2` / `system_switch_auto` / `system_switch_cbtc` read one-hot as installed hardware, overriding operator assertions on those three bits. On a cab with no fitted box they remain plain operator-asserted panel bits; cutting the `switch_box_<cab> -> stcs_atp_duo_<cab>` wire freezes the mirror so the bits can be driven manually again. |
 
 While `cut_off_traction` is high on an STCS ATP instance, its same-cab driving system is continuously reset to `off` / `off` / `0.0`, and the train-wide legacy drive-demand lever is asserted to zero on equipment-intent resolution, including before each physics step. When the signal goes low, that driving system can be commanded again; drive demand remains zero until explicitly changed.

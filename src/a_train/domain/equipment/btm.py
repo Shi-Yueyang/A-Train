@@ -6,6 +6,7 @@ import base64
 
 from ..controls import BtmControl
 from ..snapshots import BtmSnapshot
+from .base import TrainMotion
 
 
 class Btm:
@@ -50,6 +51,9 @@ class Btm:
     def reset(self) -> None:
         self._pending = None
         self._received_count = 0
+
+    def step(self, dt: float, motion: TrainMotion) -> None:
+        pass
 
     def emit_intents(self):
         return ()

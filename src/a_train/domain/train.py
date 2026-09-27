@@ -44,6 +44,7 @@ from .equipment import (
     EquipmentIntent,
     StcsAtpBase,
     SwitchBox,
+    TrainMotion,
 )
 from .link_cuts import LinkCuts
 from .physics import (
@@ -100,6 +101,10 @@ class EquipmentControlRequest:
     mode: str | None = None
     direction: str | None = None
     acceleration: float | None = None
+    control_mode: str | None = None
+    target_speed: float | None = None
+    target_position: float | None = None
+    max_speed: float | None = None
     train_out_signal: str | None = None
     train_in_signals: dict[str, bool] | None = None
     train_out_signals: dict[str, bool] | None = None
@@ -444,12 +449,27 @@ class Train:
                 raise ValueError("switch box requires system_switch")
             return SwitchBoxControl(position=command.system_switch)
         if isinstance(equipment, DrivingSystem):
-            if command.mode is None and command.direction is None and command.acceleration is None:
+            if all(
+                value is None
+                for value in (
+                    command.control_mode,
+                    command.mode,
+                    command.direction,
+                    command.acceleration,
+                    command.target_speed,
+                    command.target_position,
+                    command.max_speed,
+                )
+            ):
                 raise ValueError("driving system requires mode, direction, or acceleration")
             return DrivingSystemControl(
+                control_mode=command.control_mode,
                 mode=command.mode,
                 direction=command.direction,
                 acceleration=command.acceleration,
+                target_speed=command.target_speed,
+                target_position=command.target_position,
+                max_speed=command.max_speed,
             )
         raise ValueError(f"equipment '{command.key}' does not expose settable state")
 
@@ -462,6 +482,14 @@ class Train:
         step; with no driver intents the lever applies unchanged.
         """
 
+        motion = TrainMotion(
+            position=self._position,
+            speed=self._speed,
+            max_traction_accel=self._config.max_traction_accel,
+            max_decel=self._config.max_decel,
+        )
+        for equipment in self._equipment.values():
+            equipment.step(dt, motion)
         self._resolve_equipment_intents(self._collect_equipment_intents())
         if self._driver_inputs:
             traction = max(-1.0, min(1.0, sum(d.traction for d in self._driver_inputs)))
@@ -477,11 +505,6 @@ class Train:
             acceleration=accel,
             dt=dt,
         )
-        for equipment in self._equipment.values():
-            on_step = getattr(equipment, "step", None)
-            if on_step is not None:
-                on_step(dt, self._speed)
-
     def _collect_equipment_intents(self) -> tuple[EquipmentIntent, ...]:
         """Collect cross-component requests without sharing equipment refs."""
         return tuple(
