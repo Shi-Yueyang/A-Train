@@ -206,6 +206,61 @@ async def test_stcs_atp_train_out_signal_is_settable_through_the_api() -> None:
         assert "command" in error["detail"]
 
 
+async def test_stcs_atp_named_signal_updates_patch_train_in_and_train_out() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        status, snap = await _equipment(
+            c, "stcs_atp_duo_1", train_in_signals={"turnback_activation": True}
+        )
+        assert status == 200
+        state = _stcs_atp(snap)
+        input_bits = {signal["name"]: signal["value"] for signal in state["train_in_states"]}
+        assert input_bits["turnback_activation"] is True
+        assert input_bits["emergency_brake_1"] is False
+        assert state["last_command"] is None
+        output_bits = {signal["name"]: signal["value"] for signal in state["train_out_states"]}
+        assert output_bits["turnback_activation_feedback"] is False
+
+        status, snap = await _equipment(
+            c, "stcs_atp_duo_1", train_out_signals={"turnback_button": True}
+        )
+        assert status == 200
+        state = _stcs_atp(snap)
+        assert state["train_out_signal"][11] == "1"
+        assert state["train_out_signal"][12] == "0"
+
+
+async def test_stcs_atp_named_signal_updates_validate_before_mutation() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        status, body = await _equipment(
+            c,
+            "stcs_atp_duo_1",
+            train_out_signals={"turnback_button": True, "unknown_signal": False},
+        )
+        assert status == 400
+        assert "unknown stcs_atp signal" in body["detail"]
+        assert _stcs_atp(await _train(c))["train_out_signal"][11] == "0"
+
+        status, body = await _equipment(
+            c, "stcs_atp_duo_1", train_out_signals={"turnback_activation_feedback": True}
+        )
+        assert status == 400
+        assert "must be blocked" in body["detail"]
+
+        status, snap = await _equipment(
+            c,
+            "stcs_atp_duo_1",
+            block=["turnback_activation_feedback"],
+            train_out_signals={"turnback_activation_feedback": False},
+        )
+        assert status == 200
+        feedback = _out_bits(snap)["turnback_activation_feedback"]
+        assert feedback["value"] is False and feedback["blocked"] is True
+
+
 # -- Cab activation is native train state, no authority ------------------------
 
 
@@ -384,6 +439,23 @@ async def test_emergency_brake_feedback_is_low_only_when_both_brakes_are_active(
         assert await eb_feedback() is False
         await _equipment(c, "stcs_atp_duo_1", command="000")
         assert await eb_feedback() is True
+
+
+async def test_turnback_activation_feedback_is_the_inverse_of_activation() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        feedback = _out_bits(await _train(c))["turnback_activation_feedback"]
+        assert feedback["value"] is True
+        assert feedback["blockable"] is True
+
+        await _equipment(c, "stcs_atp_duo_1", command="00001")
+        feedback = _out_bits(await _train(c))["turnback_activation_feedback"]
+        assert feedback["value"] is False
+
+        await _equipment(c, "stcs_atp_duo_1", command="00000")
+        feedback = _out_bits(await _train(c))["turnback_activation_feedback"]
+        assert feedback["value"] is True
 
 
 async def test_block_validation_is_all_or_nothing_and_scoped_to_derived_signals() -> None:

@@ -248,6 +248,17 @@ pre#train-state-pre {
   color: #888;
 }
 
+.stcs-columns td.set {
+  width: 3.3rem;
+  text-align: center;
+}
+
+.stcs-columns td.set button {
+  padding: 0.1rem 0.25rem;
+  font: inherit;
+  font-size: 0.68rem;
+}
+
 .stcs-columns td.block {
   width: 2.5rem;
   text-align: center;

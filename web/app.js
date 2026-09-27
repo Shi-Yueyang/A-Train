@@ -26,6 +26,21 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+function hasTextSelectionWithin(element) {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return false;
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    if (selection.getRangeAt(index).intersectsNode(element)) return true;
+  }
+  return false;
+}
+
+function setLiveText(element, value) {
+  const text = String(value);
+  if (element.textContent === text || hasTextSelectionWithin(element)) return;
+  element.textContent = text;
+}
+
 async function fetchJson(path, options) {
   const res = await fetch(API + path, options);
   let data = null;
@@ -147,10 +162,10 @@ function renderBtmEncoding(input, preview) {
 
 function renderStatus() {
   const s = state.status;
-  $("sim-state").textContent = s ? s.simulation_state : "—";
-  $("sim-time").textContent = s ? fmt(s.simulation_time, 3) : "0.000";
-  $("sim-mode").textContent = s ? s.time_mode : "—";
-  $("sim-mult").textContent = s ? fmt(s.time_multiplier, 2) : "—";
+  setLiveText($("sim-state"), s ? s.simulation_state : "—");
+  setLiveText($("sim-time"), s ? fmt(s.simulation_time, 3) : "0.000");
+  setLiveText($("sim-mode"), s ? s.time_mode : "—");
+  setLiveText($("sim-mult"), s ? fmt(s.time_multiplier, 2) : "—");
 }
 
 function renderTrainSelectors() {
@@ -181,11 +196,11 @@ function renderTrainState() {
   const equipmentEl = $("train-equipment");
   const stcsEl = $("train-stcs");
   if (!sel) {
-    pre.textContent = "no trains";
+    setLiveText(pre, "no trains");
     equipmentEl.replaceChildren();
     stcsEl.replaceChildren();
-    $("cab-state").textContent = "—";
-    $("key-state").textContent = "—";
+    setLiveText($("cab-state"), "—");
+    setLiveText($("key-state"), "—");
     renderEquipmentControls([]);
     return;
   }
@@ -198,12 +213,12 @@ function renderTrainState() {
     )
     .join(", ");
   const selected = cabs.find((c) => c.cab_id === state.selectedCab);
-  $("cab-state").textContent = selected
+  setLiveText($("cab-state"), selected
     ? `cab ${selected.cab_id}: ${selected.active ? "active" : "inactive"}`
-    : "—";
-  $("key-state").textContent = selected
+    : "—");
+  setLiveText($("key-state"), selected
     ? `cab ${selected.cab_id}: ${selected.key ? "inserted" : "removed"}`
-    : "—";
+    : "—");
   const lines = [
     `train_id        ${sel.train_id}`,
     `cabs            ${cabText}`,
@@ -213,7 +228,7 @@ function renderTrainState() {
     `direction       ${sel.direction}`,
     `drive_demand    ${fmt(sel.drive_demand)}`,
   ];
-  pre.textContent = lines.join("\n");
+  setLiveText(pre, lines.join("\n"));
 
   const isStcsAtp = (entry) =>
     entry.type === "stcs_atp_duo" || entry.type === "stcs_atp_solo";
@@ -366,13 +381,15 @@ function syncDrivingPanels(equipment) {
     if (!entry || !card.widgets) continue;
     const s = entry.state;
     const w = card.widgets;
-    w.readout.textContent =
-      `cab ${s.cab_id} · facing ${s.facing} · ${s.mode}/${s.direction}/${fmt(s.acceleration, 2)}`;
+    setLiveText(
+      w.readout,
+      `cab ${s.cab_id} · facing ${s.facing} · ${s.mode}/${s.direction}/${fmt(s.acceleration, 2)}`
+    );
     if (state.dirty[dirtyKey(card.dataset.key)]) continue;
     w.mode.value = s.mode;
     w.direction.value = s.direction;
     w.accel.value = String(s.acceleration);
-    w.accelVal.textContent = fmt(s.acceleration, 2);
+    setLiveText(w.accelVal, fmt(s.acceleration, 2));
   }
 }
 
@@ -413,7 +430,7 @@ function syncDoorCards(equipment) {
   for (const card of $("door-controls").children) {
     const entry = equipment.find((e) => e.key === card.dataset.key);
     if (!entry || !card.widgets) continue;
-    card.widgets.readout.textContent = `state: ${entry.state.state}`;
+    setLiveText(card.widgets.readout, `state: ${entry.state.state}`);
   }
 }
 
@@ -455,7 +472,7 @@ function syncSwitchBoxes(equipment) {
     const entry = equipment.find((e) => e.key === card.dataset.key);
     if (!entry || !card.widgets) continue;
     const s = entry.state;
-    card.widgets.readout.textContent = `cab ${s.cab_id} - position ${s.position}`;
+    setLiveText(card.widgets.readout, `cab ${s.cab_id} - position ${s.position}`);
     card.widgets.position.value = s.position;
   }
 }
@@ -508,7 +525,10 @@ function syncBtmCards(equipment) {
     const entry = equipment.find((item) => item.key === card.dataset.key);
     if (!entry || !card.widgets) continue;
     const state = entry.state;
-    card.widgets.readout.textContent = `cab ${state.cab_id} · ${state.pending ? "pending" : "idle"} · received ${state.received_count}`;
+    setLiveText(
+      card.widgets.readout,
+      `cab ${state.cab_id} · ${state.pending ? "pending" : "idle"} · received ${state.received_count}`
+    );
   }
 }
 
@@ -516,6 +536,7 @@ function renderLinksPanel(train) {
   const sourceSel = $("cut-source");
   const targetSel = $("cut-target");
   const list = $("cut-list");
+  if (hasTextSelectionWithin(list)) return;
   if (!train) {
     list.replaceChildren();
     return;
@@ -565,6 +586,7 @@ function fillOptions(select, values) {
 }
 
 function renderEquipment(container, equipment) {
+  if (hasTextSelectionWithin(container)) return;
   container.replaceChildren();
   if (!equipment.length) {
     const empty = document.createElement("p");
@@ -608,7 +630,7 @@ function renderStcs(container, entries) {
   }
 }
 
-function buildSignalTable(states, onBlockToggle) {
+function buildSignalTable(states, onSignalSet, onBlockToggle) {
   const table = document.createElement("table");
   const showBlock = (states || []).some((signal) => signal.blockable);
   for (const [bit, signal] of (states || []).entries()) {
@@ -622,7 +644,23 @@ function buildSignalTable(states, onBlockToggle) {
     const valueCell = document.createElement("td");
     valueCell.className = "value";
     valueCell.textContent = signal.value ? "1" : "0";
-    row.append(bitCell, nameCell, valueCell);
+    const setCell = document.createElement("td");
+    setCell.className = "set";
+    const flipButton = document.createElement("button");
+    flipButton.type = "button";
+    flipButton.textContent = "Flip";
+    flipButton.setAttribute(
+      "aria-label",
+      `Flip ${signal.name} from ${signal.value ? "1" : "0"} to ${signal.value ? "0" : "1"}`
+    );
+    if (signal.blockable && !signal.blocked) {
+      flipButton.disabled = true;
+      flipButton.title = "Block the internal derivation before flipping this signal";
+    }
+    flipButton.dataset.value = String(Boolean(signal.value));
+    flipButton.onclick = () => onSignalSet(signal.name, flipButton.dataset.value !== "true");
+    setCell.appendChild(flipButton);
+    row.append(bitCell, nameCell, valueCell, setCell);
     if (showBlock) {
       const blockCell = document.createElement("td");
       blockCell.className = "block";
@@ -641,6 +679,35 @@ function buildSignalTable(states, onBlockToggle) {
     table.appendChild(row);
   }
   return table;
+}
+
+function syncSignalTable(host, states, onSignalSet, onBlockToggle) {
+  const signals = states || [];
+  const signature = signals.map((signal) => `${signal.name}:${signal.blockable ? 1 : 0}`).join("|");
+  if (host.dataset.signature !== signature) {
+    host.replaceChildren(buildSignalTable(signals, onSignalSet, onBlockToggle));
+    host.dataset.signature = signature;
+  }
+
+  for (const [index, signal] of signals.entries()) {
+    const row = host.querySelectorAll("tr")[index];
+    row.classList.toggle("on", Boolean(signal.value));
+    setLiveText(row.querySelector("td.value"), signal.value ? "1" : "0");
+
+    const flipButton = row.querySelector("td.set button");
+    flipButton.dataset.value = String(Boolean(signal.value));
+    flipButton.setAttribute(
+      "aria-label",
+      `Flip ${signal.name} from ${signal.value ? "1" : "0"} to ${signal.value ? "0" : "1"}`
+    );
+    flipButton.disabled = Boolean(signal.blockable && !signal.blocked);
+    flipButton.title = flipButton.disabled
+      ? "Block the internal derivation before flipping this signal"
+      : "";
+
+    const blockToggle = row.querySelector("td.block input");
+    if (blockToggle) blockToggle.checked = Boolean(signal.blocked);
+  }
 }
 
 function buildStcsCard(entry) {
@@ -673,7 +740,7 @@ function buildStcsCard(entry) {
     postCommand(`/trains/${state.selectedTrainId}/equipment/${entry.key}`, {
       command: inInput.value,
     });
-  inField.append(labeled("ATP → train signal", inInput), inSend);
+  inField.append(labeled("ATP → train bit string", inInput), inSend);
 
   const outField = document.createElement("div");
   outField.className = "stcs-input-field";
@@ -688,7 +755,7 @@ function buildStcsCard(entry) {
     postCommand(`/trains/${state.selectedTrainId}/equipment/${entry.key}`, {
       train_out_signal: outInput.value,
     });
-  outField.append(labeled("Train → ATP signal", outInput), outSend);
+  outField.append(labeled("Train → ATP bit string", outInput), outSend);
 
   signalInputs.append(inField, outField);
   card.appendChild(signalInputs);
@@ -728,16 +795,26 @@ function updateStcsCard(card, entry) {
     typeof stcs.last_command_time === "number"
       ? ` (received ${formatWallClock(stcs.last_command_time)})`
       : "";
-  card.widgets.raw.textContent =
-    `${cabLabel} · last ATP command: ${stcs.last_command ?? "—"}${commandAt} · train-out signal: ${stcs.train_out_signal || "—"}`;
+  setLiveText(
+    card.widgets.raw,
+    `${cabLabel} · last ATP command: ${stcs.last_command ?? "—"}${commandAt} · train-out signal: ${stcs.train_out_signal || "—"}`
+  );
 
   const setBlocked = (name, blocked) =>
     postCommand(`/trains/${state.selectedTrainId}/equipment/${entry.key}`,
       blocked ? { block: [name] } : { unblock: [name] });
-  const inputs = [stcs.train_in_states, stcs.train_out_states];
-  card.widgets.tables.forEach((host, index) => {
-    host.replaceChildren(buildSignalTable(inputs[index], index === 1 ? setBlocked : null));
-  });
+  const equipmentPath = `/trains/${state.selectedTrainId}/equipment/${entry.key}`;
+  syncSignalTable(
+    card.widgets.tables[0],
+    stcs.train_in_states,
+    (name, value) => postCommand(equipmentPath, { train_in_signals: { [name]: value } })
+  );
+  syncSignalTable(
+    card.widgets.tables[1],
+    stcs.train_out_states,
+    (name, value) => postCommand(equipmentPath, { train_out_signals: { [name]: value } }),
+    setBlocked
+  );
 }
 
 // Sync a demand slider from the live snapshot, but never while it holds the
@@ -748,7 +825,7 @@ function syncSlider(id, value) {
   if (state.dirty[id]) return;
   const el = $(id);
   el.value = String(value);
-  $(`${id}-val`).textContent = fmt(value, 2);
+  setLiveText($(`${id}-val`), fmt(value, 2));
 }
 
 function renderMessage() {
@@ -756,20 +833,22 @@ function renderMessage() {
   el.className = "message";
   if (state.error) {
     el.classList.add("error");
-    el.textContent = `Rejected: ${state.error}`;
+    setLiveText(el, `Rejected: ${state.error}`);
   } else if (state.notice) {
     el.classList.add("ok");
-    el.textContent = "ok";
+    setLiveText(el, "ok");
   } else {
-    el.textContent = "";
+    setLiveText(el, "");
   }
 }
 
 function renderWsStatus() {
   const el = $("ws-status");
   el.className = `ws-status ${state.ws}`;
-  el.textContent =
-    state.ws === "live" ? "live" : state.ws === "connecting" ? "connecting…" : "disconnected";
+  setLiveText(
+    el,
+    state.ws === "live" ? "live" : state.ws === "connecting" ? "connecting…" : "disconnected"
+  );
 }
 
 function render() {

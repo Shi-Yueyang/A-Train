@@ -79,6 +79,8 @@ class EquipmentControlRequest:
     - ``door``: ``command`` is ``"open"`` or ``"close"``.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
     - ``stcs_atp`` with ``cab_id``: ``command`` is recorded on that cab's STCS instance.
+        - ``stcs_atp`` ``train_in_signals``/``train_out_signals``: sparse named
+            signal updates; omitted bits remain unchanged.
     - ``stcs_atp`` ``train_out_signal``: raw train-to-ATP bit assertion;
       simulator-derived feedback bits are re-established from real state
       unless their derivation is blocked.
@@ -99,6 +101,8 @@ class EquipmentControlRequest:
     direction: str | None = None
     acceleration: float | None = None
     train_out_signal: str | None = None
+    train_in_signals: dict[str, bool] | None = None
+    train_out_signals: dict[str, bool] | None = None
     block: tuple[str, ...] | None = None
     unblock: tuple[str, ...] | None = None
     system_switch: str | None = None
@@ -413,15 +417,20 @@ class Train:
             if (
                 command.command is None
                 and command.train_out_signal is None
+                and command.train_in_signals is None
+                and command.train_out_signals is None
                 and command.block is None
                 and command.unblock is None
             ):
                 raise ValueError(
-                    "stcs_atp requires a command, train_out_signal, or block/unblock signals"
+                    "stcs_atp requires a command, signal update, train_out_signal, "
+                    "or block/unblock signals"
                 )
             return StcsAtpControl(
                 command=command.command,
                 train_out_signal=command.train_out_signal,
+                train_in_signals=command.train_in_signals,
+                train_out_signals=command.train_out_signals,
                 block=command.block,
                 unblock=command.unblock,
             )

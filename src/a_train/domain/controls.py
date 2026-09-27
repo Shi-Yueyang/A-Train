@@ -52,6 +52,8 @@ class StcsAtpControl:
     direction: str | None = None
     mode: str | None = None
     train_out_signal: str | None = None
+    train_in_signals: dict[str, bool] | None = None
+    train_out_signals: dict[str, bool] | None = None
     block: tuple[str, ...] | None = None
     unblock: tuple[str, ...] | None = None
     system_switch: str | None = None

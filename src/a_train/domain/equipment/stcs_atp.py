@@ -82,7 +82,10 @@ _EB_FEEDBACK = SignalDefinition(
     "emergency_brake_feedback", derive=Nand(("emergency_brake_1", "emergency_brake_2"))
 )
 _SB7_FEEDBACK = SignalDefinition(
-    "service_brake_7_feedback", derive=Follows("maximum_service_brake_7")
+    "service_brake_7_feedback", derive=Invert("maximum_service_brake_7")
+)
+_TURNBACK_ACTIVATION_FEEDBACK = SignalDefinition(
+    "turnback_activation_feedback", derive=Invert("turnback_activation")
 )
 _SLEEP = SignalDefinition("sleep_signal", derive=Invert("cab_activation"))
 
@@ -141,6 +144,7 @@ class StcsAtpBase:
     def apply_control(self, control: StcsAtpControl, *, received_at: float | None = None) -> None:
         if not isinstance(control, StcsAtpControl):
             raise ValueError("stcs_atp control is invalid")
+        self._validate_signal_updates(control)
         if control.block is not None or control.unblock is not None:
             self._apply_blocks(control.block, control.unblock)
         if control.left_door_open is not None:
@@ -170,6 +174,46 @@ class StcsAtpBase:
                 )
             for signal, bit in zip(self.TRAIN_TO_ATP_SIGNALS, bits):
                 self._train_out_states[signal.name] = bit == "1"
+        if control.train_in_signals is not None:
+            self._train_in_states.update(control.train_in_signals)
+        if control.train_out_signals is not None:
+            self._train_out_states.update(control.train_out_signals)
+
+    def _validate_signal_updates(self, control: StcsAtpControl) -> None:
+        if control.train_in_signals is not None:
+            self._validate_signal_map(
+                control.train_in_signals,
+                self.ATP_TO_TRAIN_SIGNALS,
+                "train_in_signals",
+            )
+        if control.train_out_signals is not None:
+            definitions = {signal.name: signal for signal in self.TRAIN_TO_ATP_SIGNALS}
+            self._validate_signal_map(
+                control.train_out_signals,
+                self.TRAIN_TO_ATP_SIGNALS,
+                "train_out_signals",
+            )
+            blocked_after = (self._blocked | set(control.block or ())) - set(
+                control.unblock or ()
+            )
+            for name in control.train_out_signals:
+                if definitions[name].blockable and name not in blocked_after:
+                    raise ValueError(
+                        f"derived stcs_atp signal must be blocked before manual update: {name}"
+                    )
+
+    @staticmethod
+    def _validate_signal_map(
+        updates: dict[str, bool], definitions: tuple[SignalDefinition, ...], field: str
+    ) -> None:
+        if not isinstance(updates, dict) or not updates:
+            raise ValueError(f"stcs_atp {field} must be a non-empty object")
+        names = {signal.name for signal in definitions}
+        for name, value in updates.items():
+            if name not in names:
+                raise ValueError(f"unknown stcs_atp signal in {field}: {name}")
+            if not isinstance(value, bool):
+                raise ValueError(f"stcs_atp {field} values must be booleans")
 
     def _apply_blocks(self, block: tuple[str, ...] | None, unblock: tuple[str, ...] | None) -> None:
         block_names = tuple(block or ())
@@ -353,7 +397,7 @@ class StcsAtpDuo(StcsAtpBase):
         _HANDLE_TRACTION,
         _HANDLE_BRAKE,
         SignalDefinition("turnback_button"),
-        SignalDefinition("turnback_activation_feedback"),
+        _TURNBACK_ACTIVATION_FEEDBACK,
         SignalDefinition("left_door_open_button"),
         SignalDefinition("right_door_open_button"),
         SignalDefinition("left_door_close_button"),
@@ -408,7 +452,7 @@ class StcsAtpSolo(StcsAtpBase):
         _HANDLE_TRACTION,
         _HANDLE_BRAKE,
         SignalDefinition("turnback_button"),
-        SignalDefinition("turnback_activation_feedback"),
+        _TURNBACK_ACTIVATION_FEEDBACK,
         SignalDefinition("left_door_open_button"),
         SignalDefinition("right_door_open_button"),
         SignalDefinition("left_door_close_button"),

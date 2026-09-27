@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from ...domain.snapshots import TrainSnapshot
 from ...simulation.snapshots import SimulationSnapshot
@@ -86,6 +86,14 @@ class EquipmentSetRequest(BaseModel):
         default=None,
         description="STCS ATP train-to-ATP bit assertion ('0'/'1' string); unblocked "
         "derived feedback bits are re-established from real train state.",
+    )
+    train_in_signals: dict[str, StrictBool] | None = Field(
+        default=None,
+        description="Sparse STCS ATP-to-train signal updates by signal name.",
+    )
+    train_out_signals: dict[str, StrictBool] | None = Field(
+        default=None,
+        description="Sparse STCS train-to-ATP signal updates by signal name.",
     )
     system_switch: str | None = Field(
         default=None,

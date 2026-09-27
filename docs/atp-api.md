@@ -298,7 +298,11 @@ active and `true` otherwise.
 `emergency_brake_feedback` aggregates the pair as a NAND: it is `false` only
 when both emergency brakes are active and `true` otherwise, and
 `service_brake_7_feedback` is active-low: it is `false` when
-`maximum_service_brake_7` is active and `true` otherwise:
+`maximum_service_brake_7` is active and `true` otherwise.
+`turnback_activation_feedback` is also active-low: it is `false` while the
+ATP-to-train `turnback_activation` input is active and `true` otherwise.
+These feedback bits are internal derivations and can be blocked through the
+Web API like the other derived feedbacks:
 
 | Bit | Train-out state |
 | ---: | --- |
