@@ -5,7 +5,8 @@
       {
         "cab_id": 1,
         "facing": "forward",
-        "active": true
+        "active": true,
+        "key_inserted": true
       },
       {
         "cab_id": 2,

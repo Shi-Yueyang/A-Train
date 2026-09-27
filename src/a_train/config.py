@@ -119,6 +119,7 @@ def train_config_from_data(data: Mapping[str, Any]):
     cab_ids: list[int] = []
     facings: dict[int, int] = {}
     active_cabs: list[int] = []
+    key_cabs: list[int] = []
     for index, raw_cab in enumerate(cabs):
         where = f"train config.cabs[{index}]"
         cab = _require_mapping(raw_cab, where)
@@ -128,10 +129,15 @@ def train_config_from_data(data: Mapping[str, Any]):
         facing = cab.get("facing", "forward")
         if facing not in ("forward", "backward"):
             raise ConfigError(f"{where}: 'facing' must be 'forward' or 'backward'")
+        key_inserted = cab.get("key_inserted", False)
+        if not isinstance(key_inserted, bool):
+            raise ConfigError(f"{where}: 'key_inserted' must be a boolean")
         cab_ids.append(cab_id)
         facings[cab_id] = 1 if facing == "forward" else -1
         if cab.get("active", False):
             active_cabs.append(cab_id)
+        if key_inserted:
+            key_cabs.append(cab_id)
     if len(active_cabs) != 1:
         raise ConfigError("train config.cabs: exactly one cab must have 'active': true")
 
@@ -186,6 +192,7 @@ def train_config_from_data(data: Mapping[str, Any]):
         train_id=train_id,
         cab_ids=tuple(cab_ids),
         initial_active_cab=active_cabs[0],
+        initial_key_cabs=tuple(key_cabs),
         max_traction_accel=_require_number(
             physics.get("max_traction_accel"), "max_traction_accel", "train config.physics"
         ),
@@ -263,6 +270,7 @@ def train_config_to_data(config) -> dict[str, Any]:
                 "cab_id": cab_id,
                 "facing": "forward" if config.cab_facings[cab_id] == 1 else "backward",
                 "active": cab_id == config.initial_active_cab,
+                "key_inserted": cab_id in config.initial_key_cabs,
             }
             for cab_id in config.cab_ids
         ],

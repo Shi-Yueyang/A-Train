@@ -76,7 +76,7 @@ example:
 	"train": {
 		"train_id": "TRAIN001",
 		"cabs": [
-			{"cab_id": 1, "facing": "forward", "active": true},
+			{"cab_id": 1, "facing": "forward", "active": true, "key_inserted": true},
 			{"cab_id": 2, "facing": "backward", "active": false}
 		],
 		"physics": {
@@ -100,7 +100,9 @@ example:
 }
 ```
 
-Equipment keys are generated internally as unique REST addresses; cab-scoped
+Cab entries may set `key_inserted` to `true` to start with the key inserted;
+omitted values default to `false`. Reset restores each cab's configured key
+state. Equipment keys are generated internally as unique REST addresses; cab-scoped
 equipment must be unique by `(type, cab_id)`, which is also how ATP wire
 messages address instances. The supported equipment types are `door`, `btm`,
 `driving_system`, `stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`. Each equipment entry

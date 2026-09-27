@@ -12,6 +12,7 @@ CUSTOM = TrainConfig(
     train_id="CUSTOM001",
     cab_ids=(10, 20),
     initial_active_cab=10,
+    initial_key_cabs=(10,),
     max_traction_accel=2.5,
     max_decel=3.0,
     initial_position=12.5,
@@ -42,9 +43,21 @@ async def test_environment_train_config_reaches_public_snapshot(configured_clien
     train = response.json()["trains"][0]
     assert train["train_id"] == "CUSTOM001"
     assert train["position"] == 12.5
+    cabs = {cab["cab_id"]: cab for cab in train["cabs"]}
+    assert cabs[10]["key"] is True
+    assert cabs[20]["key"] is False
     assert {entry["key"] for entry in train["equipment"]} == {
         "left_door",
         "btm_10",
         "stcs_atp_duo_10",
         "driving_system_10",
     }
+
+    response = await configured_client.post(
+        "/api/trains/CUSTOM001/commands", json={"cab_id": 10, "key": False}
+    )
+    assert response.status_code == 200
+    response = await configured_client.post("/api/simulation/reset")
+    assert response.status_code == 200
+    train = (await configured_client.get("/api/trains/CUSTOM001")).json()
+    assert next(cab for cab in train["cabs"] if cab["cab_id"] == 10)["key"] is True

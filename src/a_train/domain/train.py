@@ -138,6 +138,7 @@ class TrainConfig:
     train_id: str
     cab_ids: tuple[int, ...]
     initial_active_cab: int
+    initial_key_cabs: tuple[int, ...] = ()
     max_traction_accel: float
     max_decel: float
     initial_position: float = 0.0
@@ -158,6 +159,10 @@ class TrainConfig:
             raise ValueError("cab_ids must be positive integers")
         if self.initial_active_cab not in self.cab_ids:
             raise ValueError("initial_active_cab must be one of cab_ids")
+        initial_key_cabs = tuple(self.initial_key_cabs)
+        if not set(initial_key_cabs) <= set(self.cab_ids):
+            raise ValueError("initial_key_cabs must contain only configured cabs")
+        object.__setattr__(self, "initial_key_cabs", initial_key_cabs)
         if not is_finite(self.initial_position):
             raise ValueError("initial_position must be finite")
         if not is_finite(self.initial_speed):
@@ -263,7 +268,7 @@ class Train:
         self._cab_active = {
             cab_id: cab_id == config.initial_active_cab for cab_id in config.cab_ids
         }
-        self._cab_key = {cab_id: False for cab_id in config.cab_ids}
+        self._cab_key = {cab_id: cab_id in config.initial_key_cabs for cab_id in config.cab_ids}
         # Sync observer equipment (e.g. door feedback into stcs_atp_duo) with the
         # configured initial state before the first snapshot is taken.
         self._resolve_all_intents()
@@ -593,7 +598,9 @@ class Train:
         self._cab_active = {
             cab_id: cab_id == self._config.initial_active_cab for cab_id in self._config.cab_ids
         }
-        self._cab_key = {cab_id: False for cab_id in self._config.cab_ids}
+        self._cab_key = {
+            cab_id: cab_id in self._config.initial_key_cabs for cab_id in self._config.cab_ids
+        }
         self._link_cuts.clear()
         for eq in self._equipment.values():
             eq.reset()
