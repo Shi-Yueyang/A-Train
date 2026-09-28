@@ -278,6 +278,23 @@ async def test_position_control_stops_at_target_with_speed_cap() -> None:
         assert max_observed_speed <= 0.8 + 1e-9
 
 
+async def test_automatic_control_uses_off_deadband_for_small_requests() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        status, _ = await _handles(
+            c,
+            1,
+            control_mode="speed",
+            target_speed=0.01,
+        )
+        assert status == 200
+
+        await _step(c, FIXED_STEP)
+        state = _equipment(await _train(c), "driving_system_1")["state"]
+        assert state["mode"] == "off"
+        assert state["acceleration"] == 0.0
+
+
 async def test_manual_handle_command_returns_control_to_manual_mode() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)

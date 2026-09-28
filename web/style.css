@@ -134,10 +134,29 @@ pre#train-state-pre {
 }
 
 .equipment-card h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin: 0 0 0.4rem;
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.card-toggle {
+  flex: 0 0 auto;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.equipment-card.is-collapsed > :not(h3) {
+  display: none;
 }
 
 #train-control-cards {

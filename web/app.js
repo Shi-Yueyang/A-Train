@@ -256,7 +256,7 @@ function buildCabCard(cab) {
   controls.append(labeled("Active", active), labeled("Key inserted", keyInserted));
   card.appendChild(controls);
   card.widgets = { status, active, keyInserted };
-  return card;
+  return makeControlCardCollapsible(card);
 }
 
 function syncCabCards(cabs) {
@@ -282,6 +282,33 @@ function syncCabCards(cabs) {
 // steal focus; values are synced from each snapshot unless dirty.
 
 const controlSignature = {};
+
+let controlCardId = 0;
+
+function makeControlCardCollapsible(card) {
+  const heading = card.querySelector(":scope > h3");
+  if (!heading) return card;
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "card-toggle";
+  toggle.textContent = "-";
+  toggle.setAttribute("aria-expanded", "true");
+  toggle.setAttribute("aria-label", `Collapse ${heading.textContent}`);
+  toggle.title = "Collapse card";
+  toggle.onclick = () => {
+    const collapsed = card.classList.toggle("is-collapsed");
+    toggle.textContent = collapsed ? "+" : "-";
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    toggle.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${heading.dataset.label}`);
+    toggle.title = collapsed ? "Expand card" : "Collapse card";
+  };
+  heading.dataset.label = heading.textContent;
+  heading.replaceChildren(toggle, document.createTextNode(heading.dataset.label));
+  toggle.setAttribute("aria-controls", `control-card-${controlCardId}`);
+  card.id = `control-card-${controlCardId}`;
+  controlCardId += 1;
+  return card;
+}
 
 function ensurePanels(container, signature, rebuild) {
   if (controlSignature[container.id] === signature) return;
@@ -474,7 +501,7 @@ function buildDrivingCard(entry) {
     syncModeFields,
   };
   syncModeFields();
-  return card;
+  return makeControlCardCollapsible(card);
 }
 
 function labeled(text, ...controls) {
@@ -537,7 +564,7 @@ function buildDoorCard(entry) {
   row.appendChild(resetBtn);
   card.appendChild(row);
   card.widgets = { readout };
-  return card;
+  return makeControlCardCollapsible(card);
 }
 
 function syncDoorCards(equipment) {
@@ -578,7 +605,7 @@ function buildSwitchBoxCard(entry) {
   card.appendChild(row);
 
   card.widgets = { readout, position };
-  return card;
+  return makeControlCardCollapsible(card);
 }
 
 function syncSwitchBoxes(equipment) {
@@ -672,7 +699,7 @@ function buildBtmCard(entry) {
   row.append(send, resetBtn);
   card.appendChild(row);
   card.widgets = { readout };
-  return card;
+  return makeControlCardCollapsible(card);
 }
 
 function syncBtmCards(equipment) {
@@ -1069,6 +1096,10 @@ function timeModeBody() {
 }
 
 function bind() {
+  for (const card of document.querySelectorAll("#train-control-cards > .equipment-card")) {
+    makeControlCardCollapsible(card);
+  }
+
   $("btn-run").onclick = async () => {
     const ok = await postCommand("/simulation/time-mode", timeModeBody());
     if (ok) await postCommand("/simulation/start", {});

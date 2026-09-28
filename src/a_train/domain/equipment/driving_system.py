@@ -19,6 +19,7 @@ class DrivingSystem:
     CONTROL_MODES = ("manual", "speed", "position")
     _HANDLE_TO_TRACK_SIGN = {"forward": 1, "off": 0, "backward": -1}
     _SPEED_GAIN = 4.0
+    _AUTOMATIC_ACCELERATION_DEADBAND = 0.05
     _POSITION_TOLERANCE = 0.05
 
     def __init__(
@@ -216,11 +217,12 @@ class DrivingSystem:
             -motion.max_decel,
             min(motion.max_traction_accel, requested_accel),
         )
-        if abs(requested_accel) < 1e-9 or (
-            motion.speed != 0.0 and requested_accel * motion.speed < 0.0
-        ):
+        if motion.speed != 0.0 and requested_accel * motion.speed < 0.0:
             effort = min(1.0, abs(requested_accel) / motion.max_decel)
             self._set_effective_handles("brake", "off", effort)
+            return
+        if abs(requested_accel) < self._AUTOMATIC_ACCELERATION_DEADBAND:
+            self._set_effective_handles("off", "off", 0.0)
             return
 
         track_sign = 1 if requested_accel > 0.0 else -1
