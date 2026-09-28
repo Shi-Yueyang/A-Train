@@ -269,6 +269,7 @@ with the component's error message on invalid input.
 | `system_switch`   | string          | `switch_box_<cab_id>` | Box position `"c2"` / `"auto"` / `"cbtc"`; mirrored one-hot into that cab's STCS ATP `system_switch_*` bits. |
 | `cab_id`    | integer            | optional consistency check | Target cab, when applicable. |
 | `data`      | string             | `btm_1`, `btm_2` | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400. |
+| `telegram`  | object             | `btm_1`, `btm_2` | JSON CTCS balise telegram encoded by the simulator (btm-telegram.md); mutually exclusive with `data`. |
 | `mode`      | string             | `driving_1`, `driving_2`  | Driving-system mode handle: `"traction"` / `"off"` / `"brake"`. |
 | `direction` | string             | `driving_1`, `driving_2`  | Driving-system direction handle: `"forward"` / `"off"` / `"backward"` (cab-relative). |
 | `acceleration` | number          | `driving_1`, `driving_2`  | Driving-system acceleration handle: continuous effort in `[0.0, 1.0]`. |

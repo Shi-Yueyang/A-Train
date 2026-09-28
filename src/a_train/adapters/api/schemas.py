@@ -75,6 +75,13 @@ class EquipmentSetRequest(BaseModel):
     data: str | None = Field(
         default=None, description="Base64-encoded opaque payload (btm, atp-api.md §3.2)."
     )
+    telegram: dict | None = Field(
+        default=None,
+        description=(
+            "JSON CTCS balise telegram encoded by the simulator (btm keys only; "
+            "docs/btm-telegram.md). Mutually exclusive with 'data'."
+        ),
+    )
     mode: str | None = Field(
         default=None,
         description="Driving-system mode handle: 'traction', 'off', or 'brake'.",

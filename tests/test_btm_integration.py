@@ -152,3 +152,90 @@ async def test_reset_resyncs_without_replaying_old_payload() -> None:
             await _no_more(server, "btm_rx")
     finally:
         await server.stop()
+
+
+TELEGRAM_41 = {
+    "packets": [
+        {
+            "packet": 41,
+            "q_dir": 1,
+            "q_scale": 0,
+            "d_leveltr": 1234,
+            "m_leveltr": 2,
+            "l_ackleveltr": 5,
+        }
+    ]
+}
+# Golden encoded 830-bit CTCS frame (tests/test_telegram_codec.py pins it).
+TELEGRAM_41_HEX = "83007f8000000a501401349000507f80" + "00" * 88
+
+
+async def test_telegram_json_is_encoded_and_delivered_to_atp() -> None:
+    server = TestAtpServer()
+    port = await server.start()
+    try:
+        async with running_app([T1], _cabs(port)) as c:
+            await _await_ready(server, c, ready_count=2)
+
+            expected_b64 = base64.b64encode(bytes.fromhex(TELEGRAM_41_HEX)).decode("ascii")
+            r = await c.post("/api/trains/TRAIN001/equipment/btm_1", json={"telegram": TELEGRAM_41})
+            assert r.status_code == 200
+            btm = next(item["state"] for item in r.json()["equipment"] if item["key"] == "btm_1")
+            assert btm["payload_b64"] == expected_b64
+            assert btm["received_count"] == 1
+
+            message = await _next_train_state_with_btm(server, 1, expected_b64)
+            btm = next(item["state"] for item in message["equipment"] if item["key"] == "btm_1")
+            assert base64.b64decode(btm["payload_b64"]).hex() == TELEGRAM_41_HEX
+
+            other = base64.b64encode(b"\x01").decode("ascii")
+            r = await c.post("/api/trains/TRAIN001/equipment/btm_2", json={"data": other})
+            assert r.status_code == 200
+            message = await _next_train_state_with_btm(server, 2, other)
+            btm = next(item["state"] for item in message["equipment"] if item["key"] == "btm_2")
+            assert btm["payload_b64"] == other
+    finally:
+        await server.stop()
+
+
+async def test_telegram_validation_errors_leave_state_unchanged() -> None:
+    server = TestAtpServer()
+    port = await server.start()
+    try:
+        async with running_app([T1], _cabs(port)) as c:
+            await _await_ready(server, c, ready_count=2)
+
+            r = await c.post(
+                "/api/trains/TRAIN001/equipment/btm_1",
+                json={"telegram": {"packets": [{"packet": 5}]}},
+            )
+            assert r.status_code == 400
+            assert "unknown packet number 5" in r.json()["detail"]
+
+            r = await c.post(
+                "/api/trains/TRAIN001/equipment/btm_1",
+                json={"telegram": {"packets": [{"packet": 41, "q_dir": 2}]}},
+            )
+            assert r.status_code == 400
+            assert "q_scale: missing required field" in r.json()["detail"]
+
+            r = await c.post(
+                "/api/trains/TRAIN001/equipment/btm_1",
+                json={"telegram": TELEGRAM_41, "data": "AA=="},
+            )
+            assert r.status_code == 400
+            assert "mutually exclusive" in r.json()["detail"]
+
+            r = await c.post(
+                "/api/trains/TRAIN001/equipment/left_door",
+                json={"telegram": TELEGRAM_41},
+            )
+            assert r.status_code == 400
+            assert "only accepted for btm" in r.json()["detail"]
+
+            train = (await c.get("/api/trains/TRAIN001")).json()
+            btm = next(item["state"] for item in train["equipment"] if item["key"] == "btm_1")
+            assert btm["payload_b64"] is None
+            assert btm["received_count"] == 0
+    finally:
+        await server.stop()

@@ -23,6 +23,7 @@ from ...simulation.commands import (
 )
 from ...simulation.core import SimulationCore
 from ...simulation.snapshots import SimulationSnapshot
+from ...telegram import TelegramError, encode_telegram
 from .schemas import (
     AtpConnectionResponse,
     AtpStatusResponse,
@@ -183,8 +184,22 @@ async def set_equipment(
 ) -> TrainResponse:
     """Set train-facing equipment state through the core, applied immediately."""
 
+    if body.telegram is not None and body.data is not None:
+        raise HTTPException(status_code=400, detail="'telegram' and 'data' are mutually exclusive")
     data = None
-    if body.data is not None:
+    if body.telegram is not None:
+        train = _find_train(core.get_snapshot(), train_id)
+        if train is not None:
+            entry = next((item for item in train.equipment if item.key == key), None)
+            if entry is not None and entry.type != "btm":
+                raise HTTPException(
+                    status_code=400, detail="'telegram' is only accepted for btm equipment"
+                )
+        try:
+            data = encode_telegram(body.telegram)
+        except TelegramError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+    elif body.data is not None:
         try:
             data = base64.b64decode(body.data, validate=True)
         except (binascii.Error, ValueError):

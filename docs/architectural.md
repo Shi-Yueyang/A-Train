@@ -863,6 +863,12 @@ train-simulator/
 │   │   ├── equipment.py            # Doors, BTM, and ATP-brake equipment behavior.
 │   │   └── signals.py              # Linear-track signal state and signal-aspect rules.
 │   │
+│   ├── telegram/                   # Pure CTCS balise telegram codec (JSON object to frame user-data bytes).
+│   │   ├── bits.py                 # MSB-first bit writer.
+│   │   ├── fields.py               # Declarative field elements (scalar, conditional, repeat group).
+│   │   ├── packets.py              # Packet table (41) and packet framing.
+│   │   └── telegram.py             # Balise header, packet sequence, terminator, padding.
+│   │
 │   ├── adapters/                   # I/O boundaries that translate external data into core commands.
 │   │   ├── __init__.py             # Adapter package marker; no runtime behavior.
 │   │   ├── api/
@@ -897,6 +903,7 @@ train-simulator/
 │   ├── architectural.md            # System architecture and module contracts.
 │   ├── atp-api.md                  # ATP TCP/NDJSON wire protocol contract.
 │   ├── web-api.md                  # Implemented HTTP/WebSocket API contract.
+│   ├── btm-telegram.md             # JSON-to-CTCS balise telegram encoding contract.
 │   └── TODO.md                     # Deferred implementation work.
 │
 ├── pyproject.toml                  # Build metadata, dependencies, tooling, and test configuration.
@@ -907,12 +914,14 @@ Dependency direction is strictly inward:
 
 ```text
 adapters -------------> simulation -> domain
+adapters -------------> telegram   (pure codec; telegram imports nothing else)
 bootstrap -----------> adapters, simulation
 web ------------------> REST and WebSocket adapters
 ```
 
-`domain` never imports `simulation`, `adapters`, or `web`.
-`simulation` never imports `adapters` or `web`. `bootstrap.py` is the only
+`domain` never imports `simulation`, `adapters`, `telegram`, or `web`.
+`simulation` never imports `adapters`, `telegram`, or `web`.
+`bootstrap.py` is the only
 production module allowed to assemble these components and start background
 tasks.
 
@@ -921,7 +930,7 @@ tasks.
 1. **Headless first** — The simulator must work without the browser.
 2. **ATP is external** — ATP is an independent process and communicates only through the protocol.
 3. **Protocol is a contract** — The protocol is documented independently of Python classes.
-4. **BTM is opaque** — The simulator transports BTM bytes but does not interpret ATP-specific BTM semantics.
+4. **BTM is opaque to the simulation** — the simulator transports BTM bytes and never interprets ATP-specific BTM semantics; the optional input-edge encoder (`telegram/`, docs/btm-telegram.md) only translates a caller's JSON object into bytes before the opaque path begins.
 5. **Physics owns physical state** — ATP requests actions; the train model determines the physical result.
 6. **GUI is replaceable** — The web UI is just another client.
 7. **Everything should be automatable** — Every GUI operation should have an equivalent API/command.

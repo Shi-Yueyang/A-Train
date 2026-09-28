@@ -121,8 +121,10 @@ ruff check .
 ruff format --check .
 ```
 
-See [docs/web-api.md](docs/web-api.md) for REST/WebSocket details and
-[docs/architectural.md](docs/architectural.md) for the design.
+See [docs/web-api.md](docs/web-api.md) for REST/WebSocket details,
+[docs/architectural.md](docs/architectural.md) for the design, and
+[docs/btm-telegram.md](docs/btm-telegram.md) for the JSON BTM telegram encoder (CTCS frame)
+(`POST /api/trains/{id}/equipment/btm_1` with a `telegram` object).
 [docs/ashley.md](docs/ashley.md) is the superseded process-supervisor
 design; [docs/supervision.md](docs/supervision.md) is the current decision:
 native OS supervisors plus a thin cross-host control/monitoring shim (not
