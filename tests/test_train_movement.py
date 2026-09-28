@@ -215,7 +215,7 @@ async def test_train_reset_restores_state_and_clears_equipment() -> None:
         cab_flags = {c["cab_id"]: c["active"] for c in reset_state["cabs"]}
         assert cab_flags == {1: True, 2: False}  # configured cabs restored
         btm = [e["state"] for e in reset_state["equipment"] if e["type"] == "btm"]
-        assert all(b["pending"] is False and b["received_count"] == 0 for b in btm)
+        assert all(b["payload_b64"] is None and b["received_count"] == 0 for b in btm)
 
 
 # -- Criterion: equipment adds optional nested snapshots, physical fields intact

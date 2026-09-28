@@ -60,7 +60,7 @@ commands:
   "equipment": [
     { "type": "door", "key": "left_door", "cab_id": null, "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "cab_id": null, "state": { "state": "closed" } },
-    { "type": "btm", "key": "btm_1", "cab_id": 1, "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "btm", "key": "btm_1", "cab_id": 1, "state": { "cab_id": 1, "payload_b64": null, "received_count": 0 } },
     { "type": "driving_system", "key": "driving_1", "cab_id": 1, "state": { "cab_id": 1, "facing": "forward", "control_mode": "manual", "mode": "off", "direction": "off", "acceleration": 0.0, "target_speed": null, "target_position": null, "max_speed": null, "manual_mode": "off", "manual_direction": "off", "manual_acceleration": 0.0 } },
     { "type": "driving_system", "key": "driving_2", "cab_id": 2, "state": { "cab_id": 2, "facing": "backward", "control_mode": "manual", "mode": "off", "direction": "off", "acceleration": 0.0, "target_speed": null, "target_position": null, "max_speed": null, "manual_mode": "off", "manual_direction": "off", "manual_acceleration": 0.0 } },
     { "type": "switch_box", "key": "switch_box_1", "cab_id": 1, "state": { "cab_id": 1, "position": "c2" } },
@@ -368,7 +368,7 @@ by equipment type (§3.5).
   "equipment": [
     { "type": "door", "key": "left_door", "state": { "state": "closed" } },
     { "type": "door", "key": "right_door", "state": { "state": "closed" } },
-    { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "btm", "key": "btm_1", "state": { "cab_id": 1, "payload_b64": null, "received_count": 0 } },
     { "type": "driving_system", "key": "driving_1", "state": { "cab_id": 1, "facing": "forward", "mode": "off", "direction": "off", "acceleration": 0.0 } },
     { "type": "stcs_atp_duo", "key": "stcs_atp_duo_1", "state": {
         "last_command": null,

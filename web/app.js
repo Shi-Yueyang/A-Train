@@ -8,6 +8,10 @@
 // without changing the displayed state. The UI contains no simulation rules.
 
 const API = "/api";
+const BTM_INPUT_FORMATS = {
+  raw: { label: "Raw hex bytes" },
+  etcs41: { label: "ETCS-41 JSON" },
+};
 const state = {
   status: null,
   trains: [],
@@ -150,6 +154,22 @@ function renderBtmEncoding(input, preview) {
     preview.textContent = `base64: ${hexToBase64(value)}`;
   } catch (error) {
     preview.textContent = error.message;
+  }
+}
+
+function renderBtmStructuredInput(input, preview) {
+  if (!input.value.trim()) {
+    preview.textContent = "";
+    return;
+  }
+  try {
+    const telegram = JSON.parse(input.value);
+    if (!telegram || Array.isArray(telegram) || typeof telegram !== "object") {
+      throw new Error("Telegram must be a JSON object");
+    }
+    preview.textContent = `request: ${JSON.stringify({ telegram })}`;
+  } catch (error) {
+    preview.textContent = `JSON error: ${error.message}`;
   }
 }
 
@@ -585,26 +605,67 @@ function buildBtmCard(entry) {
   readout.className = "stcs-raw";
   card.appendChild(readout);
 
+  const modeLabel = document.createElement("label");
+  modeLabel.className = "btm-mode-label";
+  modeLabel.textContent = "Input format";
+  const formatKeys = Object.keys(BTM_INPUT_FORMATS);
+  const mode = selectEl(
+    formatKeys,
+    formatKeys.map((format) => BTM_INPUT_FORMATS[format].label)
+  );
+  modeLabel.appendChild(mode);
+  card.appendChild(modeLabel);
+
   const payloadLabel = document.createElement("label");
   payloadLabel.className = "btm-payload-label";
-  payloadLabel.textContent = "Payload (hex)";
+  const payloadTitle = document.createElement("span");
+  payloadLabel.appendChild(payloadTitle);
   const payload = document.createElement("textarea");
   payload.className = "btm-payload";
-  payload.rows = 2;
+  payload.rows = 5;
   payload.placeholder = "01 23 a4 ff 00 81 72";
   payload.setAttribute("aria-label", `${key} payload (hex)`);
   const preview = document.createElement("output");
   preview.className = "btm-base64";
   preview.setAttribute("aria-live", "polite");
-  payload.oninput = () => renderBtmEncoding(payload, preview);
+  const hint = document.createElement("small");
+  hint.className = "btm-input-hint";
   payloadLabel.append(payload, preview);
+  payloadLabel.appendChild(hint);
   card.appendChild(payloadLabel);
+
+  const setInputMode = () => {
+    const structured = mode.value === "etcs41";
+    payloadTitle.textContent = structured ? "ETCS-41 object" : "Payload (hex)";
+    payload.placeholder = structured
+      ? '{\n  "packets": [\n    {\n      "packet": 41,\n      "q_dir": 1,\n      "q_scale": 0,\n      "d_leveltr": 1234,\n      "m_leveltr": 2,\n      "l_ackleveltr": 5\n    }\n  ]\n}'
+      : "01 23 a4 ff 00 81 72";
+    payload.setAttribute("aria-label", `${key} ${structured ? "ETCS-41 JSON" : "payload (hex)"}`);
+    hint.textContent = structured
+      ? "Raw coded integers. The server encodes this object into a CTCS frame."
+      : "Hex bytes are converted to base64 before sending.";
+    payload.oninput = () =>
+      structured
+        ? renderBtmStructuredInput(payload, preview)
+        : renderBtmEncoding(payload, preview);
+    if (structured && !payload.value.trim()) {
+      payload.value = payload.placeholder;
+    } else if (!structured && payload.value.trim().startsWith("{")) {
+      payload.value = "";
+    }
+    payload.oninput();
+  };
+  mode.onchange = setInputMode;
+  setInputMode();
 
   const row = document.createElement("div");
   row.className = "controls";
   const send = document.createElement("button");
   send.textContent = "Send";
-  send.onclick = () => sendBtmPayload(key, payload.value);
+  send.onclick = () =>
+    mode.value === "etcs41"
+      ? sendBtmStructuredInput(key, payload.value)
+      : sendBtmPayload(key, payload.value);
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "Reset";
   resetBtn.onclick = () => postCommand(`/trains/${state.selectedTrainId}/equipment/${key}/reset`, {});
@@ -621,7 +682,7 @@ function syncBtmCards(equipment) {
     const state = entry.state;
     setLiveText(
       card.widgets.readout,
-      `cab ${state.cab_id} · ${state.pending ? "pending" : "idle"} · received ${state.received_count}`
+      `cab ${state.cab_id} · received ${state.received_count}`
     );
   }
 }
@@ -1061,6 +1122,22 @@ async function sendBtmPayload(key, payload) {
     return;
   }
   await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, { data });
+}
+
+async function sendBtmStructuredInput(key, value) {
+  let telegram;
+  try {
+    telegram = JSON.parse(value);
+    if (!telegram || Array.isArray(telegram) || typeof telegram !== "object") {
+      throw new Error("Telegram must be a JSON object");
+    }
+  } catch (error) {
+    state.error = `Invalid telegram JSON: ${error.message}`;
+    state.notice = null;
+    renderMessage();
+    return;
+  }
+  await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, { telegram });
 }
 
 bind();

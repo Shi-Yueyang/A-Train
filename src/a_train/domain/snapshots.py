@@ -35,12 +35,11 @@ class DoorSnapshot:
 class BtmSnapshot:
     """Read-only view of the BTM equipment for one cab/train.
 
-    The BTM payload is opaque bytes; this snapshot only reports whether a
-    delivery is pending and its base64 form plus the total delivered count.
+    The BTM payload is opaque bytes; this snapshot reports its base64 form and
+    the total delivered count.
     """
 
     cab_id: int = 0
-    pending: bool = False
     payload_b64: str | None = None
     received_count: int = 0
 

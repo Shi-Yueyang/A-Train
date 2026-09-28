@@ -136,7 +136,7 @@ control). All peers receive the same whole-train content.
   "position": 15320.40,
   "direction": "forward",
   "equipment": [
-    { "type": "btm", "cab_id": 1, "state": { "pending": false, "payload_b64": null, "received_count": 0 } },
+    { "type": "btm", "cab_id": 1, "state": { "payload_b64": null, "received_count": 0 } },
     { "type": "stcs_atp_duo", "cab_id": 1, "state": {
         "train_out_signal": "110110000000000000000000000000"
     } }
@@ -484,7 +484,7 @@ simulator ──> {"type":"train_state",...}        (every published snapshot)
 simulator ──> {"type":"train_state",...}
 ATP     ──> {"type":"atp_command","cab_id":1,"drive_demand":-1.0}
 simulator ──> {"type":"train_state","acceleration":-2.0,...}  (deceleration applied)
-simulator ──> {"type":"train_state",...,"equipment":[...,{"type":"btm","cab_id":1,"state":{"pending":true,"payload_b64":"ASOk/wCBcg==","received_count":1}}]}
+simulator ──> {"type":"train_state",...,"equipment":[...,{"type":"btm","cab_id":1,"state":{"payload_b64":"ASOk/wCBcg==","received_count":1}}]}
 ATP     ──> {"type":"atp_command","cab_id":1,"door":"open","drive_demand":0.5}
               (two commands: control, then equipment)
 ATP     ──> {"type":"atp_command","cab_id":1,"atp_signal":"0001000"}

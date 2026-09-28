@@ -78,6 +78,19 @@ input[type="range"] {
   width: 100%;
 }
 
+.btm-mode-label {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+  color: #888;
+  font-size: 0.78rem;
+}
+
+.btm-mode-label select {
+  box-sizing: border-box;
+  width: 100%;
+}
+
 .btm-payload {
   box-sizing: border-box;
   font: inherit;
@@ -92,6 +105,11 @@ input[type="range"] {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;
   overflow-wrap: anywhere;
+}
+
+.btm-input-hint {
+  color: #888;
+  font-size: 0.75rem;
 }
 
 pre#train-state-pre {
@@ -367,6 +385,23 @@ pre#train-state-pre {
 }
 
 @media (max-width: 42rem) {
+  body {
+    margin: 1rem;
+  }
+
+  #train-control-cards {
+    column-width: auto;
+  }
+
+  #train-control-cards .equipment-card {
+    width: 100%;
+  }
+
+  pre#train-state-pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
   .stcs-columns {
     grid-template-columns: 1fr;
     gap: 0.75rem;

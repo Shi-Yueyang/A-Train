@@ -17,7 +17,7 @@ class Btm:
     def __init__(self, key: str, cab_id: int) -> None:
         self._key = key
         self._cab_id = cab_id
-        self._pending: bytes | None = None
+        self._payload: bytes | None = None
         self._received_count = 0
 
     @property
@@ -33,23 +33,22 @@ class Btm:
             raise ValueError("btm control is invalid")
         if control.cab_id is not None and control.cab_id != self._cab_id:
             raise ValueError("cab_id does not match equipment key")
-        self._pending = bytes(control.data)
+        self._payload = bytes(control.data)
         self._received_count += 1
 
     def read_state(self) -> BtmSnapshot:
         return BtmSnapshot(
             cab_id=self._cab_id,
-            pending=self._pending is not None,
             payload_b64=(
-                base64.b64encode(self._pending).decode("ascii")
-                if self._pending is not None
+                base64.b64encode(self._payload).decode("ascii")
+                if self._payload is not None
                 else None
             ),
             received_count=self._received_count,
         )
 
     def reset(self) -> None:
-        self._pending = None
+        self._payload = None
         self._received_count = 0
 
     def step(self, dt: float, motion: TrainMotion) -> None:

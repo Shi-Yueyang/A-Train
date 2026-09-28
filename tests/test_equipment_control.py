@@ -92,7 +92,6 @@ async def test_btm_delivery_through_equipment_endpoint() -> None:
         status, snap = await _equipment(c, "btm_1", data=base64.b64encode(payload).decode("ascii"))
         assert status == 200
         cab1 = next(e["state"] for e in snap["equipment"] if e["key"] == "btm_1")
-        assert cab1["pending"] is True
         assert cab1["received_count"] == 1
         assert base64.b64decode(cab1["payload_b64"]) == payload
 
