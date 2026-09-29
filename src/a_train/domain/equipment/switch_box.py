@@ -23,13 +23,25 @@ class SwitchBox:
     type = "switch_box"
     POSITIONS = ("c2", "auto", "cbtc")
 
-    def __init__(self, key: str, *, cab_id: int, initial_position: str = "c2") -> None:
+    def __init__(
+        self,
+        key: str,
+        *,
+        cab_id: int,
+        initial_position: str = "c2",
+        initial_c2_authorized: bool = False,
+        initial_cbtc_authorized: bool = False,
+    ) -> None:
         if initial_position not in self.POSITIONS:
             raise ValueError(f"invalid initial switch box position: {initial_position!r}")
         self._key = key
         self._cab_id = cab_id
         self._initial = initial_position
         self._position = initial_position
+        self._initial_c2_authorized = initial_c2_authorized
+        self._initial_cbtc_authorized = initial_cbtc_authorized
+        self._c2_authorized = initial_c2_authorized
+        self._cbtc_authorized = initial_cbtc_authorized
 
     @property
     def key(self) -> str:
@@ -40,24 +52,59 @@ class SwitchBox:
         return self._cab_id
 
     def apply_control(self, control: SwitchBoxControl, *, received_at: float | None = None) -> None:
-        if not isinstance(control, SwitchBoxControl) or control.position not in self.POSITIONS:
-            raise ValueError(f"switch box position must be one of {self.POSITIONS}")
-        self._position = control.position
+        if not isinstance(control, SwitchBoxControl):
+            raise ValueError("switch box control is invalid")
+        if control.position is not None:
+            if control.position not in self.POSITIONS:
+                raise ValueError(f"switch box position must be one of {self.POSITIONS}")
+            self._position = control.position
+        if control.c2_authorized is not None:
+            if not isinstance(control.c2_authorized, bool):
+                raise ValueError("switch box c2_authorized must be a boolean")
+            self._c2_authorized = control.c2_authorized
+        if control.cbtc_authorized is not None:
+            if not isinstance(control.cbtc_authorized, bool):
+                raise ValueError("switch box cbtc_authorized must be a boolean")
+            self._cbtc_authorized = control.cbtc_authorized
+        if (
+            control.position is None
+            and control.c2_authorized is None
+            and control.cbtc_authorized is None
+        ):
+            raise ValueError("switch box requires system_switch or authorization state")
 
     def read_state(self) -> SwitchBoxSnapshot:
-        return SwitchBoxSnapshot(cab_id=self._cab_id, position=self._position)
+        return SwitchBoxSnapshot(
+            cab_id=self._cab_id,
+            position=self._position,
+            c2_authorized=self._c2_authorized,
+            cbtc_authorized=self._cbtc_authorized,
+        )
 
     def reset(self) -> None:
         self._position = self._initial
+        self._c2_authorized = self._initial_c2_authorized
+        self._cbtc_authorized = self._initial_cbtc_authorized
 
     def step(self, dt: float, motion: TrainMotion) -> None:
         pass
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
+        position = self._position
+        if position == "auto":
+            if self._c2_authorized and self._cbtc_authorized:
+                return ()
+            if self._c2_authorized:
+                position = "c2"
+            elif self._cbtc_authorized:
+                position = "cbtc"
+            else:
+                return ()
+
         return (
             EquipmentIntent(
                 source=self._key,
                 target="stcs_atp",
-                control=StcsAtpControl(cab_id=self._cab_id, system_switch=self._position),
+                control=StcsAtpControl(cab_id=self._cab_id, system_switch=position),
             ),
         )

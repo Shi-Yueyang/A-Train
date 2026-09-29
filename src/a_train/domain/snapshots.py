@@ -71,10 +71,12 @@ class DrivingSystemSnapshot:
 
 @dataclass(frozen=True)
 class SwitchBoxSnapshot:
-    """Read-only view of one cab's system-selection switch box position."""
+    """Read-only view of one cab's system-selection switch box state."""
 
     cab_id: int
     position: str
+    c2_authorized: bool = False
+    cbtc_authorized: bool = False
 
 
 @dataclass(frozen=True)

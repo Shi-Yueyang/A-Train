@@ -118,6 +118,12 @@ class EquipmentSetRequest(BaseModel):
         default=None,
         description="Switch box position: 'c2', 'auto', or 'cbtc'.",
     )
+    c2_authorized: StrictBool | None = Field(
+        default=None, description="Switch box C2 authorization state."
+    )
+    cbtc_authorized: StrictBool | None = Field(
+        default=None, description="Switch box CBTC authorization state."
+    )
     block: list[str] | None = Field(
         default=None,
         description="STCS ATP: freeze the simulator's derivation of these derived "

@@ -87,8 +87,9 @@ class EquipmentControlRequest:
       unless their derivation is blocked.
     - ``stcs_atp`` ``block``/``unblock``: freeze or resume this instance's
       internal derivation of the named derived train-out signals.
-    - ``switch_box``: ``system_switch`` is the box position ``"c2"``,
-      ``"auto"``, or ``"cbtc"``; the matching cab's STCS instance mirrors it.
+        - ``switch_box``: ``system_switch`` is the box position ``"c2"`,
+            ``"auto"``, or ``"cbtc"``; ``c2_authorized`` and ``cbtc_authorized``
+            set the box's boolean authorization state.
     - ``driving_system``: ``mode``/``direction``/``acceleration`` handle
       positions; every combination of fields may be set together.
     """
@@ -111,6 +112,8 @@ class EquipmentControlRequest:
     block: tuple[str, ...] | None = None
     unblock: tuple[str, ...] | None = None
     system_switch: str | None = None
+    c2_authorized: bool | None = None
+    cbtc_authorized: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -445,9 +448,17 @@ class Train:
                 unblock=command.unblock,
             )
         if isinstance(equipment, SwitchBox):
-            if command.system_switch is None:
-                raise ValueError("switch box requires system_switch")
-            return SwitchBoxControl(position=command.system_switch)
+            if (
+                command.system_switch is None
+                and command.c2_authorized is None
+                and command.cbtc_authorized is None
+            ):
+                raise ValueError("switch box requires system_switch or authorization state")
+            return SwitchBoxControl(
+                position=command.system_switch,
+                c2_authorized=command.c2_authorized,
+                cbtc_authorized=command.cbtc_authorized,
+            )
         if isinstance(equipment, DrivingSystem):
             if all(
                 value is None
@@ -505,6 +516,7 @@ class Train:
             acceleration=accel,
             dt=dt,
         )
+
     def _collect_equipment_intents(self) -> tuple[EquipmentIntent, ...]:
         """Collect cross-component requests without sharing equipment refs."""
         return tuple(
@@ -571,6 +583,12 @@ class Train:
                 for key, equipment in self._equipment.items()
                 if isinstance(equipment, StcsAtpBase)
                 and (cab_id is None or equipment.cab_id == cab_id)
+            )
+        if intent.target == "switch_box" and isinstance(intent.control, SwitchBoxControl):
+            return tuple(
+                key
+                for key, equipment in self._equipment.items()
+                if isinstance(equipment, SwitchBox) and equipment.cab_id == intent.control.cab_id
             )
         return ()
 

@@ -581,6 +581,24 @@ function buildSwitchBoxCard(entry) {
       system_switch: position.value,
     });
   row.append(position);
+  const c2Authorized = document.createElement("input");
+  c2Authorized.type = "checkbox";
+  c2Authorized.setAttribute("aria-label", `${key} C2 authorized`);
+  c2Authorized.onchange = () =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
+      c2_authorized: c2Authorized.checked,
+    });
+  const cbtcAuthorized = document.createElement("input");
+  cbtcAuthorized.type = "checkbox";
+  cbtcAuthorized.setAttribute("aria-label", `${key} CBTC authorized`);
+  cbtcAuthorized.onchange = () =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
+      cbtc_authorized: cbtcAuthorized.checked,
+    });
+  row.append(
+    labeled("C2 authorized", c2Authorized),
+    labeled("CBTC authorized", cbtcAuthorized),
+  );
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "Reset";
   resetBtn.onclick = () =>
@@ -588,7 +606,7 @@ function buildSwitchBoxCard(entry) {
   row.appendChild(resetBtn);
   card.appendChild(row);
 
-  card.widgets = { readout, position };
+  card.widgets = { readout, position, c2Authorized, cbtcAuthorized };
   return makeControlCardCollapsible(card);
 }
 
@@ -599,6 +617,8 @@ function syncSwitchBoxes(equipment) {
     const s = entry.state;
     setLiveText(card.widgets.readout, `cab ${s.cab_id} - position ${s.position}`);
     card.widgets.position.value = s.position;
+    card.widgets.c2Authorized.checked = s.c2_authorized;
+    card.widgets.cbtcAuthorized.checked = s.cbtc_authorized;
   }
 }
 
@@ -649,7 +669,7 @@ function buildBtmCard(entry) {
     const structured = mode.value === "etcs41";
     payloadTitle.textContent = structured ? "ETCS-41 object" : "Payload (hex)";
     payload.placeholder = structured
-      ? '{\n  "packets": [\n    {\n      "packet": 41,\n      "q_dir": 1,\n      "l_packet": 40,\n      "q_scale": 0,\n      "d_leveltr": 1234,\n      "m_leveltr": 2,\n      "nid_stm": null,\n      "l_ackleveltr": 5,\n      "n_iter": 0,\n      "transitions": []\n    }\n  ],\n  "q_updown": 1,\n  "m_version": 3,\n  "q_media": 0,\n  "n_pig": 0,\n  "n_total": 0,\n  "m_dup": 0,\n  "m_mcount": 255,\n  "nid_c": 0,\n  "nid_bg": 0,\n  "q_link": false\n}'
+      ? '{\n  "packets": [\n    {\n      "packet": 41,\n      "q_dir": 1,\n      "l_packet": 40,\n      "q_scale": 0,\n      "d_leveltr": 1234,\n      "m_leveltr": 2,\n      "nid_stm": null,\n      "l_ackleveltr": 5,\n      "n_iter": 0,\n      "transitions": []\n    }\n  ],\n  "q_updown": 1,\n  "m_version": 16,\n  "q_media": 0,\n  "n_pig": 0,\n  "n_total": 0,\n  "m_dup": 0,\n  "m_mcount": 255,\n  "nid_c": 0,\n  "nid_bg": 0,\n  "q_link": false\n}'
       : "01 23 a4 ff 00 81 72";
     payload.setAttribute("aria-label", `${key} ${structured ? "ETCS-41 JSON" : "payload (hex)"}`);
     hint.textContent = structured ? "" : "Hex bytes are converted to base64 before sending.";
@@ -667,6 +687,13 @@ function buildBtmCard(entry) {
   mode.onchange = setInputMode;
   setInputMode();
 
+  const clearBtn = document.createElement("button");
+  clearBtn.textContent = "Clear";
+  clearBtn.onclick = () => {
+    payload.value = mode.value === "etcs41" ? payload.placeholder : "";
+    payload.oninput();
+  };
+
   const row = document.createElement("div");
   row.className = "controls";
   const send = document.createElement("button");
@@ -678,7 +705,7 @@ function buildBtmCard(entry) {
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "Reset";
   resetBtn.onclick = () => postCommand(`/trains/${state.selectedTrainId}/equipment/${key}/reset`, {});
-  row.append(send, resetBtn);
+  row.append(send, clearBtn, resetBtn);
   card.appendChild(row);
   card.widgets = { readout };
   return makeControlCardCollapsible(card);

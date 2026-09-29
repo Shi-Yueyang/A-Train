@@ -460,6 +460,16 @@ BTM payloads are opaque byte arrays. The train model can receive a BTM
 delivery request for a cab, but does not interpret its contents; the ATP
 adapter delivers the payload over the protocol.
 
+The switch box is a cab-scoped three-position selector (`c2`, `auto`, or
+`cbtc`) with independent boolean `c2_authorized` and `cbtc_authorized`
+states. In `auto`, its effective STCS system-switch output selects C2 when
+C2 is authorized, otherwise CBTC when CBTC is authorized, and otherwise
+emits no STCS intent when neither authorization is true; C2 takes precedence
+if both are true. The matching STCS ATP
+instance can assert its `c2_authorized` train-input signal back to the switch
+box through an equipment intent. Both directions are ordinary physical wires
+and therefore participate in link cuts.
+
 ## 3.6 Implementation Guide
 
 Implement the train model in `domain/train.py` as the aggregate that owns one

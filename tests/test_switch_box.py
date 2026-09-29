@@ -58,7 +58,12 @@ async def test_fitted_box_feeds_one_hot_system_bits_at_startup() -> None:
         await _manual_start(c)
         snap = (await c.get("/api/trains/TRAIN001")).json()
 
-        assert _state(snap, "switch_box_1") == {"cab_id": 1, "position": "c2"}
+        assert _state(snap, "switch_box_1") == {
+            "cab_id": 1,
+            "position": "c2",
+            "c2_authorized": False,
+            "cbtc_authorized": False,
+        }
         assert _switch_bits(snap) == {
             "system_switch_c2": True,
             "system_switch_auto": False,
@@ -90,7 +95,11 @@ async def test_position_changes_mirror_to_the_matching_cab_only() -> None:
             "/api/trains/TRAIN001/equipment/switch_box_1", json={"system_switch": "auto"}
         )
         assert r.status_code == 200
-        assert _switch_bits(r.json())["system_switch_auto"] is True
+        assert _switch_bits(r.json()) == {
+            "system_switch_c2": False,
+            "system_switch_auto": False,
+            "system_switch_cbtc": True,
+        }
 
         r = await c.post(
             "/api/trains/TRAIN001/equipment/switch_box_1", json={"system_switch": "rrr"}
@@ -99,6 +108,24 @@ async def test_position_changes_mirror_to_the_matching_cab_only() -> None:
         assert "switch box position" in r.json()["detail"]
         r = await c.post("/api/trains/TRAIN001/equipment/switch_box_1", json={})
         assert r.status_code == 400  # system_switch required
+
+
+async def test_unauthorized_auto_does_not_change_stcs_state() -> None:
+    async with running_app([T2]) as c:
+        await _manual_start(c)
+
+        await c.post(
+            "/api/trains/TRAIN001/equipment/switch_box_1", json={"system_switch": "cbtc"}
+        )
+        r = await c.post(
+            "/api/trains/TRAIN001/equipment/switch_box_1", json={"system_switch": "auto"}
+        )
+        assert r.status_code == 200
+        assert _switch_bits(r.json()) == {
+            "system_switch_c2": False,
+            "system_switch_auto": False,
+            "system_switch_cbtc": True,
+        }
 
 
 async def test_box_state_is_authoritative_and_wire_cut_freezes_the_mirror() -> None:
@@ -142,6 +169,57 @@ async def test_reset_restores_the_box_default_position() -> None:
         snap = (await c.get("/api/trains/TRAIN001")).json()
         assert _state(snap, "switch_box_1")["position"] == "c2"
         assert _switch_bits(snap)["system_switch_c2"] is True
+
+
+async def test_authorizations_drive_auto_mode_and_stcs_can_authorize_c2() -> None:
+    async with running_app([T2]) as c:
+        await _manual_start(c)
+
+        r = await c.post(
+            "/api/trains/TRAIN001/equipment/switch_box_1",
+            json={"system_switch": "auto", "c2_authorized": True},
+        )
+        assert r.status_code == 200
+        assert _state(r.json(), "switch_box_1") == {
+            "cab_id": 1,
+            "position": "auto",
+            "c2_authorized": True,
+            "cbtc_authorized": False,
+        }
+        assert _switch_bits(r.json()) == {
+            "system_switch_c2": True,
+            "system_switch_auto": False,
+            "system_switch_cbtc": False,
+        }
+
+        r = await c.post(
+            "/api/trains/TRAIN001/equipment/switch_box_1",
+            json={"cbtc_authorized": True, "c2_authorized": False},
+        )
+        assert r.status_code == 200
+        assert _switch_bits(r.json())["system_switch_cbtc"] is True
+
+        r = await c.post(
+            "/api/trains/TRAIN001/equipment/stcs_atp_duo_1",
+            json={"command": "0" * 14 + "1" + "0" * 2},
+        )
+        assert r.status_code == 200
+        assert _state(r.json(), "switch_box_1")["c2_authorized"] is True
+
+
+async def test_c2_authorization_feedback_respects_a_cut_wire() -> None:
+    async with running_app([T2]) as c:
+        await _manual_start(c)
+        await c.post(
+            "/api/trains/TRAIN001/links/cut",
+            json={"source": "stcs_atp_duo_1", "target": "switch_box_1"},
+        )
+        r = await c.post(
+            "/api/trains/TRAIN001/equipment/stcs_atp_duo_1",
+            json={"command": "0" * 14 + "1" + "0" * 2},
+        )
+        assert r.status_code == 200
+        assert _state(r.json(), "switch_box_1")["c2_authorized"] is False
 
 
 async def _train(c) -> dict:
@@ -195,7 +273,12 @@ async def test_control_state_bits_follow_the_system_switch() -> None:
         }
 
         await _set_box(c, "auto")
-        assert not any(_c2_values(await _train(c)).values())
+        assert _c2_values(await _train(c)) == {
+            "c2_control_state_1_1": False,
+            "c2_control_state_1_2": False,
+            "c2_control_state_2_1": True,
+            "c2_control_state_2_2": True,
+        }
 
         await _set_box(c, "c2")
 

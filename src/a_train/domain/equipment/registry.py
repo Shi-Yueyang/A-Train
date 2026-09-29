@@ -61,11 +61,15 @@ def _create_switch_box(
     *,
     cab_id: int | None = None,
     initial_position: str = "c2",
+    initial_c2_authorized: bool = False,
+    initial_cbtc_authorized: bool = False,
 ) -> SwitchBox:
     return SwitchBox(
         key,
         cab_id=_cab_id_from_key(key, "switch_box_", cab_id),
         initial_position=initial_position,
+        initial_c2_authorized=initial_c2_authorized,
+        initial_cbtc_authorized=initial_cbtc_authorized,
     )
 
 

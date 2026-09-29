@@ -25,6 +25,7 @@ from ..controls import (
     DriverControl,
     DrivingSystemControl,
     StcsAtpControl,
+    SwitchBoxControl,
     TrainControl,
 )
 from ..snapshots import SignalState, StcsAtpSnapshot
@@ -337,6 +338,14 @@ class StcsAtpBase:
                 )
             )
         intents.extend(self._emit_variant_intents())
+        if self._train_in_states.get("c2_authorized", False):
+            intents.append(
+                EquipmentIntent(
+                    source=self._key,
+                    target="switch_box",
+                    control=SwitchBoxControl(cab_id=self._cab_id, c2_authorized=True),
+                )
+            )
         return tuple(intents)
 
     def _emit_variant_intents(self) -> tuple[EquipmentIntent, ...]:
