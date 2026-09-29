@@ -9,10 +9,10 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import subprocess
 import sys
+
+from a_train import __main__ as cli
 
 
 def test_cli_help_documents_run_command() -> None:
@@ -25,6 +25,16 @@ def test_cli_help_documents_run_command() -> None:
     assert "run" in result.stdout
 
 
+def test_cli_log_level_defaults_to_info_and_accepts_case_insensitive_values() -> None:
+    parser = cli._build_parser()
+
+    default_args = parser.parse_args(["run", "--train-config", "train.json"])
+    assert default_args.log_level == "INFO"
+
+    debug_args = parser.parse_args(["run", "--train-config", "train.json", "--log-level", "debug"])
+    assert debug_args.log_level == "DEBUG"
+
+
 async def test_application_starts_and_stops_cleanly(app_client) -> None:
     # The fixture's lifespan has already started the real core and ATP manager.
     # A successful request proves the app responds; clean fixture teardown
@@ -34,26 +44,6 @@ async def test_application_starts_and_stops_cleanly(app_client) -> None:
     body = response.json()
     assert body["simulation_state"] == "STOPPED"
     assert body["simulation_time"] == 0.0
-
-
-async def test_atp_server_speaks_ndjson(atp_server) -> None:
-    port = atp_server.port
-    assert port > 0
-    reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    try:
-        sent = {"type": "train_state", "train_id": "T1", "cab_id": 1, "speed": 0.0}
-        writer.write((json.dumps(sent) + "\n").encode("utf-8"))
-        await writer.drain()
-
-        received = await atp_server.wait_for_message()
-        assert received == sent
-
-        await atp_server.send({"type": "echo_probe", "n": 1})
-        line = await reader.readline()
-        assert json.loads(line.decode("utf-8"))["type"] == "echo_probe"
-    finally:
-        writer.close()
-        await writer.wait_closed()
 
 
 async def test_fixture_starts_real_app_and_atp_server(app_client, atp_server) -> None:

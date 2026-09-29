@@ -157,22 +157,6 @@ function renderBtmEncoding(input, preview) {
   }
 }
 
-function renderBtmStructuredInput(input, preview) {
-  if (!input.value.trim()) {
-    preview.textContent = "";
-    return;
-  }
-  try {
-    const telegram = JSON.parse(input.value);
-    if (!telegram || Array.isArray(telegram) || typeof telegram !== "object") {
-      throw new Error("Telegram must be a JSON object");
-    }
-    preview.textContent = `request: ${JSON.stringify({ telegram })}`;
-  } catch (error) {
-    preview.textContent = `JSON error: ${error.message}`;
-  }
-}
-
 function renderStatus() {
   const s = state.status;
   setLiveText($("sim-state"), s ? s.simulation_state : "—");
@@ -665,15 +649,13 @@ function buildBtmCard(entry) {
     const structured = mode.value === "etcs41";
     payloadTitle.textContent = structured ? "ETCS-41 object" : "Payload (hex)";
     payload.placeholder = structured
-      ? '{\n  "packets": [\n    {\n      "packet": 41,\n      "q_dir": 1,\n      "q_scale": 0,\n      "d_leveltr": 1234,\n      "m_leveltr": 2,\n      "l_ackleveltr": 5\n    }\n  ]\n}'
+      ? '{\n  "packets": [\n    {\n      "packet": 41,\n      "q_dir": 1,\n      "l_packet": 40,\n      "q_scale": 0,\n      "d_leveltr": 1234,\n      "m_leveltr": 2,\n      "nid_stm": null,\n      "l_ackleveltr": 5,\n      "n_iter": 0,\n      "transitions": []\n    }\n  ],\n  "q_updown": 1,\n  "m_version": 3,\n  "q_media": 0,\n  "n_pig": 0,\n  "n_total": 0,\n  "m_dup": 0,\n  "m_mcount": 255,\n  "nid_c": 0,\n  "nid_bg": 0,\n  "q_link": false\n}'
       : "01 23 a4 ff 00 81 72";
     payload.setAttribute("aria-label", `${key} ${structured ? "ETCS-41 JSON" : "payload (hex)"}`);
-    hint.textContent = structured
-      ? "Raw coded integers. The server encodes this object into a CTCS frame."
-      : "Hex bytes are converted to base64 before sending.";
+    hint.textContent = structured ? "" : "Hex bytes are converted to base64 before sending.";
     payload.oninput = () =>
       structured
-        ? renderBtmStructuredInput(payload, preview)
+        ? (preview.textContent = "")
         : renderBtmEncoding(payload, preview);
     if (structured && !payload.value.trim()) {
       payload.value = payload.placeholder;

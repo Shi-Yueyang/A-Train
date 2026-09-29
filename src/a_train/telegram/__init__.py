@@ -12,6 +12,20 @@ contract is documented in docs/btm-telegram.md.
 from __future__ import annotations
 
 from .errors import TelegramError
-from .telegram import FRAME_BITS, USER_PACKET_AREA_BITS, encode_telegram
+from .packets import Packet41, Transition
+from .telegram import (
+    FRAME_BITS,
+    USER_PACKET_AREA_BITS,
+    Telegram,
+    encode_telegram,
+)
 
-__all__ = ["TelegramError", "encode_telegram", "FRAME_BITS", "USER_PACKET_AREA_BITS"]
+__all__ = [
+    "TelegramError",
+    "Telegram",
+    "Packet41",
+    "Transition",
+    "encode_telegram",
+    "FRAME_BITS",
+    "USER_PACKET_AREA_BITS",
+]

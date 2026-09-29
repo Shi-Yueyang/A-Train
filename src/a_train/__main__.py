@@ -33,6 +33,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--reload", action="store_true", help="Enable uvicorn auto-reload (development)."
     )
     run_p.add_argument(
+        "--log-level",
+        type=str.upper,
+        choices=("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"),
+        default="INFO",
+        help="Logging level (default: INFO).",
+    )
+    run_p.add_argument(
         "--train-config",
         metavar="FILE",
         required=True,
@@ -55,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             reload=args.reload,
             train_config=args.train_config,
+            log_level=args.log_level,
         )
     parser.error(f"unknown command: {args.command!r}")
     return 2
@@ -65,6 +73,7 @@ def _run_server(
     port: int,
     reload: bool,
     train_config: str,
+    log_level: str,
 ) -> int:
     import uvicorn
 
@@ -81,9 +90,9 @@ def _run_server(
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    # uvicorn configures only its own loggers; give a_train records (e.g. the
-    # ATP "channel established" line) a matching INFO-level root handler.
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s:\t%(message)s")
+    # uvicorn configures only its own loggers; give a_train records a matching
+    # root handler.
+    logging.basicConfig(level=getattr(logging, log_level), format="%(levelname)s:\t%(message)s")
 
     os.environ[TRAIN_CONFIG_ENV] = encode_config(configured_train, atp_endpoints)
 

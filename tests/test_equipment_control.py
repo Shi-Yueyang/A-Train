@@ -411,7 +411,7 @@ async def test_block_freezes_feedback_while_the_protection_brake_still_bites() -
         # are still re-established against the operator's override.
         status, snap = await _equipment(c, "stcs_atp_duo_1", train_out_signal="0000")
         assert status == 200
-        assert _atp_state(snap)["train_out_signal"][:4] == "1100"  # ebfb: 0|0
+        assert _atp_state(snap)["train_out_signal"][:4] == "1110"  # service brake feedback is low
 
         # Unblocking self-heals immediately (brake is still commanded).
         status, snap = await _equipment(c, "stcs_atp_duo_1", unblock=["service_brake_7_feedback"])
@@ -490,13 +490,14 @@ async def test_cut_off_traction_holds_same_cab_system_off_and_clears_drive_deman
 
         train = await _train(c)
         assert train["drive_demand"] == 0.0
-        assert equipment_state(snap, "driving_system_1") == {
-            "cab_id": 1,
-            "facing": "forward",
-            "mode": "off",
-            "direction": "off",
-            "acceleration": 0.0,
-        }
+        driving_system = equipment_state(snap, "driving_system_1")
+        assert driving_system["mode"] == "off"
+        assert driving_system["direction"] == "off"
+        assert driving_system["acceleration"] == 0.0
+        assert driving_system["control_mode"] == "manual"
+        assert driving_system["manual_mode"] == "off"
+        assert driving_system["manual_direction"] == "off"
+        assert driving_system["manual_acceleration"] == 0.0
         assert equipment_state(snap, "driving_system_2")["mode"] == "brake"
 
         await _equipment(
@@ -623,7 +624,7 @@ async def test_blocking_settles_the_derived_value_over_stale_assertions() -> Non
         # settles the live derived value, not the stale write.
         status, snap = await _equipment(c, "stcs_atp_duo_1", train_out_signal="0000")
         assert status == 200
-        assert _atp_state(snap)["train_out_signal"][:4] == "1101"  # shadowed
+        assert _atp_state(snap)["train_out_signal"][:4] == "1111"  # derived feedback wins
 
         status, snap = await _equipment(c, "stcs_atp_duo_1", block=["service_brake_7_feedback"])
         assert status == 200

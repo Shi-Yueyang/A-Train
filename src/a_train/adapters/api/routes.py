@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 from collections.abc import Iterable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -27,7 +28,9 @@ from ...telegram import TelegramError, encode_telegram
 from .schemas import (
     AtpConnectionResponse,
     AtpStatusResponse,
+    EncodedPayloadResponse,
     EquipmentSetRequest,
+    EquipmentSetResponse,
     LinkCutInput,
     LinkCutsReplaceRequest,
     StatusResponse,
@@ -40,6 +43,7 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 
 def get_core(request: Request) -> SimulationCore:
@@ -175,7 +179,7 @@ async def control_train(
     )
 
 
-@router.post("/trains/{train_id}/equipment/{key}", response_model=TrainResponse)
+@router.post("/trains/{train_id}/equipment/{key}", response_model=EquipmentSetResponse)
 async def set_equipment(
     train_id: str,
     key: str,
@@ -204,6 +208,8 @@ async def set_equipment(
             data = base64.b64decode(body.data, validate=True)
         except (binascii.Error, ValueError):
             raise HTTPException(status_code=400, detail="data must be valid base64") from None
+    if key.startswith("btm_") and body.telegram is not None:
+        logger.debug("%s: %s", key.upper(), " ".join(f"{byte:02x}" for byte in data))
     payload = EquipmentControlRequest(
         key=key,
         command=body.command,
@@ -223,9 +229,16 @@ async def set_equipment(
         block=tuple(body.block) if body.block is not None else None,
         unblock=tuple(body.unblock) if body.unblock is not None else None,
     )
-    return await _train_command_response(
+    response = await _train_command_response(
         core, train_id, EquipmentCommand(train_id=train_id, payload=payload)
     )
+    encoded = None
+    if body.telegram is not None:
+        encoded = EncodedPayloadResponse(
+            hex=" ".join(f"{byte:02x}" for byte in data),
+            b64=base64.b64encode(data).decode("ascii"),
+        )
+    return EquipmentSetResponse(**response.model_dump(), encoded=encoded)
 
 
 @router.post("/trains/{train_id}/equipment/{key}/reset", response_model=TrainResponse)

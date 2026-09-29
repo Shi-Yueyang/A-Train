@@ -63,7 +63,7 @@ async def test_env_configured_listener_accepts_through_run_wiring(monkeypatch) -
             async def _poll_ready() -> dict:
                 while True:
                     body = (await c.get("/api/atp/status")).json()
-                    if body["connections"][0]["ready"]:
+                    if body["connections"][0]["active_peers"] == 1:
                         return body
                     await asyncio.sleep(0.02)
 

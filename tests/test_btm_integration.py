@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 
 from a_train.adapters.atp.manager import AtpEndpoint
 from a_train.domain.train import TrainConfig
@@ -155,44 +156,76 @@ async def test_reset_resyncs_without_replaying_old_payload() -> None:
 
 
 TELEGRAM_41 = {
+    "q_updown": 1,
+    "m_version": 3,
+    "q_media": 0,
+    "n_pig": 0,
+    "n_total": 0,
+    "m_dup": 0,
+    "m_mcount": 255,
+    "nid_c": 0,
+    "nid_bg": 0,
+    "q_link": False,
     "packets": [
         {
             "packet": 41,
             "q_dir": 1,
+            "l_packet": 40,
             "q_scale": 0,
             "d_leveltr": 1234,
             "m_leveltr": 2,
+            "nid_stm": None,
             "l_ackleveltr": 5,
+            "n_iter": 0,
+            "transitions": [],
         }
-    ]
+    ],
 }
 # Golden encoded 830-bit CTCS frame (tests/test_telegram_codec.py pins it).
 TELEGRAM_41_HEX = "83007f8000000a501401349000507f80" + "00" * 88
 
 
-async def test_telegram_json_is_encoded_and_delivered_to_atp() -> None:
+async def test_telegram_json_is_encoded_and_delivered_to_atp(
+    caplog,
+) -> None:
     server = TestAtpServer()
     port = await server.start()
     try:
         async with running_app([T1], _cabs(port)) as c:
-            await _await_ready(server, c, ready_count=2)
+            await _await_ready(c, ready_count=1)
 
             expected_b64 = base64.b64encode(bytes.fromhex(TELEGRAM_41_HEX)).decode("ascii")
-            r = await c.post("/api/trains/TRAIN001/equipment/btm_1", json={"telegram": TELEGRAM_41})
+            with caplog.at_level(logging.DEBUG, logger="a_train.adapters.api.routes"):
+                r = await c.post(
+                    "/api/trains/TRAIN001/equipment/btm_1", json={"telegram": TELEGRAM_41}
+                )
             assert r.status_code == 200
+            assert r.json()["encoded"] == {
+                "hex": " ".join(
+                    bytes.fromhex(TELEGRAM_41_HEX).hex()[i : i + 2] for i in range(0, 208, 2)
+                ),
+                "b64": expected_b64,
+            }
+            log_messages = [record.getMessage() for record in caplog.records]
+            assert log_messages == [
+                "BTM_1: "
+                + " ".join(
+                    bytes.fromhex(TELEGRAM_41_HEX).hex()[i : i + 2] for i in range(0, 208, 2)
+                ),
+            ]
             btm = next(item["state"] for item in r.json()["equipment"] if item["key"] == "btm_1")
             assert btm["payload_b64"] == expected_b64
             assert btm["received_count"] == 1
 
             message = await _next_train_state_with_btm(server, 1, expected_b64)
-            btm = next(item["state"] for item in message["equipment"] if item["key"] == "btm_1")
+            btm = _btm_state(message, 1)
             assert base64.b64decode(btm["payload_b64"]).hex() == TELEGRAM_41_HEX
 
             other = base64.b64encode(b"\x01").decode("ascii")
             r = await c.post("/api/trains/TRAIN001/equipment/btm_2", json={"data": other})
             assert r.status_code == 200
             message = await _next_train_state_with_btm(server, 2, other)
-            btm = next(item["state"] for item in message["equipment"] if item["key"] == "btm_2")
+            btm = _btm_state(message, 2)
             assert btm["payload_b64"] == other
     finally:
         await server.stop()
@@ -203,18 +236,23 @@ async def test_telegram_validation_errors_leave_state_unchanged() -> None:
     port = await server.start()
     try:
         async with running_app([T1], _cabs(port)) as c:
-            await _await_ready(server, c, ready_count=2)
+            await _await_ready(c)
 
             r = await c.post(
                 "/api/trains/TRAIN001/equipment/btm_1",
-                json={"telegram": {"packets": [{"packet": 5}]}},
+                json={"telegram": {**TELEGRAM_41, "packets": [{"packet": 5}]}},
             )
             assert r.status_code == 400
             assert "unknown packet number 5" in r.json()["detail"]
 
             r = await c.post(
                 "/api/trains/TRAIN001/equipment/btm_1",
-                json={"telegram": {"packets": [{"packet": 41, "q_dir": 2}]}},
+                json={
+                    "telegram": {
+                        **TELEGRAM_41,
+                        "packets": [{"packet": 41, "q_dir": 2, "l_packet": 40}],
+                    }
+                },
             )
             assert r.status_code == 400
             assert "q_scale: missing required field" in r.json()["detail"]

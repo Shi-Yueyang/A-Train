@@ -26,9 +26,7 @@ class TestAtpServer:
         self._tasks: list[asyncio.Task[None]] = []
         self._stopping = False
 
-    async def start(
-        self, host: str = "127.0.0.1", port: int = 0, *, peer_count: int = 1
-    ) -> int:
+    async def start(self, host: str = "127.0.0.1", port: int = 0, *, peer_count: int = 1) -> int:
         if port == 0:
             with socket.socket() as probe:
                 probe.bind((host, 0))
@@ -92,7 +90,7 @@ class TestAtpServer:
         """Broadcast raw bytes to every client (e.g. a malformed NDJSON line)."""
 
         data = text.encode("utf-8")
-        for writer in list(self._clients):
+        for writer in list(self._clients.values()):
             writer.write(data)
             await writer.drain()
 
@@ -105,10 +103,6 @@ class TestAtpServer:
         return await asyncio.wait_for(_next(), timeout=timeout)
 
     async def stop(self) -> None:
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
         self._stopping = True
         for task in self._tasks:
             task.cancel()

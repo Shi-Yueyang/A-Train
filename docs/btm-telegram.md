@@ -15,8 +15,18 @@ protocol) keeps treating the payload as opaque bytes (architectural.md §7.3).
 {
   "cab_id": 1,
   "telegram": {
+    "q_updown": 1,
+    "m_version": 3,
+    "q_media": 0,
+    "n_pig": 0,
+    "n_total": 0,
+    "m_dup": 0,
+    "m_mcount": 255,
+    "nid_c": 0,
+    "nid_bg": 0,
+    "q_link": false,
     "packets": [
-      { "packet": 41, "q_dir": 1, "q_scale": 0, "d_leveltr": 1234, "m_leveltr": 2, "l_ackleveltr": 5 }
+      { "packet": 41, "q_dir": 1, "l_packet": 40, "q_scale": 0, "d_leveltr": 1234, "m_leveltr": 2, "nid_stm": null, "l_ackleveltr": 5, "n_iter": 0, "transitions": [] }
     ]
   }
 }
@@ -35,8 +45,10 @@ protocol) keeps treating the payload as opaque bytes (architectural.md §7.3).
   test vectors, vendor formats, or anything this encoder cannot express.
 
 All field values are **raw coded integers** exactly as printed in the frame
-and packet tables. The encoder validates bit widths and framing only; it
-does not apply enums, unit offsets, or scaling.
+and packet tables. The caller must provide every header field and every
+variable packet field, including explicit `null` values for inactive
+conditional fields and empty repeat lists. The encoder translates the supplied
+values to binary; it does not apply defaults, enums, unit offsets, or scaling.
 
 ## 2. Frame layout
 
@@ -62,43 +74,42 @@ to right:
 All 50 header bits in transmission order; every field is settable, with the
 defaults below encoding an uplink balise telegram.
 
-| Field        | Bits | Default | Notes                                                          |
-| ------------ | ---: | ------: | -------------------------------------------------------------- |
-| `q_updown`   |    1 |       1 | Direction: `0` = train-to-track (车对地), `1` = track-to-train (地对车). |
-| `m_version`  |    7 |       3 | Language/code version (`0010000` = V1.0).                      |
-| `q_media`    |    1 |       0 | Medium: `0` = balise (应答器), `1` = loop (环线).              |
-| `n_pig`      |    3 |       0 | Position in group, offset-coded: `000` = 1st … `111` = 8th.    |
-| `n_total`    |    3 |       0 | Balises in group, offset-coded: `000` = 1 … `111` = 8.         |
-| `m_dup`      |    2 |       0 | `00` different, `01` same as next, `10` same as previous.      |
-| `m_mcount`   |    8 |     255 | Message counter (0-255).                                       |
-| `nid_c`      |   10 |       0 | Region code (high 7 = region, low 3 = sub-region).             |
-| `nid_bg`     |   14 |       0 | Balise identity (high 6 = station, low 8 = balise number).     |
-| `q_link`     |    1 |   false | `1` = balise group is linked.                                  |
+| Field        | Bits | Required | Notes                                                          |
+| ------------ | ---: | :------: | -------------------------------------------------------------- |
+| `q_updown`   |    1 | yes | Direction: `0` = train-to-track (车对地), `1` = track-to-train (地对车). |
+| `m_version`  |    7 | yes | Language/code version (`0010000` = V1.0).                      |
+| `q_media`    |    1 | yes | Medium: `0` = balise (应答器), `1` = loop (环线).              |
+| `n_pig`      |    3 | yes | Position in group, offset-coded.                              |
+| `n_total`    |    3 | yes | Balises in group, offset-coded.                               |
+| `m_dup`      |    2 | yes | `00` different, `01` same as next, `10` same as previous.      |
+| `m_mcount`   |    8 | yes | Message counter (0-255).                                       |
+| `nid_c`      |   10 | yes | Region code (high 7 = region, low 3 = sub-region).             |
+| `nid_bg`     |   14 | yes | Balise identity (high 6 = station, low 8 = balise number).     |
+| `q_link`     |    1 | yes | `1` = balise group is linked.                                  |
 
 The values above are raw coded integers; the offset and split semantics stay
 with the caller, exactly as in the standard tables.
 
 ## 4. Packet 41 — 等级转换信息包 (level transition order)
 
-Every packet object requires `"packet": 41` plus the settable fields below;
-the full wire layout, including the fixed and auto-computed fields the
-encoder writes, in transmission order:
+Every packet object requires `"packet": 41` plus the fields below. The encoder
+writes each supplied value in transmission order:
 
 | Field          | Bits | Value / meaning                                |
 | -------------- | ---: | ---------------------------------------------- |
 | `nid_packet`   |    8 | fixed `0010 1001` (= 41), written by the encoder |
 | `q_dir`        |    2 | 验证方向 (see enums below)                     |
-| `l_packet`     |   13 | 信息包位数: bits following this field, auto-computed |
+| `l_packet`     |   13 | 信息包位数: bits following this field, supplied by caller |
 | `q_scale`      |    2 | 距离/长度的分辨率 (see enums below)            |
 | `d_leveltr`    |   15 | 到等级转换点的距离                             |
 | `m_leveltr`    |    3 | 转换的列控等级                                 |
 | `nid_stm`      |    8 | 转换的非 ETCS 等级, only while `m_leveltr == 1` (STM) |
 | `l_ackleveltr` |   15 | 等级转换点外方确认区段长度                     |
-| `n_iter`       |    5 | 包含等级转换点的数量, auto = `len(transitions)` |
+| `n_iter`       |    5 | 包含等级转换点的数量, supplied by caller |
 | `transitions`  |    N | repeated items (max 31)                        |
 
 Each `transitions` item: `m_leveltr` (3), `nid_stm` (8, only when that
-item's `m_leveltr == 1`; ignored otherwise), `l_ackleveltr` (15,
+item's `m_leveltr == 1`; otherwise it must be explicitly `null`), `l_ackleveltr` (15,
 等级转换点外方确认区段长度).
 
 Enum values from the table (informational — the encoder accepts raw coded

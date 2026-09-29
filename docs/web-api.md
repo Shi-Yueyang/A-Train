@@ -269,7 +269,7 @@ with the component's error message on invalid input.
 | `system_switch`   | string          | `switch_box_<cab_id>` | Box position `"c2"` / `"auto"` / `"cbtc"`; mirrored one-hot into that cab's STCS ATP `system_switch_*` bits. |
 | `cab_id`    | integer            | optional consistency check | Target cab, when applicable. |
 | `data`      | string             | `btm_1`, `btm_2` | Base64 opaque payload (atp-api.md §3.2); invalid base64 → 400. |
-| `telegram`  | object             | `btm_1`, `btm_2` | JSON CTCS balise telegram encoded by the simulator (btm-telegram.md); mutually exclusive with `data`. |
+| `telegram`  | object             | `btm_1`, `btm_2` | Complete JSON CTCS balise telegram encoded exactly as supplied (btm-telegram.md); mutually exclusive with `data`. |
 | `mode`      | string             | `driving_1`, `driving_2`  | Driving-system mode handle: `"traction"` / `"off"` / `"brake"`. |
 | `direction` | string             | `driving_1`, `driving_2`  | Driving-system direction handle: `"forward"` / `"off"` / `"backward"` (cab-relative). |
 | `acceleration` | number          | `driving_1`, `driving_2`  | Driving-system acceleration handle: continuous effort in `[0.0, 1.0]`. |
@@ -277,6 +277,23 @@ with the component's error message on invalid input.
 | `target_speed` | number          | speed control             | Signed target speed in m/s; must be finite. |
 | `target_position` | number       | position control          | Absolute track position in metres; must be finite. |
 | `max_speed` | number              | position control          | Positive speed limit in m/s. |
+
+For a structured BTM `telegram` request, the successful `200` response is the
+updated `TrainResponse` plus an `encoded` object containing the exact payload
+sent to the BTM:
+
+```json
+{
+  "encoded": {
+    "hex": "83 00 7f 80 ...",
+    "b64": "gwB/gAAA..."
+  }
+}
+```
+
+The `hex` value is space-separated lowercase bytes. The `b64` value is the
+same payload encoded as base64. Other equipment requests return the normal
+`TrainResponse` without `encoded`.
 
 **Semantics per equipment key**:
 

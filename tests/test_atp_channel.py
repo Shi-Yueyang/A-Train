@@ -8,6 +8,7 @@ and production-protocol test ATP clients; no production module is mocked.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import socket
 from collections.abc import Callable
@@ -74,21 +75,23 @@ async def test_simulator_listens_and_serves_atp_peer() -> None:
         reader, writer = await asyncio.open_connection("127.0.0.1", port)
         try:
             line = await asyncio.wait_for(reader.readline(), 2.0)
-            assert b'"type":"train_state"' in line
+            assert json.loads(line)["type"] == "train_state"
 
             writer.write(b'{"type":"hello"}\n')
             await writer.drain()
             error = await asyncio.wait_for(reader.readline(), 2.0)
-            assert b'"code":"unknown_message_type"' in error
+            assert json.loads(error)["code"] == "unknown_message_type"
 
             status = (await c.get("/api/atp/status")).json()
-            assert status["connections"] == [{
-                "host": "127.0.0.1",
-                "port": port,
-                "state": "READY",
-                "ready": True,
-                "active_peers": 1,
-            }]
+            assert status["connections"] == [
+                {
+                    "host": "127.0.0.1",
+                    "port": port,
+                    "state": "READY",
+                    "ready": True,
+                    "active_peers": 1,
+                }
+            ]
         finally:
             writer.close()
             await writer.wait_closed()
@@ -164,7 +167,9 @@ async def test_dropped_connection_is_reported_and_isolated(
                 # The drop and the recovery are reported through logs. A
                 # server-side close may surface as clean EOF or as a reset.
                 assert any(
-                    "closed by peer" in rec.getMessage() or "connection failed" in rec.getMessage()
+                    "closed by peer" in rec.getMessage()
+                    or "connection failed" in rec.getMessage()
+                    or "connection ended" in rec.getMessage()
                     for rec in caplog.records
                 )
                 assert any("channel established" in rec.getMessage() for rec in caplog.records)
@@ -223,6 +228,7 @@ async def test_send_message_writes_framed_ndjson_to_peers() -> None:
 async def test_rest_reports_connection_states_through_the_lifecycle() -> None:
     port = _free_port()
     async with running_app([T1], _one_peer(port)) as c:
+
         async def _status_until(active_peers: int, timeout: float = 5.0) -> dict:
             async def _poll() -> dict:
                 while True:

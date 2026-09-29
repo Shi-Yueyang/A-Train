@@ -78,8 +78,8 @@ class EquipmentSetRequest(BaseModel):
     telegram: dict | None = Field(
         default=None,
         description=(
-            "JSON CTCS balise telegram encoded by the simulator (btm keys only; "
-            "docs/btm-telegram.md). Mutually exclusive with 'data'."
+            "Complete JSON CTCS balise telegram encoded exactly as provided by the "
+            "caller (btm keys only; docs/btm-telegram.md). Mutually exclusive with 'data'."
         ),
     )
     mode: str | None = Field(
@@ -162,6 +162,15 @@ class TrainResponse(BaseModel):
     drive_demand: float
     equipment: list[object] = Field(default_factory=list)
     link_cuts: list[object] = Field(default_factory=list)
+
+
+class EncodedPayloadResponse(BaseModel):
+    hex: str
+    b64: str
+
+
+class EquipmentSetResponse(TrainResponse):
+    encoded: EncodedPayloadResponse | None = None
 
 
 class TrainsResponse(BaseModel):

@@ -34,8 +34,10 @@ the activated virtual environment.
 ## Run
 
 ```bash
-python -m a_train run --train-config train.json --host 0.0.0.0 --port 8002
+python -m a_train run --train-config train.json --host 0.0.0.0 --port 8002 --log-level DEBUG
 ```
+
+Use `--log-level DEBUG` to show debug records, including BTM API payload logs.
 
 Open http://127.0.0.1:8001/ for the browser demo.
 
@@ -108,8 +110,7 @@ messages address instances. The supported equipment types are `door`, `btm`,
 `driving_system`, `stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`. Each equipment entry
 may include `"enabled": false` to leave that equipment out of the installed
 train; omitted `enabled` values default to `true`. Equipment configuration is
-validated before the server starts. Each optional `atp` entry is a `{host,
-port}` address for A-Train to bind; ATP clients connect to that address. Peers
+validated before the server starts. Each optional `atp` entry is a `{host, port}` address for A-Train to bind; ATP clients connect to that address. Peers
 are not bound to cabs. A missing or empty `atp` array starts without an ATP
 listener.
 
