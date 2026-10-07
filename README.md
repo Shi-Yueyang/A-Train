@@ -107,7 +107,7 @@ state. Equipment keys are generated internally as unique REST addresses; cab-sco
 equipment must be unique by `(type, cab_id)`, which is also how ATP wire
 messages address instances. The switch box owns its authorization states;
 CBTC switch logic connects over the same HTTP server at `/ws/cbtc`. The
-supported equipment types are `door`, `btm`, `cbtc`, `driving_system`,
+supported equipment types are `door`, `btm`, `driving_system`,
 `stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`.
 Each equipment entry may include `"enabled": false` to leave that equipment
 out of the installed train;

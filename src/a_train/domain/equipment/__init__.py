@@ -2,7 +2,6 @@
 
 from .base import Equipment, EquipmentContext, EquipmentIntent, TrainMotion
 from .btm import Btm
-from .cbtc import Cbtc
 from .door import Door
 from .driving_system import DrivingSystem
 from .registry import EQUIPMENT_FACTORIES
@@ -11,7 +10,6 @@ from .switch_box import SwitchBox
 
 __all__ = [
     "Btm",
-    "Cbtc",
     "Door",
     "DrivingSystem",
     "EQUIPMENT_FACTORIES",

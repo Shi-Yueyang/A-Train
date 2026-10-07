@@ -7,7 +7,6 @@ from typing import Any
 
 from .base import Equipment, EquipmentContext
 from .btm import Btm
-from .cbtc import Cbtc
 from .door import Door
 from .driving_system import DrivingSystem
 from .stcs_atp import StcsAtpDuo, StcsAtpSolo
@@ -42,20 +41,6 @@ def _cab_id_from_key(key: str, prefix: str, cab_id: int | None) -> int:
 
 def _create_btm(key: str, _ctx: EquipmentContext, *, cab_id: int | None = None) -> Btm:
     return Btm(key, _cab_id_from_key(key, "btm_", cab_id))
-
-
-def _create_cbtc(
-    key: str,
-    _ctx: EquipmentContext,
-    *,
-    cab_id: int | None = None,
-    is_cbtc_authorized: bool = False,
-) -> Cbtc:
-    return Cbtc(
-        key,
-        cab_id=_cab_id_from_key(key, "cbtc_", cab_id),
-        is_cbtc_authorized=is_cbtc_authorized,
-    )
 
 
 def _create_stcs_atp_duo(
@@ -115,7 +100,6 @@ EQUIPMENT_FACTORIES.update(
     {
         "door": _create_door,
         "btm": _create_btm,
-        "cbtc": _create_cbtc,
         "stcs_atp_duo": _create_stcs_atp_duo,
         "stcs_atp_solo": _create_stcs_atp_solo,
         "driving_system": _create_driving_system,

@@ -17,12 +17,6 @@ class BtmControl:
 
 
 @dataclass(frozen=True)
-class CbtcControl:
-    cab_id: int | None = None
-    is_cbtc_authorized: bool | None = None
-
-
-@dataclass(frozen=True)
 class CabStateControl:
     """Native state observed by equipment associated with one cab."""
 
@@ -112,11 +106,6 @@ class TrainControl:
 
 
 EquipmentControl = (
-    DoorControl
-    | BtmControl
-    | CbtcControl
-    | StcsAtpControl
-    | DrivingSystemControl
-    | SwitchBoxControl
+    DoorControl | BtmControl | StcsAtpControl | DrivingSystemControl | SwitchBoxControl
 )
 Control = EquipmentControl | CabStateControl | TrainControl | DriverControl

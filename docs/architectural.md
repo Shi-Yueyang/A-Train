@@ -421,12 +421,11 @@ is zero. Snapshot `direction` is derived from the speed sign: `"forward"`,
 
 ## 3.5 Train-Facing Equipment Boundary
 
-Doors, BTM, CBTC authorization state, ATP protection state, and each cab's
-driving system are train-local equipment. The optional `cbtc` equipment is
-standalone; it does not drive switch-box state. Each switch box owns its
-physical selector position and authorization states. The external switch
-logic WebSocket adapter submits `cbtc-out` authorization changes through the
-core to the matching cab's switch box.
+Doors, BTM, ATP protection state, and each cab's driving system are
+train-local equipment. Each switch box owns its physical selector position
+and authorization states. The external switch logic WebSocket adapter submits
+`cbtc-out` authorization changes through the core to the matching cab's switch
+box.
 The selector and authorization states drive the four STCS
 `c2_control_state_*` bits: C2 position asserts the two `*_1_*` bits, CBTC
 position asserts the two `*_2_*` bits, and AUTO selects a pair only when its
