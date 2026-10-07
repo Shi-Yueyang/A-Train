@@ -34,15 +34,15 @@ the activated virtual environment.
 ## Run
 
 ```bash
-python -m a_train run --train-config train.json --host 0.0.0.0 --port 8002 --log-level DEBUG
+python -m a_train run --train-config train.json --host 127.0.0.1 --port 8101 --log-level DEBUG
 ```
 
 Use `--log-level DEBUG` to show debug records, including BTM API payload logs.
 
-Open http://127.0.0.1:8001/ for the browser demo.
+Open http://127.0.0.1:8101/ for the browser demo.
 
 ```bash
-curl http://127.0.0.1:8001/api/status
+curl http://127.0.0.1:8101/api/status
 ```
 
 ## ATP
@@ -55,7 +55,7 @@ broadcast, and every peer may command any cab by putting `cab_id` in its
 `ATP_COMMAND` messages.
 
 ```bash
-python -m a_train run --train-config train.json --host 127.0.0.1 --port 8001
+python -m a_train run --train-config train.json --host 127.0.0.1 --port 8101
 ```
 
 See [docs/atp-api.md](docs/atp-api.md) for the NDJSON protocol.
@@ -96,8 +96,7 @@ example:
 		]
 	},
 	"atp": [
-		{"host": "127.0.0.1", "port": 9101},
-		{"host": "127.0.0.1", "port": 9102}
+		{"host": "127.0.0.1", "port": 8102}
 	]
 }
 ```
