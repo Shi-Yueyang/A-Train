@@ -287,6 +287,19 @@ C2_STATES = (
     "c2_control_state_2_1",
     "c2_control_state_2_2",
 )
+C2_SELECTED = {
+    "c2_control_state_1_1": True,
+    "c2_control_state_1_2": True,
+    "c2_control_state_2_1": False,
+    "c2_control_state_2_2": False,
+}
+CBTC_SELECTED = {
+    "c2_control_state_1_1": False,
+    "c2_control_state_1_2": False,
+    "c2_control_state_2_1": True,
+    "c2_control_state_2_2": True,
+}
+NEITHER_SELECTED = dict.fromkeys(C2_STATES, False)
 
 
 async def _set_box(c, position: str) -> None:
@@ -301,42 +314,78 @@ def _c2_values(snap: dict) -> dict[str, bool]:
     return {name: bits[name]["value"] for name in C2_STATES}
 
 
-async def test_control_state_bits_are_asserted_independently_of_the_system_switch() -> None:
+async def test_control_state_bits_follow_position_and_auto_authorization() -> None:
     async with running_app([T2]) as c:
         await _manual_start(c)
 
-        # These rows are operator-owned signals, independent of the selector.
-        assert _c2_values(await _train(c)) == {
-            "c2_control_state_1_1": False,
-            "c2_control_state_1_2": False,
-            "c2_control_state_2_1": False,
-            "c2_control_state_2_2": False,
-        }
+        assert _c2_values(await _train(c)) == C2_SELECTED
         assert _out_bits(await _train(c))["c2_control_state_1_1"]["blockable"] is False
 
-        await _set_box(c, "cbtc")
+        cases = (
+            (
+                {
+                    "system_switch": "c2",
+                    "c2_authorized": True,
+                    "cbtc_authorized": True,
+                },
+                C2_SELECTED,
+            ),
+            (
+                {
+                    "system_switch": "cbtc",
+                    "c2_authorized": True,
+                    "cbtc_authorized": True,
+                },
+                CBTC_SELECTED,
+            ),
+            (
+                {
+                    "system_switch": "auto",
+                    "c2_authorized": True,
+                    "cbtc_authorized": False,
+                },
+                C2_SELECTED,
+            ),
+            (
+                {
+                    "system_switch": "auto",
+                    "c2_authorized": False,
+                    "cbtc_authorized": True,
+                },
+                CBTC_SELECTED,
+            ),
+            (
+                {
+                    "system_switch": "auto",
+                    "c2_authorized": True,
+                    "cbtc_authorized": True,
+                },
+                NEITHER_SELECTED,
+            ),
+            (
+                {
+                    "system_switch": "auto",
+                    "c2_authorized": False,
+                    "cbtc_authorized": False,
+                },
+                NEITHER_SELECTED,
+            ),
+        )
+        for control, expected in cases:
+            r = await c.post(
+                "/api/trains/TRAIN001/equipment/switch_box_1",
+                json=control,
+            )
+            assert r.status_code == 200
+            assert _c2_values(r.json()) == expected
+
+        # Fitted switch-box outputs reassert their truth-table values.
         r = await c.post(
             "/api/trains/TRAIN001/equipment/stcs_atp_duo_1",
-            json={
-                "train_out_signals": {
-                    "c2_control_state_1_1": True,
-                    "c2_control_state_2_2": True,
-                }
-            },
+            json={"train_out_signals": dict.fromkeys(C2_STATES, True)},
         )
         assert r.status_code == 200
-        bits = _out_bits(r.json())
-        assert bits["c2_control_state_1_1"]["value"] is True
-        assert bits["c2_control_state_2_2"]["value"] is True
-        assert bits["c2_control_state_1_1"]["blocked"] is False
-
-        await _set_box(c, "auto")
-        assert _c2_values(await _train(c)) == {
-            "c2_control_state_1_1": True,
-            "c2_control_state_1_2": False,
-            "c2_control_state_2_1": False,
-            "c2_control_state_2_2": True,
-        }
+        assert _c2_values(r.json()) == NEITHER_SELECTED
 
         r = await c.post(
             "/api/trains/TRAIN001/equipment/stcs_atp_duo_1",
@@ -344,13 +393,8 @@ async def test_control_state_bits_are_asserted_independently_of_the_system_switc
         )
         assert r.status_code == 400
         bits = _out_bits(await _train(c))
-        assert bits["c2_control_state_1_1"]["value"] is True
+        assert bits["c2_control_state_1_1"]["value"] is False
         assert bits["c2_control_state_1_1"]["blockable"] is False
 
         await c.post("/api/simulation/reset")
-        assert _c2_values(await _train(c)) == {
-            "c2_control_state_1_1": False,
-            "c2_control_state_1_2": False,
-            "c2_control_state_2_1": False,
-            "c2_control_state_2_2": False,
-        }
+        assert _c2_values(await _train(c)) == C2_SELECTED

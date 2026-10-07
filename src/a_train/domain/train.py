@@ -402,9 +402,12 @@ class Train:
         return ControlResult()
 
     def _resolve_all_intents(self) -> None:
-        self._resolve_equipment_intents(
-            self._collect_equipment_intents() + self._cab_state_intents()
-        )
+        # Resolve again so state changes delivered to equipment can propagate
+        # through its newly emitted intents in the same aggregate operation.
+        for _ in range(2):
+            self._resolve_equipment_intents(
+                self._collect_equipment_intents() + self._cab_state_intents()
+            )
 
     def _cab_state_intents(self) -> tuple[EquipmentIntent, ...]:
         return tuple(

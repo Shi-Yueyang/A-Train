@@ -19,6 +19,7 @@ def _train_config():
                         "cab_id": 1,
                         "params": {"is_cbtc_authorized": True},
                     },
+                    {"type": "stcs_atp_duo", "cab_id": 1},
                     {"type": "switch_box", "cab_id": 1},
                     {"type": "switch_box", "cab_id": 2},
                 ],
@@ -29,6 +30,18 @@ def _train_config():
 
 def _equipment(train: dict, key: str) -> dict:
     return next(entry for entry in train["equipment"] if entry["key"] == key)
+
+
+def _control_state_bits(train: dict) -> dict[str, bool]:
+    signals = _equipment(train, "stcs_atp_duo_1")["state"]["train_out_states"]
+    names = (
+        "c2_control_state_1_1",
+        "c2_control_state_1_2",
+        "c2_control_state_2_1",
+        "c2_control_state_2_2",
+    )
+    values = {signal["name"]: signal["value"] for signal in signals}
+    return {name: values[name] for name in names}
 
 
 async def test_cbtc_authorization_feeds_same_cab_switch_box() -> None:
@@ -42,6 +55,24 @@ async def test_cbtc_authorization_feeds_same_cab_switch_box() -> None:
         assert cbtc["state"] == {"cab_id": 1, "is_cbtc_authorized": True}
         assert _equipment(train, "switch_box_1")["state"]["cbtc_authorized"] is True
         assert _equipment(train, "switch_box_2")["state"]["cbtc_authorized"] is False
+        assert _control_state_bits(train) == {
+            "c2_control_state_1_1": True,
+            "c2_control_state_1_2": True,
+            "c2_control_state_2_1": False,
+            "c2_control_state_2_2": False,
+        }
+
+        response = await client.post(
+            "/api/trains/TRAIN001/equipment/switch_box_1",
+            json={"system_switch": "auto"},
+        )
+        assert response.status_code == 200
+        assert _control_state_bits(response.json()) == {
+            "c2_control_state_1_1": False,
+            "c2_control_state_1_2": False,
+            "c2_control_state_2_1": True,
+            "c2_control_state_2_2": True,
+        }
 
         response = await client.post(
             "/api/trains/TRAIN001/equipment/cbtc_1",
@@ -52,6 +83,12 @@ async def test_cbtc_authorization_feeds_same_cab_switch_box() -> None:
         assert _equipment(train, "cbtc_1")["state"]["is_cbtc_authorized"] is False
         assert _equipment(train, "switch_box_1")["state"]["cbtc_authorized"] is False
         assert _equipment(train, "switch_box_2")["state"]["cbtc_authorized"] is False
+        assert _control_state_bits(train) == {
+            "c2_control_state_1_1": False,
+            "c2_control_state_1_2": False,
+            "c2_control_state_2_1": False,
+            "c2_control_state_2_2": False,
+        }
 
         response = await client.post(
             "/api/trains/TRAIN001/equipment/cbtc_1",

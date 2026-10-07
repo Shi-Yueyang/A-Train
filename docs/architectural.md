@@ -427,7 +427,11 @@ driving system are train-local equipment. CBTC equipment stores one
 to the matching cab's switch box as `cbtc_authorized`. This is a physical
 equipment intent and is subject to link cuts. Switch-box state also includes
 its physical selector position and authorization states.
-Their state may be included in a train snapshot, but
+The selector and authorization states drive the four STCS
+`c2_control_state_*` bits: C2 position asserts the two `*_1_*` bits, CBTC
+position asserts the two `*_2_*` bits, and AUTO selects a pair only when its
+authorization is exclusively true. With both authorizations equal in AUTO,
+all four bits are low. Their state may be included in a train snapshot, but
 their transport and protocol handling remain outside the train model. Cab
 activation is not equipment; it is native train state owned by the aggregate
 (§3.2) and addressed through train controls, not the equipment endpoint.

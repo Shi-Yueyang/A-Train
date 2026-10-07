@@ -306,9 +306,9 @@ same payload encoded as base64. Other equipment requests return the normal
 | `left_door`, `right_door` | `command` `"open"` / `"close"` sets the selected door state. |
 | `btm_1`, `btm_2` | Delivers opaque `data` to that BTM instance. |
 | `cbtc_<cab_id>` | Stores `is_cbtc_authorized` for the configured cab; reset restores its configured initial value. It asserts `cbtc_authorized` to `switch_box_<cab_id>` through an equipment intent, subject to that physical link cut. |
-| `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. `train_in_signals` and `train_out_signals` apply sparse, named updates without changing omitted bits; train-in updates do not update `last_command`. An update to a derived train-out signal is accepted only while blocked. Bulk `train_out_signal` asserts train→ATP bits; derived feedbacks (brake feedbacks and sleep) and real-state mirrors (cab/key activation, door, driving-handle, and switch-box states) are re-established and reject the override, while operator-owned signals (buttons, panel states, and all four `c2_control_state_*` bits) take manual assertions as given. `block` freezes the simulator's derivation of named *derived* signals (snapshot rows with `blockable: true`): while blocked such a bit keeps its last value, manual updates stick, and ATP-side reactions to input bits are unaffected. `unblock` resumes derivation; the bit self-heals on the same application. Unknown signal names and non-blockable names in `block`/`unblock` are rejected 400, all-or-nothing. |
+| `stcs_atp_duo_1`, `stcs_atp_duo_2` | `command` is recorded as `last_command` on the addressed cab's STCS Duo instance, together with the wall-clock time of arrival as `last_command_time`. `train_in_signals` and `train_out_signals` apply sparse, named updates without changing omitted bits; train-in updates do not update `last_command`. An update to a derived train-out signal is accepted only while blocked. Bulk `train_out_signal` asserts train→ATP bits; derived feedbacks (brake feedbacks and sleep) and real-state mirrors (cab/key activation, door, driving-handle, switch-box position, and the four `c2_control_state_*` bits on a cab with a fitted switch box) are re-established and reject the override, while operator-owned signals (buttons, panel states, and those four bits on a cab without a switch box) take manual assertions as given. `block` freezes the simulator's derivation of named *derived* signals (snapshot rows with `blockable: true`): while blocked such a bit keeps its last value, manual updates stick, and ATP-side reactions to input bits are unaffected. `unblock` resumes derivation; the bit self-heals on the same application. Unknown signal names and non-blockable names in `block`/`unblock` are rejected 400, all-or-nothing. |
 | `driving_1`, `driving_2` | In `manual` control mode, sets any subset of the three driver-room handles (no interlocks; each position is independently settable). A legacy request containing `mode`, `direction`, or `acceleration` without `control_mode` selects manual mode. While a cab's handle `mode` is `"traction"` or `"brake"`, that driving system **overwrites** the legacy `drive_demand` lever for every step. In `speed` mode, `target_speed` is a signed speed setpoint. In `position` mode, the system drives to the absolute `target_position`, slowing under a stopping-speed envelope, with `max_speed` as a cap and a 0.05 m arrival tolerance. Automatic control updates effective handles before each physics step; `manual_*` snapshot fields retain the operator's stored handles. |
-| `switch_box_<cab>` | `system_switch` sets the cab's system-selection box to `"c2"`, `"auto"`, or `"cbtc"` (reset returns it to `"c2"`); the selected physical position is mirrored one-hot to STCS ATP, including `system_switch_auto` while set to `"auto"`. `c2_authorized` and `cbtc_authorized` are independent authorization states and do not alter the selector position. A fitted `cbtc_<cab>` drives `cbtc_authorized`; otherwise it remains operator-settable. The matching STCS ATP instance feeds `c2_authorized` back to the box when its ATP input signal is true. On a cab with no fitted box the switch bits remain plain operator-asserted panel bits; cutting either physical wire freezes its receiver, and restoring it self-heals on the next delivery. |
+| `switch_box_<cab>` | `system_switch` sets the cab's system-selection box to `"c2"`, `"auto"`, or `"cbtc"` (reset returns it to `"c2"`); the selected physical position is mirrored one-hot to STCS ATP, including `system_switch_auto` while set to `"auto"`. The four `c2_control_state_*` bits assert the C2 pair in C2 position, the CBTC pair in CBTC position, and in AUTO assert a pair only when its authorization is exclusively true; equal authorization values in AUTO set all four low. `c2_authorized` and `cbtc_authorized` are independent authorization states and do not alter the selector position. A fitted `cbtc_<cab>` drives `cbtc_authorized`; otherwise it remains operator-settable. The matching STCS ATP instance feeds `c2_authorized` back to the box when its ATP input signal is true. On a cab with no fitted box the switch bits remain plain operator-asserted panel bits; cutting either physical wire freezes its receiver, and restoring it self-heals on the next delivery. |
 
 While `cut_off_traction` is high on an STCS ATP instance, its same-cab driving system is continuously reset to `off` / `off` / `0.0`, and the train-wide legacy drive-demand lever is asserted to zero on equipment-intent resolution, including before each physics step. When the signal goes low, that driving system can be commanded again; drive demand remains zero until explicitly changed.
 
@@ -436,9 +436,10 @@ state as one bit string. Each signal row's `blockable` is true exactly for the s
 signals whose value STCS derives from other signals it holds — the four brake
 feedback rows, `turnback_activation_feedback`, and `sleep_signal` — and `blocked` reports the active freeze set through `block`/`unblock`
 (cleared by `simulation/reset`). Every other row — train-in bits, asserted
-real-state mirrors (door, cab/key, driving-handle, switch-box), and
-operator-owned panel signals including the four `c2_control_state_*` rows —
-is `blockable: false`; freeze an asserted
+real-state mirrors (door, cab/key, driving-handle, switch-box, and the four
+`c2_control_state_*` rows when a switch box is fitted), and operator-owned
+panel signals including those four rows on cabs without a switch box — is
+`blockable: false`; freeze an asserted
 mirror with its `source -> stcs_atp_duo_<cab>` link cut (stale, not zeroed)
 rather than with `block`. `door_state_1` / `door_state_2` mirror the
 `left_door` / `right_door` open state. `direction_handle_forward_1` and
@@ -449,10 +450,13 @@ rather than with `block`. `door_state_1` / `door_state_2` mirror the
 remaining handle positions. All five are projected onto these rows at
 ingest by that cab's own `driving_system_<cab>` feedback intent; a cut on
 that wire leaves them stale and manually assertable until a delivery
-after restore self-heals them. The `c2_control_state_*` rows do not follow
-the switch rows and remain independently operator-asserted. `system_switch_c2`
-/ `system_switch_auto` / `system_switch_cbtc` mirror the fitted
-`switch_box_<cab>` one-hot; unfitted cabs keep them operator-owned.
+after restore self-heals them. A fitted switch box asserts the
+`c2_control_state_*` rows from its position and authorization: C2 asserts the
+two `*_1_*` rows, CBTC asserts the two `*_2_*` rows, and AUTO asserts one pair
+only when that system is exclusively authorized; equal authorization values
+in AUTO leave all four rows low. `system_switch_c2` / `system_switch_auto` /
+`system_switch_cbtc` mirror the fitted `switch_box_<cab>` one-hot; unfitted
+cabs keep those rows and the `c2_control_state_*` rows operator-owned.
 
 Future addons add entries without changing existing physical fields; a train
 without an equipment instance simply omits that entry.

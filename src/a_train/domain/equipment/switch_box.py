@@ -90,10 +90,25 @@ class SwitchBox:
         pass
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
+        c2_active = self._position == "c2" or (
+            self._position == "auto" and self._c2_authorized and not self._cbtc_authorized
+        )
+        cbtc_active = self._position == "cbtc" or (
+            self._position == "auto" and self._cbtc_authorized and not self._c2_authorized
+        )
         return (
             EquipmentIntent(
                 source=self._key,
                 target="stcs_atp",
-                control=StcsAtpControl(cab_id=self._cab_id, system_switch=self._position),
+                control=StcsAtpControl(
+                    cab_id=self._cab_id,
+                    system_switch=self._position,
+                    train_out_signals={
+                        "c2_control_state_1_1": c2_active,
+                        "c2_control_state_1_2": c2_active,
+                        "c2_control_state_2_1": cbtc_active,
+                        "c2_control_state_2_2": cbtc_active,
+                    },
+                ),
             ),
         )

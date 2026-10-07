@@ -289,11 +289,14 @@ for the 30 train-side feedback bits. It is exposed as `train_out_signal` (bit st
 `train_out_states` (named entries) in `StcsAtpSnapshot`. The remaining
 train-originated bits (buttons, panel states, and -- on a cab without a fitted
 switch box -- the `system_switch_*` bits) have no simulator-side source and
-are asserted through the Web API equipment endpoint. The four
-`c2_control_state_*` bits are also operator-owned; they do not follow the
-system switch and are not blockable. They can be asserted with
-`train_out_signals` or `train_out_signal` through the equipment endpoint
-(`web-api.md` §3.5). The derived feedback bits below always reflect real
+are asserted through the Web API equipment endpoint. When a switch box is fitted, the four `c2_control_state_*` bits reflect its
+position and authorization: C2 asserts the two `*_1_*` bits; CBTC asserts
+the two `*_2_*` bits; AUTO asserts one pair only when its authorization is
+exclusively true. If both authorization values match in AUTO, all four bits
+are low. Without a fitted switch box, these non-blockable bits remain
+operator-owned and can be asserted with `train_out_signals` or
+`train_out_signal` through the equipment endpoint (`web-api.md` §3.5). The
+derived feedback bits below always reflect real
 train state, unless that signal's derivation has been blocked through the Web
 API (`web-api.md`), in which case the bit keeps its last value — and an
 operator assertion on a blocked bit sticks — until unblocked. Blocking
