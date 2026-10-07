@@ -423,8 +423,10 @@ is zero. Snapshot `direction` is derived from the speed sign: `"forward"`,
 
 Doors, BTM, CBTC authorization state, ATP protection state, and each cab's
 driving system are train-local equipment. CBTC equipment stores one
-`is_cbtc_authorized` boolean per configured instance and cab; it has no
-simulation effect and does not feed the separate switch-box authorization.
+`is_cbtc_authorized` boolean per configured instance and cab, and asserts it
+to the matching cab's switch box as `cbtc_authorized`. This is a physical
+equipment intent and is subject to link cuts. Switch-box state also includes
+its physical selector position and authorization states.
 Their state may be included in a train snapshot, but
 their transport and protocol handling remain outside the train model. Cab
 activation is not equipment; it is native train state owned by the aggregate
@@ -465,10 +467,9 @@ adapter delivers the payload over the protocol.
 
 The switch box is a cab-scoped three-position selector (`c2`, `auto`, or
 `cbtc`) with independent boolean `c2_authorized` and `cbtc_authorized`
-states. In `auto`, its effective STCS system-switch output selects C2 when
-C2 is authorized, otherwise CBTC when CBTC is authorized, and otherwise
-emits no STCS intent when neither authorization is true; C2 takes precedence
-if both are true. The matching STCS ATP
+states. It mirrors its physical position one-hot to STCS ATP, so selecting
+`auto` asserts `system_switch_auto` regardless of either authorization flag.
+Those flags do not change the selector position. The matching STCS ATP
 instance can assert its `c2_authorized` train-input signal back to the switch
 box through an equipment intent. Both directions are ordinary physical wires
 and therefore participate in link cuts.

@@ -54,13 +54,6 @@ class Nand:
 
 
 @dataclass(frozen=True)
-class Follows:
-    """Derived train-out signal: an exact copy of another signal STCS holds."""
-
-    source: str
-
-
-@dataclass(frozen=True)
 class SignalDefinition:
     """One named boolean signal at a protocol-defined bit position.
 
@@ -70,7 +63,7 @@ class SignalDefinition:
 
     name: str
     default: bool = False
-    derive: Invert | Or | Nand | Follows | None = None
+    derive: Invert | Or | Nand | None = None
 
     @property
     def blockable(self) -> bool:
@@ -95,16 +88,6 @@ _TURNBACK_ACTIVATION_FEEDBACK = SignalDefinition(
     "turnback_activation_feedback", derive=Invert("turnback_activation")
 )
 _SLEEP = SignalDefinition("sleep_signal", derive=Invert("cab_activation"))
-
-# Duo-only C2/CBTC control-state groups: group 1 is high with the system
-# switch on C2, group 2 with CBTC, and all four low on AUTO or a frozen/
-# unpowered switch feed. Identity copies of the switch bits, so the fold
-# tracks every path that moves them: box feed, operator asserts on the
-# switch rows, blocks, and reset.
-_C2_STATE_1_1 = SignalDefinition("c2_control_state_1_1", derive=Follows("system_switch_c2"))
-_C2_STATE_1_2 = SignalDefinition("c2_control_state_1_2", derive=Follows("system_switch_c2"))
-_C2_STATE_2_1 = SignalDefinition("c2_control_state_2_1", derive=Follows("system_switch_cbtc"))
-_C2_STATE_2_2 = SignalDefinition("c2_control_state_2_2", derive=Follows("system_switch_cbtc"))
 
 # Handle-mirror rows are asserted at ingest from the driving system's feedback
 # intent (see ``_apply_handle_feedback``), not derived from STCS's own signal
@@ -292,9 +275,7 @@ class StcsAtpBase:
                 out[definition.name] = self._evaluate(definition.derive, out)
         return out
 
-    def _evaluate(self, rule: Invert | Or | Nand | Follows, out: dict[str, bool]) -> bool:
-        if isinstance(rule, Follows):
-            return self._bit(rule.source, out)
+    def _evaluate(self, rule: Invert | Or | Nand, out: dict[str, bool]) -> bool:
         if isinstance(rule, Invert):
             return not self._bit(rule.source, out)
         if isinstance(rule, Nand):
@@ -445,13 +426,13 @@ class StcsAtpDuo(StcsAtpBase):
         SignalDefinition("door_state_1"),
         SignalDefinition("door_state_2"),
         SignalDefinition("cbtc_authorized_command"),
-        _C2_STATE_1_1,
-        _C2_STATE_2_1,
+        SignalDefinition("c2_control_state_1_1"),
+        SignalDefinition("c2_control_state_2_1"),
         SignalDefinition("system_switch_c2"),
         SignalDefinition("system_switch_auto"),
         SignalDefinition("system_switch_cbtc"),
-        _C2_STATE_1_2,
-        _C2_STATE_2_2,
+        SignalDefinition("c2_control_state_1_2"),
+        SignalDefinition("c2_control_state_2_2"),
     )
 
 

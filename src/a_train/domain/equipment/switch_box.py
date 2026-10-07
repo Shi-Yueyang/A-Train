@@ -90,21 +90,10 @@ class SwitchBox:
         pass
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
-        position = self._position
-        if position == "auto":
-            if self._c2_authorized and self._cbtc_authorized:
-                return ()
-            if self._c2_authorized:
-                position = "c2"
-            elif self._cbtc_authorized:
-                position = "cbtc"
-            else:
-                return ()
-
         return (
             EquipmentIntent(
                 source=self._key,
                 target="stcs_atp",
-                control=StcsAtpControl(cab_id=self._cab_id, system_switch=position),
+                control=StcsAtpControl(cab_id=self._cab_id, system_switch=self._position),
             ),
         )

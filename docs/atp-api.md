@@ -288,9 +288,12 @@ The STCS ATP component also maintains a plain internal `train_out_states` map
 for the 30 train-side feedback bits. It is exposed as `train_out_signal` (bit string) and
 `train_out_states` (named entries) in `StcsAtpSnapshot`. The remaining
 train-originated bits (buttons, panel states, and -- on a cab without a fitted
-switch box -- the `system_switch_*` bits) have no simulator-side source and are asserted through the Web API equipment endpoint; `c2_control_state_1_1` / `c2_control_state_1_2` instead follow `system_switch_c2` and `c2_control_state_2_1` / `c2_control_state_2_2` follow `system_switch_cbtc` (all four low on AUTO) -- those four bits are STCS-internal derivations, blockable like the brake feedbacks
-(`web-api.md` §3.5, `POST .../equipment/stcs_atp_duo_<cab_id>` with
-`train_out_signal`); the derived feedback bits below always reflect real
+switch box -- the `system_switch_*` bits) have no simulator-side source and
+are asserted through the Web API equipment endpoint. The four
+`c2_control_state_*` bits are also operator-owned; they do not follow the
+system switch and are not blockable. They can be asserted with
+`train_out_signals` or `train_out_signal` through the equipment endpoint
+(`web-api.md` §3.5). The derived feedback bits below always reflect real
 train state, unless that signal's derivation has been blocked through the Web
 API (`web-api.md`), in which case the bit keeps its last value — and an
 operator assertion on a blocked bit sticks — until unblocked. Blocking

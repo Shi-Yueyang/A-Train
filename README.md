@@ -108,14 +108,16 @@ state. Equipment keys are generated internally as unique REST addresses; cab-sco
 equipment must be unique by `(type, cab_id)`, which is also how ATP wire
 messages address instances. The `cbtc` equipment stores a cab-scoped
 `is_cbtc_authorized` boolean, initially `false` unless set in `params`, and can
-be updated through its equipment endpoint. It is independent of the switch
-box's `cbtc_authorized` state. The supported equipment types are `door`, `btm`,
-`cbtc`, `driving_system`, `stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`. Each equipment entry
-may include `"enabled": false` to leave that equipment out of the installed
-train; omitted `enabled` values default to `true`. Equipment configuration is
-validated before the server starts. Each optional `atp` entry is a `{host, port}` address for A-Train to bind; ATP clients connect to that address. Peers
-are not bound to cabs. A missing or empty `atp` array starts without an ATP
-listener.
+be updated through its equipment endpoint. It feeds the same cab's switch
+box `cbtc_authorized` state through an equipment intent; a physical link cut
+can interrupt that connection. The supported equipment types are `door`, `btm`,
+`cbtc`, `driving_system`, `stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`.
+Each equipment entry may include `"enabled": false` to leave that equipment
+out of the installed train;
+omitted `enabled` values default to `true`. Equipment configuration is
+validated before the server starts. Each optional `atp` entry is a `{host, port}`
+address for A-Train to bind; ATP clients connect to that address. Peers are not
+bound to cabs. A missing or empty `atp` array starts without an ATP listener.
 
 ## Checks
 

@@ -67,7 +67,7 @@ class StcsAtpControl:
 
 @dataclass(frozen=True)
 class SwitchBoxControl:
-    """The position a cab's switch box is set to: "c2", "auto", or "cbtc"."""
+    """A cab switch-box state update."""
 
     cab_id: int | None = None
     position: str | None = None

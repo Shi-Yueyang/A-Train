@@ -33,6 +33,7 @@ async def test_static_assets_are_served(app_client) -> None:
     assert "Drive to position" in js.text
     assert "target_position" in js.text
     assert "is_cbtc_authorized" in js.text
+    assert "Switch position" in js.text
 
     css = await app_client.get("/style.css")
     assert css.status_code == 200

@@ -634,7 +634,7 @@ function buildSwitchBoxCard(entry) {
     postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
       system_switch: position.value,
     });
-  row.append(position);
+  row.append(labeled("Switch position", position));
   const c2Authorized = document.createElement("input");
   c2Authorized.type = "checkbox";
   c2Authorized.setAttribute("aria-label", `${key} C2 authorized`);
@@ -669,7 +669,10 @@ function syncSwitchBoxes(equipment) {
     const entry = equipment.find((e) => e.key === card.dataset.key);
     if (!entry || !card.widgets) continue;
     const s = entry.state;
-    setLiveText(card.widgets.readout, `cab ${s.cab_id} - position ${s.position}`);
+    setLiveText(
+      card.widgets.readout,
+      `cab ${s.cab_id} - position ${s.position}`
+    );
     card.widgets.position.value = s.position;
     card.widgets.c2Authorized.checked = s.c2_authorized;
     card.widgets.cbtcAuthorized.checked = s.cbtc_authorized;

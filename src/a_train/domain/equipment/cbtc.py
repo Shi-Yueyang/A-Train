@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from ..controls import CbtcControl
+from ..controls import CbtcControl, SwitchBoxControl
 from ..snapshots import CbtcSnapshot
-from .base import TrainMotion
+from .base import EquipmentIntent, TrainMotion
 
 
 class Cbtc:
@@ -57,5 +57,14 @@ class Cbtc:
     def step(self, dt: float, motion: TrainMotion) -> None:
         pass
 
-    def emit_intents(self):
-        return ()
+    def emit_intents(self) -> tuple[EquipmentIntent, ...]:
+        return (
+            EquipmentIntent(
+                source=self._key,
+                target="switch_box",
+                control=SwitchBoxControl(
+                    cab_id=self._cab_id,
+                    cbtc_authorized=self._is_cbtc_authorized,
+                ),
+            ),
+        )
