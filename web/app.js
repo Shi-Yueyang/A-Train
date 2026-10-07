@@ -322,6 +322,11 @@ function renderEquipmentControls(equipment) {
     () => byType(equipment, "door").map(buildDoorCard)
   );
   ensurePanels(
+    $("cbtc-panels"),
+    prefix(byType(equipment, "cbtc")),
+    () => byType(equipment, "cbtc").map(buildCbtcCard)
+  );
+  ensurePanels(
     $("switch-box-panels"),
     prefix(byType(equipment, "switch_box")),
     () => byType(equipment, "switch_box").map(buildSwitchBoxCard)
@@ -333,6 +338,7 @@ function renderEquipmentControls(equipment) {
   );
   syncDrivingPanels(equipment);
   syncDoorCards(equipment);
+  syncCbtcs(equipment);
   syncSwitchBoxes(equipment);
   syncBtmCards(equipment);
 }
@@ -556,6 +562,54 @@ function syncDoorCards(equipment) {
     const entry = equipment.find((e) => e.key === card.dataset.key);
     if (!entry || !card.widgets) continue;
     setLiveText(card.widgets.readout, `state: ${entry.state.state}`);
+  }
+}
+
+function buildCbtcCard(entry) {
+  const key = entry.key;
+  const card = document.createElement("article");
+  card.className = "equipment-card cbtc-card";
+  card.dataset.key = key;
+
+  const heading = document.createElement("h3");
+  heading.textContent = key;
+  card.appendChild(heading);
+
+  const readout = document.createElement("p");
+  readout.className = "stcs-raw";
+  card.appendChild(readout);
+
+  const authorized = document.createElement("input");
+  authorized.type = "checkbox";
+  authorized.setAttribute("aria-label", `${key} CBTC authorized`);
+  authorized.onchange = () =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, {
+      is_cbtc_authorized: authorized.checked,
+    });
+
+  const reset = document.createElement("button");
+  reset.textContent = "Reset";
+  reset.onclick = () =>
+    postCommand(`/trains/${state.selectedTrainId}/equipment/${key}/reset`, {});
+
+  const controls = document.createElement("div");
+  controls.className = "controls";
+  controls.append(labeled("CBTC authorized", authorized), reset);
+  card.appendChild(controls);
+  card.widgets = { readout, authorized };
+  return makeControlCardCollapsible(card);
+}
+
+function syncCbtcs(equipment) {
+  for (const card of $("cbtc-panels").children) {
+    const entry = equipment.find((item) => item.key === card.dataset.key);
+    if (!entry || !card.widgets) continue;
+    const value = entry.state.is_cbtc_authorized;
+    setLiveText(
+      card.widgets.readout,
+      `cab ${entry.state.cab_id} · CBTC ${value ? "authorized" : "not authorized"}`
+    );
+    card.widgets.authorized.checked = value;
   }
 }
 

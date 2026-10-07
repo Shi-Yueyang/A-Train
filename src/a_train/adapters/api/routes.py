@@ -228,6 +228,7 @@ async def set_equipment(
         system_switch=body.system_switch,
         c2_authorized=body.c2_authorized,
         cbtc_authorized=body.cbtc_authorized,
+        is_cbtc_authorized=body.is_cbtc_authorized,
         block=tuple(body.block) if body.block is not None else None,
         unblock=tuple(body.unblock) if body.unblock is not None else None,
     )

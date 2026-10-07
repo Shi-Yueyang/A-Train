@@ -14,6 +14,7 @@ async def test_root_serves_demo_page(app_client) -> None:
     assert "text/html" in r.headers["content-type"]
     assert "A-Train API Tester" in r.text
     assert 'id="cab-panels"' in r.text
+    assert 'id="cbtc-panels"' in r.text
     assert 'id="cab-select"' not in r.text
     assert 'id="drive-demand-card" class="equipment-card drive-demand-card"' in r.text
     assert 'id="link-cuts" class="equipment-card link-cuts-card"' in r.text
@@ -31,6 +32,7 @@ async def test_static_assets_are_served(app_client) -> None:
     assert "fetch" in js.text
     assert "Drive to position" in js.text
     assert "target_position" in js.text
+    assert "is_cbtc_authorized" in js.text
 
     css = await app_client.get("/style.css")
     assert css.status_code == 200

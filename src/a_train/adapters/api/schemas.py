@@ -124,6 +124,9 @@ class EquipmentSetRequest(BaseModel):
     cbtc_authorized: StrictBool | None = Field(
         default=None, description="Switch box CBTC authorization state."
     )
+    is_cbtc_authorized: StrictBool | None = Field(
+        default=None, description="CBTC equipment authorization state for its cab."
+    )
     block: list[str] | None = Field(
         default=None,
         description="STCS ATP: freeze the simulator's derivation of these derived "

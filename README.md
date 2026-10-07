@@ -92,6 +92,7 @@ example:
 			{"type": "door", "params": {"side": "right"}},
 			{"type": "btm", "cab_id": 1},
 			{"type": "stcs_atp_duo", "cab_id": 1},
+			{"type": "cbtc", "cab_id": 1},
 			{"type": "switch_box", "cab_id": 1}
 		]
 	},
@@ -105,8 +106,11 @@ Cab entries may set `key_inserted` to `true` to start with the key inserted;
 omitted values default to `false`. Reset restores each cab's configured key
 state. Equipment keys are generated internally as unique REST addresses; cab-scoped
 equipment must be unique by `(type, cab_id)`, which is also how ATP wire
-messages address instances. The supported equipment types are `door`, `btm`,
-`driving_system`, `stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`. Each equipment entry
+messages address instances. The `cbtc` equipment stores a cab-scoped
+`is_cbtc_authorized` boolean, initially `false` unless set in `params`, and can
+be updated through its equipment endpoint. It is independent of the switch
+box's `cbtc_authorized` state. The supported equipment types are `door`, `btm`,
+`cbtc`, `driving_system`, `stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`. Each equipment entry
 may include `"enabled": false` to leave that equipment out of the installed
 train; omitted `enabled` values default to `true`. Equipment configuration is
 validated before the server starts. Each optional `atp` entry is a `{host, port}` address for A-Train to bind; ATP clients connect to that address. Peers

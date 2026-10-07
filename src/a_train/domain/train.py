@@ -27,6 +27,7 @@ from typing import Any
 from .controls import (
     BtmControl,
     CabStateControl,
+    CbtcControl,
     DoorControl,
     DriverControl,
     DrivingSystemControl,
@@ -37,6 +38,7 @@ from .controls import (
 from .equipment import (
     EQUIPMENT_FACTORIES,
     Btm,
+    Cbtc,
     Door,
     DrivingSystem,
     Equipment,
@@ -79,6 +81,7 @@ class EquipmentControlRequest:
 
     - ``door``: ``command`` is ``"open"`` or ``"close"``.
     - ``btm``: ``cab_id`` plus opaque ``data`` bytes.
+    - ``cbtc``: ``is_cbtc_authorized`` boolean for the addressed cab.
     - ``stcs_atp`` with ``cab_id``: ``command`` is recorded on that cab's STCS instance.
         - ``stcs_atp`` ``train_in_signals``/``train_out_signals``: sparse named
             signal updates; omitted bits remain unchanged.
@@ -114,6 +117,7 @@ class EquipmentControlRequest:
     system_switch: str | None = None
     c2_authorized: bool | None = None
     cbtc_authorized: bool | None = None
+    is_cbtc_authorized: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -426,6 +430,13 @@ class Train:
             if command.data is None:
                 raise ValueError("btm requires data")
             return BtmControl(command.data, command.cab_id)
+        if isinstance(equipment, Cbtc):
+            if command.is_cbtc_authorized is None:
+                raise ValueError("cbtc requires is_cbtc_authorized")
+            return CbtcControl(
+                cab_id=command.cab_id,
+                is_cbtc_authorized=command.is_cbtc_authorized,
+            )
         if isinstance(equipment, StcsAtpBase):
             if (
                 command.command is None

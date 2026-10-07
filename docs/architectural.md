@@ -421,8 +421,11 @@ is zero. Snapshot `direction` is derived from the speed sign: `"forward"`,
 
 ## 3.5 Train-Facing Equipment Boundary
 
-Doors, BTM, ATP protection state, and each cab's driving system are
-train-local equipment. Their state may be included in a train snapshot, but
+Doors, BTM, CBTC authorization state, ATP protection state, and each cab's
+driving system are train-local equipment. CBTC equipment stores one
+`is_cbtc_authorized` boolean per configured instance and cab; it has no
+simulation effect and does not feed the separate switch-box authorization.
+Their state may be included in a train snapshot, but
 their transport and protocol handling remain outside the train model. Cab
 activation is not equipment; it is native train state owned by the aggregate
 (§3.2) and addressed through train controls, not the equipment endpoint.

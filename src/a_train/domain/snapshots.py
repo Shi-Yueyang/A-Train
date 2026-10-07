@@ -45,6 +45,14 @@ class BtmSnapshot:
 
 
 @dataclass(frozen=True)
+class CbtcSnapshot:
+    """Read-only view of one cab's CBTC authorization state."""
+
+    cab_id: int
+    is_cbtc_authorized: bool = False
+
+
+@dataclass(frozen=True)
 class DrivingSystemSnapshot:
     """Read-only view of one cab's driving system and active control.
 

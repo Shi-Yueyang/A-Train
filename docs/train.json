@@ -71,6 +71,13 @@
         "cab_id": 2
       },
       {
+        "type": "cbtc",
+        "cab_id": 1,
+        "params": {
+          "is_cbtc_authorized": false
+        }
+      },
+      {
         "type": "switch_box",
         "cab_id": 1,
         "params": {
