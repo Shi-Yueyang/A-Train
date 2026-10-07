@@ -28,6 +28,8 @@ class AsgiWebSocket:
         self._app_to_client: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=send_maxsize)
         self._accepted = asyncio.Event()
         self._closed = asyncio.Event()
+        self.close_code: int | None = None
+        self.close_reason: str | None = None
         self._first_receive = True
         self._scope: dict[str, Any] = {
             "type": "websocket",
@@ -60,6 +62,8 @@ class AsgiWebSocket:
             self._accepted.set()
             return
         if mtype == "websocket.close":
+            self.close_code = message.get("code")
+            self.close_reason = message.get("reason")
             self._closed.set()
             return
         if mtype == "websocket.send":
@@ -86,6 +90,9 @@ class AsgiWebSocket:
     async def receive_text(self) -> str:
         message = await self._app_to_client.get()
         return message["text"]
+
+    async def wait_closed(self) -> None:
+        await self._closed.wait()
 
     async def send_json(self, obj: Any) -> None:
         text = json.dumps(obj)

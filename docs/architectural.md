@@ -422,11 +422,11 @@ is zero. Snapshot `direction` is derived from the speed sign: `"forward"`,
 ## 3.5 Train-Facing Equipment Boundary
 
 Doors, BTM, CBTC authorization state, ATP protection state, and each cab's
-driving system are train-local equipment. CBTC equipment stores one
-`is_cbtc_authorized` boolean per configured instance and cab, and asserts it
-to the matching cab's switch box as `cbtc_authorized`. This is a physical
-equipment intent and is subject to link cuts. Switch-box state also includes
-its physical selector position and authorization states.
+driving system are train-local equipment. The optional `cbtc` equipment is
+standalone; it does not drive switch-box state. Each switch box owns its
+physical selector position and authorization states. The external switch
+logic WebSocket adapter submits `cbtc-out` authorization changes through the
+core to the matching cab's switch box.
 The selector and authorization states drive the four STCS
 `c2_control_state_*` bits: C2 position asserts the two `*_1_*` bits, CBTC
 position asserts the two `*_2_*` bits, and AUTO selects a pair only when its
@@ -720,6 +720,11 @@ Browser
 
 The browser does **not** communicate directly with ATP.
 
+The external switch-logic client has a separate WebSocket protocol at
+`/ws/cbtc`. Its adapter reads the matching switch-box snapshot and submits
+`cbtc-out` updates as commands through the core; it does not share the
+dashboard's `/ws` message contract.
+
 ## 5.2 REST API
 
 Example endpoints:
@@ -894,6 +899,7 @@ train-simulator/
 │   │   │   ├── app.py              # FastAPI construction, lifespan, and dependency wiring.
 │   │   │   ├── routes.py           # REST request handlers that submit core commands.
 │   │   │   ├── websocket.py        # Snapshot-to-browser WebSocket publisher task.
+│   │   │   ├── switch_logic_websocket.py # External CBTC switch-logic protocol.
 │   │   │   └── schemas.py          # HTTP request and response validation models.
 │   │   └── atp/
 │   │       ├── __init__.py         # ATP adapter public exports.

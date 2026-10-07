@@ -92,7 +92,6 @@ example:
 			{"type": "door", "params": {"side": "right"}},
 			{"type": "btm", "cab_id": 1},
 			{"type": "stcs_atp_duo", "cab_id": 1},
-			{"type": "cbtc", "cab_id": 1},
 			{"type": "switch_box", "cab_id": 1}
 		]
 	},
@@ -106,12 +105,10 @@ Cab entries may set `key_inserted` to `true` to start with the key inserted;
 omitted values default to `false`. Reset restores each cab's configured key
 state. Equipment keys are generated internally as unique REST addresses; cab-scoped
 equipment must be unique by `(type, cab_id)`, which is also how ATP wire
-messages address instances. The `cbtc` equipment stores a cab-scoped
-`is_cbtc_authorized` boolean, initially `false` unless set in `params`, and can
-be updated through its equipment endpoint. It feeds the same cab's switch
-box `cbtc_authorized` state through an equipment intent; a physical link cut
-can interrupt that connection. The supported equipment types are `door`, `btm`,
-`cbtc`, `driving_system`, `stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`.
+messages address instances. The switch box owns its authorization states;
+CBTC switch logic connects over the same HTTP server at `/ws/cbtc`. The
+supported equipment types are `door`, `btm`, `cbtc`, `driving_system`,
+`stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`.
 Each equipment entry may include `"enabled": false` to leave that equipment
 out of the installed train;
 omitted `enabled` values default to `true`. Equipment configuration is

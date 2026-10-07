@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from ..controls import CbtcControl, SwitchBoxControl
+from ..controls import CbtcControl
 from ..snapshots import CbtcSnapshot
 from .base import EquipmentIntent, TrainMotion
 
 
 class Cbtc:
-    """Stores the CBTC authorization state for one cab."""
+    """Stores standalone CBTC authorization state for one cab."""
 
     type = "cbtc"
 
@@ -58,13 +58,4 @@ class Cbtc:
         pass
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
-        return (
-            EquipmentIntent(
-                source=self._key,
-                target="switch_box",
-                control=SwitchBoxControl(
-                    cab_id=self._cab_id,
-                    cbtc_authorized=self._is_cbtc_authorized,
-                ),
-            ),
-        )
+        return ()

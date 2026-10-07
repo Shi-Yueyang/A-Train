@@ -4,8 +4,8 @@
 router and WebSocket publisher, and serves the static browser demo from the
 repository ``web/`` directory at the site root. The lifespan -- not this module
 -- assembles the production components and starts the background tasks (§2.6).
-The API routes are registered before the static mount so ``/api/*`` and ``/ws``
-are never shadowed.
+The API routes are registered before the static mount so ``/api/*``, ``/ws``,
+and ``/ws/cbtc`` are never shadowed.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .routes import router
+from .switch_logic_websocket import router as switch_logic_router
 from .websocket import ws_router
 
 Lifespan = Callable[[FastAPI], AsyncIterator[None]]
@@ -38,6 +39,8 @@ def create_app(lifespan: Lifespan) -> FastAPI:
     )
     app.include_router(router)
     app.include_router(ws_router)
+    app.include_router(switch_logic_router)
+    app.state.switch_logic_connected_cabs = set()
     if _WEB_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")
     return app
