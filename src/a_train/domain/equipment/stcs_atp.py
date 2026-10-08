@@ -289,16 +289,9 @@ class StcsAtpBase:
 
     def emit_intents(self) -> tuple[EquipmentIntent, ...]:
         intents: list[EquipmentIntent] = []
-        if self._train_in_states.get("maximum_service_brake_7", False):
-            intents.append(
-                EquipmentIntent(
-                    source=self._key,
-                    target="train",
-                    control=DriverControl(brake=1.0),
-                )
-            )
-        cut_off_traction = self._train_in_states.get("cut_off_traction", False)
-        if cut_off_traction:
+
+
+        if self._train_in_states.get("cut_off_traction", False) is True:
             intents.extend(
                 (
                     EquipmentIntent(
@@ -318,7 +311,46 @@ class StcsAtpBase:
                     ),
                 )
             )
-        intents.extend(self._emit_variant_intents())
+            if self._train_in_states.get("emergency_brake_1", False) is False:
+                intents.append(
+                    EquipmentIntent(
+                        source=self._key,
+                        target="train",
+                        control=DriverControl(brake=0.7),
+                    )
+                )   
+            if self._train_in_states.get("emergency_brake_2", False) is False:
+                intents.append(
+                    EquipmentIntent(
+                        source=self._key,
+                        target="train",
+                        control=DriverControl(brake=0.7),
+                    )
+                )            
+            if self._train_in_states.get("maximum_service_brake_7", False) is False:
+                intents.append(
+                    EquipmentIntent(
+                        source=self._key,
+                        target="train",
+                        control=DriverControl(brake=0.7),
+                    )
+                )
+            if self._train_in_states.get("service_brake_4", False) is True:
+                intents.append(
+                    EquipmentIntent(
+                        source=self._key,
+                        target="train",
+                        control=DriverControl(brake=0.4),
+                    )
+                )
+            if self._train_in_states.get("service_brake_1", False) is True:
+                intents.append(
+                    EquipmentIntent(
+                        source=self._key,
+                        target="train",
+                        control=DriverControl(brake=0.1),
+                    )
+                )
         if self._train_in_states.get("c2_authorized", False):
             intents.append(
                 EquipmentIntent(
@@ -327,6 +359,9 @@ class StcsAtpBase:
                     control=SwitchBoxControl(cab_id=self._cab_id, c2_authorized=True),
                 )
             )
+
+        intents.extend(self._emit_variant_intents())
+
         return tuple(intents)
 
     def _emit_variant_intents(self) -> tuple[EquipmentIntent, ...]:
