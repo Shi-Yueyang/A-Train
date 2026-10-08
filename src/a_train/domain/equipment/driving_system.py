@@ -83,9 +83,7 @@ class DrivingSystem:
             raise ValueError("driving acceleration must be a finite value in [0.0, 1.0]")
 
         manual_fields = (
-            control.mode is not None
-            or control.direction is not None
-            or acceleration is not None
+            control.mode is not None or control.direction is not None or acceleration is not None
         )
         requested_mode = control.control_mode
         if requested_mode is None:
@@ -94,9 +92,8 @@ class DrivingSystem:
             elif control.target_speed is not None and self._control_mode == "speed":
                 requested_mode = "speed"
             elif (
-                (control.target_position is not None or control.max_speed is not None)
-                and self._control_mode == "position"
-            ):
+                control.target_position is not None or control.max_speed is not None
+            ) and self._control_mode == "position":
                 requested_mode = "position"
             else:
                 requested_mode = self._control_mode
@@ -130,7 +127,11 @@ class DrivingSystem:
             target_speed = control.target_speed
             if target_speed is None and self._control_mode == "speed":
                 target_speed = self._target_speed
-            if target_speed is None or isinstance(target_speed, bool) or not is_finite(target_speed):
+            if (
+                target_speed is None
+                or isinstance(target_speed, bool)
+                or not is_finite(target_speed)
+            ):
                 raise ValueError("speed control requires a finite target_speed")
             self._control_mode = "speed"
             self._target_speed = float(target_speed)
@@ -155,7 +156,11 @@ class DrivingSystem:
                 or not is_finite(target_position)
             ):
                 raise ValueError("position control requires a finite target_position")
-            if max_speed is None or isinstance(max_speed, bool) or not is_positive_finite(max_speed):
+            if (
+                max_speed is None
+                or isinstance(max_speed, bool)
+                or not is_positive_finite(max_speed)
+            ):
                 raise ValueError("position control requires a positive finite max_speed")
             self._control_mode = "position"
             self._target_speed = None
@@ -217,12 +222,16 @@ class DrivingSystem:
             -motion.max_decel,
             min(motion.max_traction_accel, requested_accel),
         )
+        travel_sign = motion.speed * self._facing
+        travel_direction = (
+            "forward" if travel_sign > 0 else "backward" if travel_sign < 0 else "off"
+        )
         if motion.speed != 0.0 and requested_accel * motion.speed < 0.0:
             effort = min(1.0, abs(requested_accel) / motion.max_decel)
-            self._set_effective_handles("brake", "off", effort)
+            self._set_effective_handles("brake", travel_direction, effort)
             return
         if abs(requested_accel) < self._AUTOMATIC_ACCELERATION_DEADBAND:
-            self._set_effective_handles("off", "off", 0.0)
+            self._set_effective_handles("off", travel_direction, 0.0)
             return
 
         track_sign = 1 if requested_accel > 0.0 else -1

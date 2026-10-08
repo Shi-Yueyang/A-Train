@@ -455,7 +455,10 @@ track position, uses `max_speed` as a speed cap, and reduces its speed target
 according to a stopping-speed envelope; arrival is within 0.05 m. The
 automatic controller maps its bounded acceleration request into the same
 traction/brake and direction handles as manual control, so the existing
-cab-facing and train-intent path remains in use.
+cab-facing and train-intent path remains in use. In automatic control, the
+direction handle follows the train's current travel direction relative to the
+cab while moving, including during braking and when holding speed; at
+standstill it is off unless traction is being applied to start in a direction.
 While that STCS instance's `cut_off_traction` input is high, it continuously
 resets the driving system on the same cab to `off` / `off` / `0.0` and asserts
 zero train-wide legacy drive demand. Both effects route through the train

@@ -248,7 +248,47 @@ async def test_speed_control_reaches_target_and_reports_effective_handles() -> N
         state = _equipment(train, "driving_system_1")["state"]
         assert train["speed"] == pytest.approx(1.0, abs=0.03)
         assert state["acceleration"] < 0.05
+        assert state["direction"] == "forward"
+        assert _out_bits(train)["direction_handle_forward_1"] is True
+        assert _out_bits(train)["direction_handle_forward_2"] is True
         assert state["manual_mode"] == "off"
+
+
+async def test_automatic_braking_keeps_direction_handle_aligned_with_travel() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        await _handles(c, 1, control_mode="speed", target_speed=1.0)
+        await _step(c, 2.0)
+        assert (await _train(c))["speed"] > 0.0
+
+        status, _ = await _handles(c, 1, control_mode="speed", target_speed=0.0)
+        assert status == 200
+        await _step(c, FIXED_STEP)
+
+        train = await _train(c)
+        state = _equipment(train, "driving_system_1")["state"]
+        bits = _out_bits(train)
+        assert state["mode"] == "brake"
+        assert state["direction"] == "forward"
+        assert bits["direction_handle_forward_1"] is True
+        assert bits["direction_handle_backward"] is False
+        assert bits["traction_handle_brake"] is True
+
+
+async def test_automatic_direction_handle_is_relative_to_cab_facing() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        status, _ = await _handles(c, 2, control_mode="speed", target_speed=1.0)
+        assert status == 200
+        await _step(c, FIXED_STEP)
+
+        train = await _train(c)
+        state = _equipment(train, "driving_system_2")["state"]
+        bits = _out_bits(train, cab=2)
+        assert train["speed"] > 0.0
+        assert state["mode"] == "traction"
+        assert state["direction"] == "backward"
+        assert bits["direction_handle_backward"] is True
 
 
 async def test_position_control_stops_at_target_with_speed_cap() -> None:
@@ -267,8 +307,15 @@ async def test_position_control_stops_at_target_with_speed_cap() -> None:
         assert state["target_position"] == 3.0
         assert state["max_speed"] == 0.8
 
+        await _step(c, 0.25)
+        train = await _train(c)
+        state = _equipment(train, "driving_system_1")["state"]
+        assert state["mode"] == "traction"
+        assert state["direction"] == "forward"
+        assert _out_bits(train)["direction_handle_forward_1"] is True
+
         max_observed_speed = 0.0
-        for _ in range(24):
+        for _ in range(23):
             await _step(c, 0.25)
             train = await _train(c)
             max_observed_speed = max(max_observed_speed, abs(train["speed"]))
@@ -299,9 +346,7 @@ async def test_manual_handle_command_returns_control_to_manual_mode() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
         await _handles(c, 1, control_mode="speed", target_speed=1.0)
-        status, snap = await _handles(
-            c, 1, mode="traction", direction="forward", acceleration=0.5
-        )
+        status, snap = await _handles(c, 1, mode="traction", direction="forward", acceleration=0.5)
         assert status == 200
         state = _equipment(snap, "driving_system_1")["state"]
         assert state["control_mode"] == "manual"
