@@ -94,7 +94,7 @@ class EquipmentControlRequest:
       registered control law name; manual ``mode``/``direction``/
       ``acceleration`` handle positions, or the law's declared targets
       (``target_speed`` for ``hold_speed``, ``target_position``/
-      ``max_speed`` for ``stopping_envelope``).
+      ``max_speed``/``speed_gain`` for ``stopping_envelope``).
     """
 
     key: str | None = None
@@ -109,6 +109,7 @@ class EquipmentControlRequest:
     target_speed: float | None = None
     target_position: float | None = None
     max_speed: float | None = None
+    speed_gain: float | None = None
     train_out_signal: str | None = None
     train_in_signals: dict[str, bool] | None = None
     train_out_signals: dict[str, bool] | None = None
@@ -476,6 +477,7 @@ class Train:
                     command.target_speed,
                     command.target_position,
                     command.max_speed,
+                    command.speed_gain,
                 )
             ):
                 raise ValueError("driving system requires mode, direction, or acceleration")
@@ -487,6 +489,7 @@ class Train:
                 target_speed=command.target_speed,
                 target_position=command.target_position,
                 max_speed=command.max_speed,
+                speed_gain=command.speed_gain,
             )
         raise ValueError(f"equipment '{command.key}' does not expose settable state")
 

@@ -102,6 +102,10 @@ class EquipmentSetRequest(BaseModel):
     target_speed: float | None = Field(default=None, description="Signed speed target in m/s.")
     target_position: float | None = Field(default=None, description="Position target in metres.")
     max_speed: float | None = Field(default=None, description="Positive speed cap in m/s.")
+    speed_gain: float | None = Field(
+        default=None,
+        description="Positive finite proportional speed-tracking gain in 1/s.",
+    )
     train_out_signal: str | None = Field(
         default=None,
         description="STCS ATP train-to-ATP bit assertion ('0'/'1' string); unblocked "

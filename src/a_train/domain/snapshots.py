@@ -78,6 +78,7 @@ class DrivingSystemSnapshot:
     target_speed: float | None = None
     target_position: float | None = None
     max_speed: float | None = None
+    speed_gain: float | None = None
     manual_mode: str = "off"
     manual_direction: str = "off"
     manual_acceleration: float = 0.0

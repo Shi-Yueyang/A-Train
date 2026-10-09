@@ -398,6 +398,12 @@ function buildDrivingCard(entry) {
   maxSpeed.min = "0.1";
   maxSpeed.step = "0.1";
   maxSpeed.setAttribute("aria-label", "Maximum speed in metres per second");
+  const speedGain = document.createElement("input");
+  speedGain.type = "number";
+  speedGain.min = "0.1";
+  speedGain.step = "0.1";
+  speedGain.value = "4";
+  speedGain.setAttribute("aria-label", "Speed tracking gain in inverse seconds");
 
   const markDirty = () => {
     state.dirty[dirtyKey(key)] = true;
@@ -411,6 +417,7 @@ function buildDrivingCard(entry) {
   targetSpeed.oninput = markDirty;
   targetPosition.oninput = markDirty;
   maxSpeed.oninput = markDirty;
+  speedGain.oninput = markDirty;
   const selectedOption = () =>
     controlOptions.find((option) => option.value === controlMode.value);
   // Field visibility follows the selected option's published targets.
@@ -423,6 +430,7 @@ function buildDrivingCard(entry) {
     speedField.hidden = !targets.includes("target_speed");
     positionField.hidden = !targets.includes("target_position");
     maxSpeedField.hidden = !targets.includes("max_speed");
+    speedGainField.hidden = !targets.includes("speed_gain");
   };
   controlMode.onchange = () => {
     markDirty();
@@ -441,6 +449,8 @@ function buildDrivingCard(entry) {
   positionField.className = "driving-field";
   const maxSpeedField = labeled("Max speed (m/s)", maxSpeed);
   maxSpeedField.className = "driving-field";
+  const speedGainField = labeled("Speed gain (1/s)", speedGain);
+  speedGainField.className = "driving-field";
 
   const apply = document.createElement("button");
   apply.textContent = "Apply Control";
@@ -455,6 +465,7 @@ function buildDrivingCard(entry) {
         target_speed: targetSpeed,
         target_position: targetPosition,
         max_speed: maxSpeed,
+        speed_gain: speedGain,
       };
       for (const name of selectedOption()?.targets ?? []) {
         body[name] = parseFloat(targetInputs[name].value);
@@ -478,6 +489,7 @@ function buildDrivingCard(entry) {
     speedField,
     positionField,
     maxSpeedField,
+    speedGainField,
     apply,
     resetBtn
   );
@@ -492,6 +504,7 @@ function buildDrivingCard(entry) {
     targetSpeed,
     targetPosition,
     maxSpeed,
+    speedGain,
     syncModeFields,
   };
   syncModeFields();
@@ -523,6 +536,7 @@ function syncDrivingPanels(equipment) {
     w.targetSpeed.value = s.target_speed ?? "";
     w.targetPosition.value = s.target_position ?? "";
     w.maxSpeed.value = s.max_speed ?? "";
+    w.speedGain.value = s.speed_gain ?? "4";
     setLiveText(w.accelVal, fmt(parseFloat(w.accel.value), 2));
     w.syncModeFields();
   }

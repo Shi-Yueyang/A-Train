@@ -32,12 +32,16 @@ async def test_static_assets_are_served(app_client) -> None:
     assert "fetch" in js.text
     assert "control_options" in js.text
     assert "target_position" in js.text
+    assert "speed_gain" in js.text
     assert "is_cbtc_authorized" not in js.text
     assert "Switch position" in js.text
 
     css = await app_client.get("/style.css")
     assert css.status_code == 200
     assert "color-scheme" in css.text
+    assert "max-height: 16rem" in css.text
+    assert "overflow-y: scroll" in css.text
+    assert ".equipment-card pre::-webkit-scrollbar-thumb" in css.text
 
 
 async def test_api_remains_reachable_alongside_static_mount(app_client) -> None:

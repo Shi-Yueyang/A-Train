@@ -24,11 +24,12 @@ class DrivingSystem:
         for name, law_cls in DRIVING_LAWS.items()
     )
     CONTROL_MODES = tuple(option.value for option in CONTROL_OPTIONS)
-    _TARGET_FIELDS = ("target_speed", "target_position", "max_speed")
+    _TARGET_FIELDS = ("target_speed", "target_position", "max_speed", "speed_gain")
     _TARGET_VALIDATORS = {
         "target_speed": is_finite,
         "target_position": is_finite,
         "max_speed": is_positive_finite,
+        "speed_gain": is_positive_finite,
     }
     _HANDLE_TO_TRACK_SIGN = {"forward": 1, "off": 0, "backward": -1}
     _AUTOMATIC_ACCELERATION_DEADBAND = 0.05
@@ -129,6 +130,8 @@ class DrivingSystem:
             value = command_targets.get(name)
             if value is None and updating:
                 value = self._targets.get(name)
+            if value is None:
+                value = law_cls.target_defaults.get(name)
             if (
                 value is None
                 or isinstance(value, bool)
@@ -160,6 +163,7 @@ class DrivingSystem:
             target_speed=self._targets.get("target_speed"),
             target_position=self._targets.get("target_position"),
             max_speed=self._targets.get("max_speed"),
+            speed_gain=self._targets.get("speed_gain"),
             manual_mode=self._manual_mode,
             manual_direction=self._manual_direction,
             manual_acceleration=self._manual_acceleration,

@@ -250,6 +250,7 @@ async def test_stopping_envelope_cruises_at_cap_and_reports_effective_handles() 
         assert state["control_mode"] == "stopping_envelope"
         assert state["law"] == "stopping_envelope"
         assert state["target_position"] == 5.0
+        assert state["speed_gain"] == 4.0
 
         await _step(c, 2.0)
         train = await _train(c)
@@ -260,6 +261,33 @@ async def test_stopping_envelope_cruises_at_cap_and_reports_effective_handles() 
         assert _out_bits(train)["direction_handle_forward_1"] is True
         assert _out_bits(train)["direction_handle_forward_2"] is True
         assert state["manual_mode"] == "off"
+
+
+async def test_stopping_envelope_speed_gain_can_be_set_and_updated() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        status, snap = await _handles(
+            c,
+            1,
+            control_mode="stopping_envelope",
+            target_position=100.0,
+            max_speed=0.5,
+            speed_gain=1.0,
+        )
+        assert status == 200
+        state = _equipment(snap, "driving_system_1")["state"]
+        assert state["speed_gain"] == 1.0
+
+        await _step(c, FIXED_STEP)
+        state = _equipment(await _train(c), "driving_system_1")["state"]
+        assert state["acceleration"] == pytest.approx(0.5)
+
+        status, _ = await _handles(c, 1, speed_gain=4.0)
+        assert status == 200
+        await _step(c, FIXED_STEP)
+        state = _equipment(await _train(c), "driving_system_1")["state"]
+        assert state["speed_gain"] == 4.0
+        assert state["acceleration"] == 1.0
 
 
 async def test_hold_speed_law_tracks_signed_setpoint() -> None:
@@ -433,6 +461,15 @@ async def test_automatic_control_requires_valid_targets() -> None:
             max_speed=0.0,
         )
         assert status == 400
+        status, _ = await _handles(
+            c,
+            1,
+            control_mode="stopping_envelope",
+            target_position=10.0,
+            max_speed=0.5,
+            speed_gain=0.0,
+        )
+        assert status == 400
         # A law only accepts its own declared targets.
         status, _ = await _handles(c, 1, control_mode="hold_speed", target_position=10.0)
         assert status == 400
@@ -583,7 +620,7 @@ async def test_driving_snapshot_publishes_control_options_and_law() -> None:
             (
                 "stopping_envelope",
                 "Stopping envelope",
-                ("target_position", "max_speed"),
+                ("target_position", "max_speed", "speed_gain"),
             ),
         ]
 

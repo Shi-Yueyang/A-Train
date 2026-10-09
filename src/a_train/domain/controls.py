@@ -83,6 +83,7 @@ class DrivingSystemControl:
     target_speed: float | None = None
     target_position: float | None = None
     max_speed: float | None = None
+    speed_gain: float | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

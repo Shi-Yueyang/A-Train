@@ -460,7 +460,9 @@ commanding here, which is what the position law's no-reverse rule forbids
 the controller from choosing on its own. The `stopping_envelope` law
 drives to an absolute track position ahead of its cab's facing, uses
 `max_speed` as a speed cap, and reduces its speed target according to a
-stopping-speed envelope, demanding zero speed within 0.05 m of the target.
+stopping-speed envelope. Its proportional speed-tracking gain is configurable
+as `speed_gain` (default `4.0` 1/s), and it demands zero speed within 0.05 m
+of the target.
 A position behind the facing — commanded deliberately or overtaken by
 momentum — is never reversed toward: the law brakes a moving train to a
 standstill, settling slightly past the target being accepted, then the

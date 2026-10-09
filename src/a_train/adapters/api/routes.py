@@ -222,6 +222,7 @@ async def set_equipment(
         target_speed=body.target_speed,
         target_position=body.target_position,
         max_speed=body.max_speed,
+        speed_gain=body.speed_gain,
         train_out_signal=body.train_out_signal,
         train_in_signals=body.train_in_signals,
         train_out_signals=body.train_out_signals,

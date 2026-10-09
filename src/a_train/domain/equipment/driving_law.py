@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 from .base import TrainMotion
 
@@ -27,6 +27,7 @@ class DrivingTargets:
     target_speed: float | None = None
     target_position: float | None = None
     max_speed: float | None = None
+    speed_gain: float | None = None
 
 
 class DrivingLaw(Protocol):
@@ -34,6 +35,7 @@ class DrivingLaw(Protocol):
 
     label: str
     targets: tuple[str, ...]
+    target_defaults: ClassVar[dict[str, float]]
 
     def step(self, dt: float, motion: TrainMotion, targets: DrivingTargets, facing: int) -> float:
         """Return the bounded signed acceleration request in track terms."""
@@ -59,6 +61,7 @@ class HoldSpeedLaw:
 
     label = "Hold speed"
     targets = ("target_speed",)
+    target_defaults: ClassVar[dict[str, float]] = {}
 
     _SPEED_GAIN = 4.0
 
@@ -80,13 +83,18 @@ class StoppingEnvelopeLaw:
     """
 
     label = "Stopping envelope"
-    targets = ("target_position", "max_speed")
+    targets = ("target_position", "max_speed", "speed_gain")
 
-    _SPEED_GAIN = 4.0
+    DEFAULT_SPEED_GAIN = 4.0
+    target_defaults: ClassVar[dict[str, float]] = {"speed_gain": DEFAULT_SPEED_GAIN}
     _POSITION_TOLERANCE = 0.05
 
     def step(self, dt: float, motion: TrainMotion, targets: DrivingTargets, facing: int) -> float:
-        assert targets.target_position is not None and targets.max_speed is not None
+        assert (
+            targets.target_position is not None
+            and targets.max_speed is not None
+            and targets.speed_gain is not None
+        )
         ahead = (targets.target_position - motion.position) * facing
         remaining = max(0.0, ahead - self._POSITION_TOLERANCE)
         desired_speed = (
@@ -94,7 +102,7 @@ class StoppingEnvelopeLaw:
             if remaining > 0.0
             else 0.0
         )
-        return _track_acceleration(desired_speed, motion, self._SPEED_GAIN)
+        return _track_acceleration(desired_speed, motion, targets.speed_gain)
 
     def reset(self) -> None:
         # The envelope law is stateless.
