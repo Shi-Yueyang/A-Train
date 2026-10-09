@@ -9,6 +9,8 @@ domain object is touched directly (§6.1).
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from a_train.domain.train import TrainConfig
@@ -25,6 +27,9 @@ T1 = TrainConfig(
     max_decel=2.0,
     initial_position=0.0,
 )
+# Same consist rolling rearward/forward at 1.0 m/s at reset.
+T_ROLL_BACKWARD = replace(T1, initial_speed=-1.0)
+T_ROLL_FORWARD = replace(T1, initial_speed=1.0)
 
 
 async def _manual_start(c) -> None:
@@ -234,19 +239,22 @@ async def test_invalid_driving_inputs_are_rejected() -> None:
         assert status == 400
 
 
-async def test_speed_control_reaches_target_and_reports_effective_handles() -> None:
+async def test_stopping_envelope_cruises_at_cap_and_reports_effective_handles() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
-        status, snap = await _handles(c, 1, control_mode="speed", target_speed=1.0)
+        status, snap = await _handles(
+            c, 1, control_mode="stopping_envelope", target_position=5.0, max_speed=1.0
+        )
         assert status == 200
         state = _equipment(snap, "driving_system_1")["state"]
-        assert state["control_mode"] == "speed"
-        assert state["target_speed"] == 1.0
+        assert state["control_mode"] == "stopping_envelope"
+        assert state["law"] == "stopping_envelope"
+        assert state["target_position"] == 5.0
 
         await _step(c, 2.0)
         train = await _train(c)
         state = _equipment(train, "driving_system_1")["state"]
-        assert train["speed"] == pytest.approx(1.0, abs=0.03)
+        assert train["speed"] == pytest.approx(1.0, abs=0.05)
         assert state["acceleration"] < 0.05
         assert state["direction"] == "forward"
         assert _out_bits(train)["direction_handle_forward_1"] is True
@@ -254,14 +262,48 @@ async def test_speed_control_reaches_target_and_reports_effective_handles() -> N
         assert state["manual_mode"] == "off"
 
 
+async def test_hold_speed_law_tracks_signed_setpoint() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        status, snap = await _handles(c, 1, control_mode="hold_speed", target_speed=1.0)
+        assert status == 200
+        state = _equipment(snap, "driving_system_1")["state"]
+        assert state["law"] == "hold_speed"
+        assert state["target_speed"] == 1.0
+
+        await _step(c, 2.0)
+        train = await _train(c)
+        assert train["speed"] == pytest.approx(1.0, abs=0.05)
+        state = _equipment(train, "driving_system_1")["state"]
+        assert state["direction"] == "forward"
+
+        # A rearward setpoint is an explicit operator reversal: the hold law
+        # brakes through zero and tractores cab-relative backward to hold it.
+        status, _ = await _handles(c, 1, target_speed=-0.5)
+        assert status == 200
+        for _ in range(8):
+            await _step(c, 0.25)
+        train = await _train(c)
+        assert train["speed"] == pytest.approx(-0.5, abs=0.05)
+        state = _equipment(train, "driving_system_1")["state"]
+        assert state["target_speed"] == -0.5
+        # At setpoint the tracking request is under the deadband: handles rest
+        # off while the direction handle stays on the rearward travel side.
+        assert state["mode"] == "off"
+        assert state["direction"] == "backward"
+        assert state["acceleration"] == 0.0
+
+
 async def test_automatic_braking_keeps_direction_handle_aligned_with_travel() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
-        await _handles(c, 1, control_mode="speed", target_speed=1.0)
+        await _handles(c, 1, control_mode="stopping_envelope", target_position=10.0, max_speed=1.0)
         await _step(c, 2.0)
         assert (await _train(c))["speed"] > 0.0
 
-        status, _ = await _handles(c, 1, control_mode="speed", target_speed=0.0)
+        # Re-targeting behind the moving train drops the demand to zero:
+        # braking begins while the direction handle stays on the travel side.
+        status, _ = await _handles(c, 1, target_position=0.0)
         assert status == 200
         await _step(c, FIXED_STEP)
 
@@ -276,9 +318,11 @@ async def test_automatic_braking_keeps_direction_handle_aligned_with_travel() ->
 
 
 async def test_automatic_direction_handle_is_relative_to_cab_facing() -> None:
-    async with running_app([T1]) as c:
+    async with running_app([T_ROLL_FORWARD]) as c:
         await _manual_start(c)
-        status, _ = await _handles(c, 2, control_mode="speed", target_speed=1.0)
+        status, _ = await _handles(
+            c, 2, control_mode="stopping_envelope", target_position=-5.0, max_speed=1.0
+        )
         assert status == 200
         await _step(c, FIXED_STEP)
 
@@ -286,7 +330,10 @@ async def test_automatic_direction_handle_is_relative_to_cab_facing() -> None:
         state = _equipment(train, "driving_system_2")["state"]
         bits = _out_bits(train, cab=2)
         assert train["speed"] > 0.0
-        assert state["mode"] == "traction"
+        # The -1-facing cab sees the +1 track motion as rearward travel and
+        # brakes against it; the forward-only law never tractores cab-rearward,
+        # so a rearward traction handle stays a manual move.
+        assert state["mode"] == "brake"
         assert state["direction"] == "backward"
         assert bits["direction_handle_backward"] is True
 
@@ -297,13 +344,13 @@ async def test_position_control_stops_at_target_with_speed_cap() -> None:
         status, snap = await _handles(
             c,
             1,
-            control_mode="position",
+            control_mode="stopping_envelope",
             target_position=3.0,
             max_speed=0.8,
         )
         assert status == 200
         state = _equipment(snap, "driving_system_1")["state"]
-        assert state["control_mode"] == "position"
+        assert state["control_mode"] == "stopping_envelope"
         assert state["target_position"] == 3.0
         assert state["max_speed"] == 0.8
 
@@ -320,7 +367,10 @@ async def test_position_control_stops_at_target_with_speed_cap() -> None:
             train = await _train(c)
             max_observed_speed = max(max_observed_speed, abs(train["speed"]))
 
-        assert train["position"] == pytest.approx(3.0, abs=0.08)
+        # The train settles slightly past the target and stays: rearward
+        # traction is never asserted, so an overshoot is not corrected.
+        assert train["position"] == pytest.approx(3.0, abs=0.2)
+        assert train["position"] >= 3.0 - 0.05
         assert abs(train["speed"]) < 0.05
         assert max_observed_speed <= 0.8 + 1e-9
 
@@ -328,11 +378,14 @@ async def test_position_control_stops_at_target_with_speed_cap() -> None:
 async def test_automatic_control_uses_off_deadband_for_small_requests() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
+        # A target inside the arrival band demands zero speed: the resulting
+        # acceleration request falls under the deadband and handles go off.
         status, _ = await _handles(
             c,
             1,
-            control_mode="speed",
-            target_speed=0.01,
+            control_mode="stopping_envelope",
+            target_position=0.03,
+            max_speed=0.8,
         )
         assert status == 200
 
@@ -345,13 +398,14 @@ async def test_automatic_control_uses_off_deadband_for_small_requests() -> None:
 async def test_manual_handle_command_returns_control_to_manual_mode() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
-        await _handles(c, 1, control_mode="speed", target_speed=1.0)
+        await _handles(c, 1, control_mode="stopping_envelope", target_position=3.0, max_speed=0.5)
         status, snap = await _handles(c, 1, mode="traction", direction="forward", acceleration=0.5)
         assert status == 200
         state = _equipment(snap, "driving_system_1")["state"]
         assert state["control_mode"] == "manual"
         assert state["manual_mode"] == "traction"
-        assert state["target_speed"] is None
+        assert state["target_position"] is None
+        assert state["law"] is None
 
         status, snap = await _handles(c, 1, control_mode="manual")
         assert status == 200
@@ -365,34 +419,205 @@ async def test_automatic_control_requires_valid_targets() -> None:
     async with running_app([T1]) as c:
         await _manual_start(c)
 
-        status, _ = await _handles(c, 1, control_mode="speed")
+        status, _ = await _handles(c, 1, control_mode="stopping_envelope")
         assert status == 400
-        status, _ = await _handles(c, 1, control_mode="position", target_position=10.0)
+        status, _ = await _handles(c, 1, control_mode="hold_speed")
+        assert status == 400
+        status, _ = await _handles(c, 1, control_mode="stopping_envelope", target_position=10.0)
         assert status == 400
         status, _ = await _handles(
             c,
             1,
-            control_mode="position",
+            control_mode="stopping_envelope",
             target_position=10.0,
             max_speed=0.0,
         )
         assert status == 400
-
-
-async def test_position_control_reaches_a_reverse_track_position() -> None:
-    async with running_app([T1]) as c:
-        await _manual_start(c)
+        # A law only accepts its own declared targets.
+        status, _ = await _handles(c, 1, control_mode="hold_speed", target_position=10.0)
+        assert status == 400
         status, _ = await _handles(
             c,
             1,
-            control_mode="position",
+            control_mode="stopping_envelope",
+            target_position=10.0,
+            max_speed=0.5,
+            target_speed=1.0,
+        )
+        assert status == 400
+        # Unknown control modes — including the retired "speed"/"position"
+        # words — are rejected.
+        status, _ = await _handles(c, 1, control_mode="pid_jerk")
+        assert status == 400
+        status, _ = await _handles(c, 1, control_mode="speed", target_speed=1.0)
+        assert status == 400
+
+
+async def test_position_control_holds_when_target_is_behind_the_cab() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        status, snap = await _handles(
+            c,
+            1,
+            control_mode="stopping_envelope",
             target_position=-2.0,
             max_speed=0.7,
         )
         assert status == 200
 
-        for _ in range(24):
+        await _step(c, 0.25)
+        await _step(c, 0.25)
+        train = await _train(c)
+        assert train["position"] == 0.0
+        assert train["speed"] == 0.0
+        state = _equipment(train, "driving_system_1")["state"]
+        assert state["control_mode"] == "stopping_envelope"
+        assert state["target_position"] == -2.0
+        assert state["mode"] == "off"
+        assert state["direction"] == "off"
+        assert state["acceleration"] == 0.0
+
+
+async def test_position_control_brakes_before_pursuing_a_forward_target() -> None:
+    async with running_app([T_ROLL_BACKWARD]) as c:
+        await _manual_start(c)
+        status, _ = await _handles(
+            c,
+            1,
+            control_mode="stopping_envelope",
+            target_position=5.0,
+            max_speed=0.8,
+        )
+        assert status == 200
+
+        # Rolling rearward toward nothing: the controller brakes first, and
+        # the direction handle follows current travel while braking.
+        await _step(c, 0.25)
+        train = await _train(c)
+        assert -1.0 < train["speed"] < 0.0
+        state = _equipment(train, "driving_system_1")["state"]
+        assert state["mode"] == "brake"
+        assert state["direction"] == "backward"
+
+        for _ in range(49):
+            await _step(c, 0.25)
+            train = await _train(c)
+            state = _equipment(train, "driving_system_1")["state"]
+            # Rearward travel is only ever braked, never tractored toward.
+            if state["mode"] == "traction":
+                assert state["direction"] == "forward"
+
+        assert train["position"] == pytest.approx(5.0, abs=0.12)
+        assert abs(train["speed"]) < 0.05
+
+
+async def test_position_control_stops_past_a_target_it_cannot_hold_back() -> None:
+    async with running_app([T_ROLL_FORWARD]) as c:
+        await _manual_start(c)
+        status, _ = await _handles(
+            c,
+            1,
+            control_mode="stopping_envelope",
+            target_position=0.02,
+            max_speed=0.8,
+        )
+        assert status == 200
+
+        previous_position = (await _train(c))["position"]
+        for _ in range(8):
+            await _step(c, 0.25)
+            train = await _train(c)
+            assert train["position"] >= previous_position
+            previous_position = train["position"]
+            assert train["speed"] > -0.05
+
+        state = _equipment(train, "driving_system_1")["state"]
+        assert train["position"] == pytest.approx(0.3, abs=0.1)
+        assert abs(train["speed"]) < 0.05
+        assert state["mode"] in ("off", "brake")
+        assert state["target_position"] == 0.02
+
+
+async def test_position_control_drives_decreasing_positions_from_cab2() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        status, _ = await _handles(
+            c,
+            2,
+            control_mode="stopping_envelope",
+            target_position=-2.0,
+            max_speed=0.7,
+        )
+        assert status == 200
+
+        await _step(c, 0.25)
+        train = await _train(c)
+        assert train["position"] < 0.0
+        state = _equipment(train, "driving_system_2")["state"]
+        # Track-decreasing motion is cab-relative forward for the -1 cab.
+        assert state["mode"] == "traction"
+        assert state["direction"] == "forward"
+
+        for _ in range(23):
             await _step(c, 0.25)
         train = await _train(c)
-        assert train["position"] == pytest.approx(-2.0, abs=0.08)
+        assert train["position"] == pytest.approx(-2.0, abs=0.2)
+        assert train["position"] <= -2.0 + 0.05
         assert abs(train["speed"]) < 0.05
+
+
+# -- Control modes are manual plus every registered speed-planning law --------
+
+
+async def test_driving_snapshot_publishes_control_options_and_law() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+        state = _equipment(await _train(c), "driving_system_1")["state"]
+        assert state["control_mode"] == "manual"
+        assert state["law"] is None
+        assert [
+            (o["value"], o["label"], tuple(o["targets"])) for o in state["control_options"]
+        ] == [
+            ("manual", "Manual", ()),
+            ("hold_speed", "Hold speed", ("target_speed",)),
+            (
+                "stopping_envelope",
+                "Stopping envelope",
+                ("target_position", "max_speed"),
+            ),
+        ]
+
+        status, snap = await _handles(
+            c, 1, control_mode="stopping_envelope", target_position=3.0, max_speed=0.8
+        )
+        assert status == 200
+        state = _equipment(snap, "driving_system_1")["state"]
+        assert state["control_mode"] == "stopping_envelope"
+        assert state["law"] == "stopping_envelope"
+
+
+async def test_law_switches_are_runtime_controls() -> None:
+    async with running_app([T1]) as c:
+        await _manual_start(c)
+
+        # Arming the law takes over from manual handles.
+        await _handles(c, 1, mode="off", direction="forward", acceleration=0.0)
+        status, _ = await _handles(
+            c, 1, control_mode="stopping_envelope", target_position=2.0, max_speed=0.6
+        )
+        assert status == 200
+        await _step(c, 0.25)
+        assert (await _train(c))["position"] > 0.0
+
+        # Back to manual drops the armed law.
+        status, snap = await _handles(c, 1, control_mode="manual")
+        assert status == 200
+        state = _equipment(snap, "driving_system_1")["state"]
+        assert state["law"] is None
+        assert state["control_mode"] == "manual"
+
+        # An unregistered law is a rejected command, not a startup failure.
+        status, _ = await _handles(
+            c, 1, control_mode="model_predictive", target_position=2.0, max_speed=0.6
+        )
+        assert status == 400

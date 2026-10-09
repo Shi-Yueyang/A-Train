@@ -96,7 +96,8 @@ class EquipmentSetRequest(BaseModel):
     )
     control_mode: str | None = Field(
         default=None,
-        description="Driving-system control mode: manual, speed, or position.",
+        description="Driving-system control: 'manual' or a registered control law "
+        "name (see the published control_options).",
     )
     target_speed: float | None = Field(default=None, description="Signed speed target in m/s.")
     target_position: float | None = Field(default=None, description="Position target in metres.")

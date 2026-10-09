@@ -447,12 +447,24 @@ systems of several cabs act additively; cabs still carry no authority. Each
 driving system also asserts its raw handle positions to the matching
 `stcs_atp_duo_<cab_id>` instance as a
 feedback intent, the same pattern as door state.
-The separate `control_mode` selects `manual`, `speed`, or `position`; it does
-not change the meaning of the physical handle `mode`. Manual handle positions
-are retained while automatic control updates the effective handles. Speed
-control tracks a signed speed target. Position control tracks an absolute
-track position, uses `max_speed` as a speed cap, and reduces its speed target
-according to a stopping-speed envelope; arrival is within 0.05 m. The
+The separate `control_mode` selects `manual` or an installed speed-planning
+control law — a registered name such as `stopping_envelope`; it does not
+change the meaning of the physical handle `mode`. Each law declares its
+operator-facing label and the target fields it consumes, and the equipment
+publishes manual plus every registered law as `control_options` so clients
+build their controls from state. Manual handle positions are retained while
+an armed law updates the effective handles. The `hold_speed` law tracks a
+signed `target_speed` setpoint; a cab-relative rearward setpoint reverses
+the train under the operator's explicit demand — reversing is the operator
+commanding here, which is what the position law's no-reverse rule forbids
+the controller from choosing on its own. The `stopping_envelope` law
+drives to an absolute track position ahead of its cab's facing, uses
+`max_speed` as a speed cap, and reduces its speed target according to a
+stopping-speed envelope, demanding zero speed within 0.05 m of the target.
+A position behind the facing — commanded deliberately or overtaken by
+momentum — is never reversed toward: the law brakes a moving train to a
+standstill, settling slightly past the target being accepted, then the
+handles hold neutral, and the law never asserts cab-rearward traction. The
 automatic controller maps its bounded acceleration request into the same
 traction/brake and direction handles as manual control, so the existing
 cab-facing and train-intent path remains in use. In automatic control, the
@@ -583,6 +595,20 @@ vigilance, pantograph control, or passenger systems can be added by implementing
 this interface and extending the aggregate's configuration and snapshot types.
 Do not add protocol-specific behavior to an equipment component; adapters
 translate protocol data into equipment commands and publish snapshot data.
+
+The driving system's speed planning is isolated behind a replaceable
+`DrivingLaw` interface (`domain/equipment/driving_law.py`), armed at runtime
+through `control_mode`; the registered set is manual plus one entry per law.
+Each law declares its label and target fields, and the equipment validates
+every command against the armed law's declared targets, rejecting unknown
+law names and foreign targets at the boundary. The driving system keeps the
+driver-room actuator mapping: the law returns one bounded signed
+acceleration request in track terms, and the equipment translates it into
+traction/brake and direction handles, facing, intents, and link-cut
+behavior. A law is instantiated fresh when armed (so switching laws cannot
+leak planner state), may hold per-instance state while armed, and is
+released to manual — with its targets cleared — by a manual command or
+equipment reset.
 
 When an equipment protocol derives its own output signals from state it holds
 (the STCS ATP brake feedbacks and sleep), express the

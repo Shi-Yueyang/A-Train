@@ -368,9 +368,12 @@ function buildDrivingCard(entry) {
 
   const row = document.createElement("div");
   row.className = "controls";
+  // Control choices come from the published driving-system state, not a
+  // hard-coded copy, so the API stays the single source of the option list.
+  const controlOptions = entry.state?.control_options ?? [];
   const controlMode = selectEl(
-    ["manual", "speed", "position"],
-    ["Manual", "Hold speed", "Drive to position"]
+    controlOptions.map((option) => option.value),
+    controlOptions.map((option) => option.label)
   );
   const mode = selectEl(["off", "traction", "brake"], ["Off", "Traction", "Brake"]);
   const direction = selectEl(["off", "forward", "backward"], ["Off", "Forward", "Backward"]);
@@ -408,15 +411,18 @@ function buildDrivingCard(entry) {
   targetSpeed.oninput = markDirty;
   targetPosition.oninput = markDirty;
   maxSpeed.oninput = markDirty;
+  const selectedOption = () =>
+    controlOptions.find((option) => option.value === controlMode.value);
+  // Field visibility follows the selected option's published targets.
   const syncModeFields = () => {
     const manual = controlMode.value === "manual";
-    const speed = controlMode.value === "speed";
+    const targets = selectedOption()?.targets ?? [];
     modeField.hidden = !manual;
     directionField.hidden = !manual;
     accelerationField.hidden = !manual;
-    speedField.hidden = !speed;
-    positionField.hidden = controlMode.value !== "position";
-    maxSpeedField.hidden = controlMode.value !== "position";
+    speedField.hidden = !targets.includes("target_speed");
+    positionField.hidden = !targets.includes("target_position");
+    maxSpeedField.hidden = !targets.includes("max_speed");
   };
   controlMode.onchange = () => {
     markDirty();
@@ -444,11 +450,15 @@ function buildDrivingCard(entry) {
       body.mode = mode.value;
       body.direction = direction.value;
       body.acceleration = parseFloat(accel.value);
-    } else if (controlMode.value === "speed") {
-      body.target_speed = parseFloat(targetSpeed.value);
     } else {
-      body.target_position = parseFloat(targetPosition.value);
-      body.max_speed = parseFloat(maxSpeed.value);
+      const targetInputs = {
+        target_speed: targetSpeed,
+        target_position: targetPosition,
+        max_speed: maxSpeed,
+      };
+      for (const name of selectedOption()?.targets ?? []) {
+        body[name] = parseFloat(targetInputs[name].value);
+      }
     }
     const ok = await postCommand(`/trains/${state.selectedTrainId}/equipment/${key}`, body);
     if (ok) delete state.dirty[dirtyKey(key)];
@@ -503,7 +513,7 @@ function syncDrivingPanels(equipment) {
     const w = card.widgets;
     setLiveText(
       w.readout,
-      `cab ${s.cab_id} · ${s.control_mode} ·  ${s.mode}/${s.direction}/${fmt(s.acceleration, 2)}`
+      `cab ${s.cab_id} - ${s.mode}/${s.direction}/${fmt(s.acceleration, 1)}`
     );
     if (state.dirty[dirtyKey(card.dataset.key)]) continue;
     w.controlMode.value = s.control_mode || "manual";

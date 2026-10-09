@@ -71,7 +71,9 @@ class SwitchBoxControl:
 
 @dataclass(frozen=True, kw_only=True)
 class DrivingSystemControl:
-    """Driving mode, target, and manual handles of one cab's driving system."""
+    """Driving control law selection, targets, and manual handles of one
+    cab's driving system. ``control_mode`` is ``"manual"`` or a registered
+    control law name; law targets must be declared by that law."""
 
     cab_id: int | None = None
     control_mode: str | None = None

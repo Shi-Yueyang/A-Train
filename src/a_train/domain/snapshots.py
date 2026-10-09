@@ -45,14 +45,28 @@ class BtmSnapshot:
 
 
 @dataclass(frozen=True)
+class DrivingControlOption:
+    """One selectable driving control mode with its operator-facing label
+    and the target fields that mode consumes (empty for manual)."""
+
+    value: str
+    label: str
+    targets: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class DrivingSystemSnapshot:
     """Read-only view of one cab's driving system and active control.
 
     ``mode`` is ``"traction"`` / ``"off"`` / ``"brake"``, ``direction`` is
     ``"forward"`` / ``"off"`` / ``"backward"`` (cab-relative), and
     ``acceleration`` is the effective handle effort in ``[0.0, 1.0]``.
-    Manual handle positions are retained separately while automatic control
-    operates the effective handles.
+    Manual handle positions are retained separately while a control law
+    operates the effective handles. ``control_options`` carries the full
+    selectable list — manual plus every registered control law, each with
+    its label and declared targets — so clients build their controls from
+    published state rather than a hard-coded copy; ``law`` names the
+    currently armed speed-planning control law, or ``None`` in manual mode.
     """
 
     cab_id: int = 0
@@ -67,6 +81,8 @@ class DrivingSystemSnapshot:
     manual_mode: str = "off"
     manual_direction: str = "off"
     manual_acceleration: float = 0.0
+    law: str | None = None
+    control_options: tuple[DrivingControlOption, ...] = ()
 
 
 @dataclass(frozen=True)

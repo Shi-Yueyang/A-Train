@@ -30,7 +30,7 @@ async def test_static_assets_are_served(app_client) -> None:
     js = await app_client.get("/app.js")
     assert js.status_code == 200
     assert "fetch" in js.text
-    assert "Drive to position" in js.text
+    assert "control_options" in js.text
     assert "target_position" in js.text
     assert "is_cbtc_authorized" not in js.text
     assert "Switch position" in js.text

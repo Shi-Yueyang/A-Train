@@ -108,7 +108,10 @@ equipment must be unique by `(type, cab_id)`, which is also how ATP wire
 messages address instances. The switch box owns its authorization states;
 CBTC switch logic connects over the same HTTP server at `/ws/cbtc`. The
 supported equipment types are `door`, `btm`, `driving_system`,
-`stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`.
+`stcs_atp_duo`, `stcs_atp_solo`, and `switch_box`. A `driving_system`
+selects its speed-planning control law at runtime through `control_mode`
+(`manual` or a registered law name, currently `hold_speed` or
+`stopping_envelope`).
 Each equipment entry may include `"enabled": false` to leave that equipment
 out of the installed train;
 omitted `enabled` values default to `true`. Equipment configuration is

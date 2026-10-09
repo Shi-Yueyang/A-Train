@@ -90,8 +90,11 @@ class EquipmentControlRequest:
         - ``switch_box``: ``system_switch`` is the box position ``"c2"`,
             ``"auto"``, or ``"cbtc"``; ``c2_authorized`` and ``cbtc_authorized``
             set the box's boolean authorization state.
-    - ``driving_system``: ``mode``/``direction``/``acceleration`` handle
-      positions; every combination of fields may be set together.
+    - ``driving_system``: ``control_mode`` selects ``"manual"`` or a
+      registered control law name; manual ``mode``/``direction``/
+      ``acceleration`` handle positions, or the law's declared targets
+      (``target_speed`` for ``hold_speed``, ``target_position``/
+      ``max_speed`` for ``stopping_envelope``).
     """
 
     key: str | None = None

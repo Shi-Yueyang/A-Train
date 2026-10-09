@@ -6,8 +6,9 @@ import math
 
 from ..controls import DriverControl, DrivingSystemControl, StcsAtpControl
 from ..physics import is_finite, is_positive_finite
-from ..snapshots import DrivingSystemSnapshot
+from ..snapshots import DrivingControlOption, DrivingSystemSnapshot
 from .base import EquipmentIntent, TrainMotion
+from .driving_law import DRIVING_LAWS, DrivingLaw, DrivingTargets
 
 
 class DrivingSystem:
@@ -16,11 +17,21 @@ class DrivingSystem:
     type = "driving_system"
     MODES = ("traction", "off", "brake")
     DIRECTIONS = ("forward", "off", "backward")
-    CONTROL_MODES = ("manual", "speed", "position")
+    # The selectable control surface: manual plus every registered law,
+    # published in the snapshot so clients never hard-code the list.
+    CONTROL_OPTIONS = (DrivingControlOption("manual", "Manual"),) + tuple(
+        DrivingControlOption(name, law_cls.label, law_cls.targets)
+        for name, law_cls in DRIVING_LAWS.items()
+    )
+    CONTROL_MODES = tuple(option.value for option in CONTROL_OPTIONS)
+    _TARGET_FIELDS = ("target_speed", "target_position", "max_speed")
+    _TARGET_VALIDATORS = {
+        "target_speed": is_finite,
+        "target_position": is_finite,
+        "max_speed": is_positive_finite,
+    }
     _HANDLE_TO_TRACK_SIGN = {"forward": 1, "off": 0, "backward": -1}
-    _SPEED_GAIN = 4.0
     _AUTOMATIC_ACCELERATION_DEADBAND = 0.05
-    _POSITION_TOLERANCE = 0.05
 
     def __init__(
         self,
@@ -48,9 +59,8 @@ class DrivingSystem:
         self._direction = initial_direction
         self._acceleration = initial_acceleration
         self._control_mode = "manual"
-        self._target_speed: float | None = None
-        self._target_position: float | None = None
-        self._max_speed: float | None = None
+        self._law: DrivingLaw | None = None
+        self._targets: dict[str, float] = {}
 
     @property
     def key(self) -> str:
@@ -85,25 +95,14 @@ class DrivingSystem:
         manual_fields = (
             control.mode is not None or control.direction is not None or acceleration is not None
         )
+        command_targets = self._command_targets(control)
         requested_mode = control.control_mode
         if requested_mode is None:
-            if manual_fields:
-                requested_mode = "manual"
-            elif control.target_speed is not None and self._control_mode == "speed":
-                requested_mode = "speed"
-            elif (
-                control.target_position is not None or control.max_speed is not None
-            ) and self._control_mode == "position":
-                requested_mode = "position"
-            else:
-                requested_mode = self._control_mode
+            requested_mode = "manual" if manual_fields else self._control_mode
 
         if requested_mode == "manual":
-            if any(
-                value is not None
-                for value in (control.target_speed, control.target_position, control.max_speed)
-            ):
-                raise ValueError("targets are only valid in speed or position control")
+            if command_targets:
+                raise ValueError("targets are only valid with a control law")
             self._manual_mode = control.mode if control.mode is not None else self._manual_mode
             self._manual_direction = (
                 control.direction if control.direction is not None else self._manual_direction
@@ -112,61 +111,43 @@ class DrivingSystem:
                 float(acceleration) if acceleration is not None else self._manual_acceleration
             )
             self._control_mode = "manual"
-            self._target_speed = None
-            self._target_position = None
-            self._max_speed = None
+            self._law = None
+            self._targets = {}
             self._use_manual_handles()
             return
 
         if manual_fields:
-            raise ValueError("manual handles cannot be changed in automatic control modes")
+            raise ValueError("manual handles cannot be changed while a control law is armed")
 
-        if requested_mode == "speed":
-            if control.target_position is not None or control.max_speed is not None:
-                raise ValueError("position targets cannot be used in speed control")
-            target_speed = control.target_speed
-            if target_speed is None and self._control_mode == "speed":
-                target_speed = self._target_speed
+        law_cls = DRIVING_LAWS[requested_mode]
+        for name in command_targets:
+            if name not in law_cls.targets:
+                raise ValueError(f"{name} cannot be used with control law {requested_mode!r}")
+        updating = requested_mode == self._control_mode and self._law is not None
+        targets: dict[str, float] = {}
+        for name in law_cls.targets:
+            value = command_targets.get(name)
+            if value is None and updating:
+                value = self._targets.get(name)
             if (
-                target_speed is None
-                or isinstance(target_speed, bool)
-                or not is_finite(target_speed)
+                value is None
+                or isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not self._TARGET_VALIDATORS[name](value)
             ):
-                raise ValueError("speed control requires a finite target_speed")
-            self._control_mode = "speed"
-            self._target_speed = float(target_speed)
-            self._target_position = None
-            self._max_speed = None
-            self._set_effective_handles("brake", "off", 0.0)
-            return
+                raise ValueError(f"control law {requested_mode!r} requires a valid {name}")
+            targets[name] = float(value)
+        self._control_mode = requested_mode
+        self._law = law_cls()
+        self._targets = targets
+        self._set_effective_handles("brake", "off", 0.0)
 
-        if requested_mode == "position":
-            if control.target_speed is not None:
-                raise ValueError("target_speed cannot be used in position control")
-            target_position = control.target_position
-            max_speed = control.max_speed
-            if self._control_mode == "position":
-                target_position = (
-                    self._target_position if target_position is None else target_position
-                )
-                max_speed = self._max_speed if max_speed is None else max_speed
-            if (
-                target_position is None
-                or isinstance(target_position, bool)
-                or not is_finite(target_position)
-            ):
-                raise ValueError("position control requires a finite target_position")
-            if (
-                max_speed is None
-                or isinstance(max_speed, bool)
-                or not is_positive_finite(max_speed)
-            ):
-                raise ValueError("position control requires a positive finite max_speed")
-            self._control_mode = "position"
-            self._target_speed = None
-            self._target_position = float(target_position)
-            self._max_speed = float(max_speed)
-            self._set_effective_handles("brake", "off", 0.0)
+    def _command_targets(self, control: DrivingSystemControl) -> dict[str, float]:
+        return {
+            name: value
+            for name in self._TARGET_FIELDS
+            if (value := getattr(control, name)) is not None
+        }
 
     def read_state(self) -> DrivingSystemSnapshot:
         return DrivingSystemSnapshot(
@@ -176,12 +157,14 @@ class DrivingSystem:
             direction=self._direction,
             acceleration=self._acceleration,
             control_mode=self._control_mode,
-            target_speed=self._target_speed,
-            target_position=self._target_position,
-            max_speed=self._max_speed,
+            target_speed=self._targets.get("target_speed"),
+            target_position=self._targets.get("target_position"),
+            max_speed=self._targets.get("max_speed"),
             manual_mode=self._manual_mode,
             manual_direction=self._manual_direction,
             manual_acceleration=self._manual_acceleration,
+            law=self._control_mode if self._law is not None else None,
+            control_options=self.CONTROL_OPTIONS,
         )
 
     def reset(self) -> None:
@@ -192,36 +175,17 @@ class DrivingSystem:
         self._manual_direction = "off"
         self._manual_acceleration = 0.0
         self._control_mode = "manual"
-        self._target_speed = None
-        self._target_position = None
-        self._max_speed = None
+        self._law = None
+        self._targets = {}
 
     def step(self, dt: float, motion: TrainMotion) -> None:
-        if self._control_mode == "manual":
+        if self._law is None:
             self._use_manual_handles()
             return
 
-        if self._control_mode == "speed":
-            desired_speed = self._target_speed
-        else:
-            assert self._target_position is not None and self._max_speed is not None
-            distance = self._target_position - motion.position
-            remaining = max(0.0, abs(distance) - self._POSITION_TOLERANCE)
-            desired_speed = (
-                math.copysign(
-                    min(self._max_speed, math.sqrt(2.0 * motion.max_decel * remaining)),
-                    distance,
-                )
-                if remaining > 0.0
-                else 0.0
-            )
-
-        assert desired_speed is not None
-        requested_accel = self._SPEED_GAIN * (desired_speed - motion.speed)
-        requested_accel = max(
-            -motion.max_decel,
-            min(motion.max_traction_accel, requested_accel),
-        )
+        # The law plans the bounded acceleration request; the handle mapping
+        # below is the driver-room actuator model and stays here (§3.5).
+        requested_accel = self._law.step(dt, motion, DrivingTargets(**self._targets), self._facing)
         travel_sign = motion.speed * self._facing
         travel_direction = (
             "forward" if travel_sign > 0 else "backward" if travel_sign < 0 else "off"
